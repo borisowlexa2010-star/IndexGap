@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.0 — 2026-08-29
+
+Any tool's export, not just a webmaster panel — and the report never pretends
+they mean the same thing.
+
+* **New `sources` module.** Recognises exports from Ahrefs, Semrush, Serpstat,
+  Moz, Screaming Frog, Sitebulb, JetOctopus, OnCrawl, Netpeak, GA4, Matomo,
+  Plausible, Umami, Cloudflare and the five webmaster panels — by filename
+  first, headers second. A tie answers "I don't know" rather than inventing a
+  label, because two exports under one label silently merge into one index.
+* **Formats read as they come**: CSV with any delimiter and encoding, **XLSX
+  without re-saving** (stdlib `zipfile` + XML — still zero dependencies), JSON,
+  NDJSON, an XML sitemap, or a plain list of URLs. Relative paths from GA4 and
+  Matomo (`/guide/visa/`) are completed against `--site`; without `--site` the
+  file is no longer read as silently empty.
+* **Each source keeps its meaning.** A panel answers "does the engine know this
+  page". Analytics proves indexation only for pages someone visited. A crawler
+  proves reachability. Ahrefs is *its* index, not Google's. The funnel step is
+  renamed to match the evidence, a crawler export next to a panel triggers an
+  explicit "this number is higher than real indexation", and engine-vs-engine
+  comparison runs over panels only.
+* **The keyword column is found** whether an export calls it `Keyword`, `Фраза`,
+  `Запрос`, `Search Term` or `Query`; `--dataset` accepts XLSX too.
+
+21 new tests (217 total).
+
 ## 0.6.0 — 2026-08-28
 
 Calibrated against six production sites: 7,149 sitemap URLs, 5,041 pages

@@ -75,7 +75,11 @@ indexgap profiles                   # what the content-type presets change
 
 Understands both built HTML and Markdown sources with frontmatter. Input file
 encoding is detected, not assumed: UTF-16, BOM, and the cp1251 CSVs that
-Russian Excel produces all read correctly.
+Russian Excel produces all read correctly. Exports are read as they come —
+CSV with any delimiter, XLSX straight from Ahrefs or Semrush without
+re-saving, JSON, NDJSON, an XML sitemap, or a plain list of URLs — and the
+keyword column is found whether the export calls it `Keyword`, `Фраза`,
+`Запрос` or `Search Term`.
 
 ---
 
@@ -133,9 +137,24 @@ Why pages are not indexed:
     9  no local explanation → check status in Search Console
 ```
 
-Index data comes from ordinary webmaster-panel exports — Search Console, Bing
-Webmaster Tools, Yandex.Webmaster, Naver. **Ask for all of them, not just
-Google.** A page missing *everywhere* is a technical problem. A page missing
+Index data comes from ordinary exports — no API keys. A webmaster panel is the
+direct source (Search Console, Bing Webmaster Tools, Yandex.Webmaster, Naver,
+Seznam), but not everyone has one, so exports from **Ahrefs, Semrush, Serpstat,
+Moz, Screaming Frog, Sitebulb, JetOctopus, OnCrawl, Netpeak, GA4, Matomo,
+Plausible** — or a plain list of URLs — are read too, in CSV, XLSX, JSON,
+NDJSON or XML.
+
+They are not interchangeable, and the tool refuses to pretend otherwise. A
+panel answers "does the engine know this page". Analytics proves a page is
+indexed, but only for pages someone actually visited — its silence proves
+nothing. A crawler proves reachability, not indexation. Ahrefs and Semrush are
+*their* index, not Google's. So the funnel step is renamed to match the
+evidence — "at least in one index" versus "known to a third-party service" —
+and when a crawler export sits next to a panel, the report says out loud that
+the step count is higher than real indexation. Engine-vs-engine comparison
+runs over panels only.
+
+**Ask for all the panels you have, not just Google.** A page missing *everywhere* is a technical problem. A page missing
 *only in one engine* was crawled and accepted by the others, which makes it a
 quality or speed question that technical fixes rarely solve. Without the split
 the two look identical and people fix the wrong thing.
@@ -221,7 +240,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-196 scenarios. Each one is a reproduced defect found by two waves of adversarial
+217 scenarios. Each one is a reproduced defect found by two waves of adversarial
 review and one run against six live sites, plus the behaviour of profiles,
 portfolio and project installation. The rule: a finding without a test comes back.
 

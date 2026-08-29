@@ -8,7 +8,12 @@
 Без этой воронки причина не видна: в интерфейсе Search Console страницы просто
 «обнаружены, но не проиндексированы», без объяснения.
 
-Данные об индексации берутся из экспорта панели вебмастера. Никаких ключей и API.
+Данные берутся из выгрузок, а не из API: никаких ключей и подписок. Панель
+вебмастера — прямой источник, но её нет не у всех, поэтому читаются и выгрузки
+из Ahrefs, Semrush, Screaming Frog, Sitebulb, GA4, Matomo и других — в CSV,
+XLSX, JSON или просто списком адресов. Что каждый источник доказывает, а что
+нет, разбирает `sources.py`, и подпись шага воронки меняется вместе
+с источником: «хотя бы в одном индексе» и «известно Ahrefs» — разные строки.
 
 Три вещи, исправленные после аудита:
 
@@ -32,6 +37,7 @@ import urllib.error
 import urllib.request
 from xml.etree import ElementTree
 
+from . import sources
 from .core import read_text, url_key, SourceError
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -111,24 +117,12 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
     return {"urls": urls, "error": ""}
 
 
-URL_COLUMN_HINTS = ("url", "страниц", "page", "адрес", "address", "top pages",
-                    "landing", "링크", "주소", "odkaz", "stránka", "ページ", "网址")
+URL_COLUMN_HINTS = sources.URL_COLUMN_HINTS
 
 
 def _read_rows(csv_path: str) -> tuple:
-    if not os.path.exists(csv_path):
-        raise SourceError(f"Файл не найден: {csv_path}")
-    text, encoding = read_text(csv_path)
-    if text[:2] == "PK":
-        raise SourceError(
-            f"{csv_path} — это xlsx или zip-архив. Search Console отдаёт архив: "
-            f"распакуй его и передай CSV изнутри.")
-    sample = text[:8192]
-    try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
-    except csv.Error:
-        dialect = csv.excel
-    return list(csv.reader(io.StringIO(text, newline=""), dialect)), encoding
+    """CSV, XLSX, JSON, NDJSON, XML или список адресов — всё через `sources`."""
+    return sources.read_table(csv_path)
 
 
 def read_indexed_header(csv_path: str) -> list:
@@ -140,78 +134,125 @@ def read_indexed_header(csv_path: str) -> list:
     return rows[0] if rows else []
 
 
-def read_indexed(csv_path: str) -> dict:
+def read_indexed(csv_path: str, site: str = "") -> dict:
     """
-    Экспорт любой панели вебмастера: Search Console, Bing, Яндекс, Naver.
-    Колонка с URL ищется по заголовку, а если заголовки непонятные —
-    по содержимому первой строки. Формат у всех разный, URL есть у всех.
+    Выгрузка чего угодно, где есть адреса страниц: панель вебмастера, Ahrefs,
+    Semrush, Screaming Frog, GA4, Matomo, просто список.
+
+    Колонка с адресом ищется по заголовку, а если заголовки непонятные —
+    по содержимому первой строки. Формат у всех разный, адрес есть у всех.
+
+    Отдельно про относительные пути: GA4 и Matomo выгружают `/guide/visa/`,
+    а не полный адрес. Без `site` такая выгрузка читалась как пустая, и отчёт
+    уверенно сообщал «в индексе ноль» — худший вид ошибки. Теперь путь
+    достраивается до адреса, а если `site` не передан, об этом говорится вслух.
     """
     rows, encoding = _read_rows(csv_path)
     if not rows:
         raise SourceError(f"{csv_path}: файл пустой.")
 
-    header = [str(c).strip().lower() for c in rows[0]]
-    col = next((i for i, h in enumerate(header)
-                if any(hint in h for hint in URL_COLUMN_HINTS)), None)
+    found = sources.guess_column(rows[0], URL_COLUMN_HINTS)
+    col = found if found >= 0 else None
     start = 1
     if col is None:
         col = next((i for i, c in enumerate(rows[0])
-                    if str(c).startswith(("http://", "https://"))), None)
+                    if str(c).startswith(("http://", "https://", "/"))), None)
         start = 0
     if col is None:
         raise SourceError(
             f"{csv_path}: не нашёл колонку с адресами страниц.\n"
-            f"    Заголовки файла: " + ", ".join(rows[0][:8]) + "\n"
-            f"    Нужен экспорт, где есть столбец с полными URL "
+            f"    Заголовки файла: " + ", ".join(str(c) for c in rows[0][:8]) + "\n"
+            f"    Нужен экспорт, где есть столбец с адресами "
             f"(в Search Console — «Страницы», не «Запросы»).")
 
-    out, seen = [], set()
+    base = (site or "").rstrip("/")
+    out, seen, relative, skipped = [], set(), 0, 0
     for row in rows[start:]:
         if col >= len(row):
             continue
-        value = str(row[col]).strip()
-        if value.startswith(("http://", "https://")) and value not in seen:
+        value = str(row[col]).strip().strip('"')
+        if not value:
+            continue
+        if value.startswith("/"):
+            relative += 1
+            if not base:
+                skipped += 1
+                continue
+            value = base + value
+        elif not value.startswith(("http://", "https://")):
+            continue
+        if value not in seen:
             seen.add(value)
             out.append(value)
+
+    notes = []
+    if relative and base:
+        notes.append(f"{os.path.basename(csv_path)}: {relative} адресов были "
+                     f"относительными путями — достроены до {base}/…")
+    if skipped:
+        notes.append(f"{os.path.basename(csv_path)}: {skipped} строк содержат "
+                     f"пути вида /guide/… без домена, а --site не задан — "
+                     f"они пропущены. Передай --site, чтобы их учесть.")
     if not out:
         raise SourceError(
             f"{csv_path}: колонка «{rows[0][col] if col < len(rows[0]) else col}» "
-            f"нашлась, но ни одного полного URL в ней нет.")
-    return {"urls": out, "encoding": encoding}
+            f"нашлась, но ни одного адреса в ней нет."
+            + ("\n    В файле только относительные пути — передай --site."
+               if relative else ""))
+    return {"urls": out, "encoding": encoding, "notes": notes}
 
 
-def read_sources(specs: list) -> dict:
+def read_sources(specs: list, site: str = "") -> dict:
     """
-    Читает несколько выгрузок сразу: {"google": {...urls}, "bing": {...urls}}.
-    Спека — либо `движок=путь`, либо просто путь (движок определится сам).
-    """
-    from . import engines
+    Читает несколько выгрузок сразу и помнит, чем каждая является.
 
-    out, notes, unlabeled = {}, [], set()
+    Спека — либо `имя=путь`, либо просто путь. Имя может быть поисковиком
+    (`google=`, `bing=`) или инструментом (`ahrefs=`, `screamingfrog=`, `ga4=`):
+    от этого зависит не метка в отчёте, а смысл шага воронки.
+
+    Возвращает `by_engine` (только панели вебмастера — то, что вправе называться
+    индексом) и `by_source` (всё подряд, включая краулеры и сторонние сервисы).
+    """
+    out, extra, notes, unlabeled, kinds = {}, {}, [], set(), {}
     for spec in specs or ():
-        engine, path = engines.parse_source(spec)
+        name, path = sources.parse_spec(spec)
         header = read_indexed_header(path)
-        if not engine:
-            guessed, confident = engines.guess_engine(path, header)
-            engine = guessed or os.path.splitext(os.path.basename(path))[0].lower()
+        if name:
+            kind = sources.kind_of(name)
+        else:
+            guessed, kind, confident = sources.identify(path, header)
+            name = guessed or os.path.splitext(os.path.basename(path))[0].lower()
+            kind = kind or sources.LIST
             if not confident:
-                unlabeled.add(engine)
+                unlabeled.add(name)
                 notes.append(
                     f"{os.path.basename(path)}: не удалось уверенно определить "
-                    f"поисковик, файл засчитан как «{engine}». Если это не так, "
-                    f"укажи явно: --indexed движок={path}")
-        urls = set(read_indexed(path)["urls"])
-        if engine in out:
-            notes.append(f"две выгрузки помечены как «{engine}» — они объединены; "
-                         f"если это разные поисковики, задай метки явно")
-            out[engine] |= urls
+                    f"источник, файл засчитан как «{name}» "
+                    f"({sources.KIND_TITLE[kind]}). Если это не так, укажи явно: "
+                    f"--indexed google={path} или --indexed ahrefs={path}")
+        result = read_indexed(path, site)
+        notes += result.get("notes", [])
+        urls = set(result["urls"])
+        kinds[name] = kind
+        target = out if kind == sources.INDEX else extra
+        if name in target:
+            notes.append(f"две выгрузки помечены как «{name}» — они объединены; "
+                         f"если это разные источники, задай метки явно")
+            target[name] |= urls
         else:
-            out[engine] = urls
-    return {"by_engine": out, "notes": notes, "unlabeled": sorted(unlabeled)}
+            target[name] = urls
+
+    if not out and extra:
+        notes.append(
+            "панели вебмастера среди выгрузок нет. Воронка построена на том, "
+            "что есть, но подпись шага это учитывает: "
+            + "; ".join(sources.describe(list(extra))) + ".")
+    return {"by_engine": out, "by_source": extra, "kinds": kinds,
+            "notes": notes, "unlabeled": sorted(unlabeled)}
 
 
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
-           by_engine: dict = None) -> dict:
+           by_engine: dict = None, by_source: dict = None) -> dict:
     """
     Строит воронку и, главное, объясняет каждую потерю.
     Возвращает как числа, так и конкретные списки URL — чинить надо адресно.
@@ -230,7 +271,12 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         return sorted(display.get(k, k) for k in keys)
 
     in_sitemap = _keys(sitemap_urls or []) if sitemap_urls is not None else None
-    engines_keys = {name: _keys(urls) for name, urls in (by_engine or {}).items() if urls}
+    # Панели вебмастера и всё остальное считаются вместе, но помнят, кто есть кто:
+    # от состава зависит, как честно назвать шаг.
+    panels = {name: _keys(urls) for name, urls in (by_engine or {}).items() if urls}
+    others = {name: _keys(urls) for name, urls in (by_source or {}).items() if urls}
+    engines_keys = dict(panels)
+    engines_keys.update(others)
     if engines_keys and indexed_urls is None:
         in_index = set().union(*engines_keys.values())
     elif indexed_urls is not None:
@@ -259,17 +305,33 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         # Счёт и потери берутся от одного множества `known`, иначе воронка
         # росла: закрытая от индексации страница, ещё сидящая в индексе,
         # давала «в индексе 3» после «в sitemap 2».
-        steps.append({"name": "Хотя бы в одном индексе", "count": len(known & in_index),
+        label = sources.index_grade(list(engines_keys)) or "Хотя бы в одном индексе"
+        steps.append({"name": label, "count": len(known & in_index),
                       "lost": len(known - in_index),
-                      "why": "поисковик знает про URL, но не добавил в индекс"})
+                      "why": "источник знает про URL, но страницы в нём нет"})
         for name in sorted(engines_keys):
             hit = engines_keys[name] & known
-            steps.append({"name": f"  из них в {name}", "count": len(hit),
+            kind = sources.kind_of(name)
+            suffix = "" if kind == sources.INDEX else f" ({sources.KIND_TITLE[kind]})"
+            steps.append({"name": f"  из них в {name}{suffix}", "count": len(hit),
                           "lost": len((known & in_index) - hit),
-                          "why": f"есть в других индексах, но не в {name}",
-                          "engine": name})
+                          "why": f"есть в других источниках, но не в {name}",
+                          "engine": name, "kind": kind})
 
     foreign = []
+    # Краулер и сторонний сервис поднимают цифру шага, не поднимая индексацию.
+    # Без этой оговорки добавление выгрузки Screaming Frog выглядело бы как
+    # улучшение — самый дорогой вид уверенной неправды.
+    if panels and others:
+        foreign.append(
+            "в шаг засчитаны источники, которые индексом не являются "
+            f"({', '.join(sorted(others))}). Реальную индексацию показывают "
+            f"строки панелей: {', '.join(sorted(panels))}.")
+    elif others and not panels:
+        foreign.append(
+            "панели вебмастера среди выгрузок нет, поэтому строгого ответа "
+            "«в индексе или нет» здесь не будет: "
+            + "; ".join(sources.describe(list(others))) + ".")
     if in_index is not None and generated and not (in_index & generated) and in_index:
         foreign.append(
             f"ни один из {len(in_index)} адресов выгрузки не совпал с адресами сайта. "
@@ -281,6 +343,9 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "foreign": foreign,
         "by_engine": {name: show(keys & generated) for name, keys in engines_keys.items()},
         "engine_keys": {name: sorted(keys) for name, keys in engines_keys.items()},
+        "panel_keys": {name: sorted(keys) for name, keys in panels.items()},
+        "kinds": {name: sources.kind_of(name) for name in engines_keys},
+        "proves": sources.describe(list(engines_keys)),
         "display": display,
         "blocked": show(blocked),
         "missing_from_sitemap": missing_from_sitemap,
@@ -304,11 +369,18 @@ def cross_engine(funnel_result: dict, pages: list) -> list:
 
     Страницы, закрытые от индексации намеренно, в «нигде» не попадают:
     раньше сознательный noindex выглядел как авария.
+
+    Сравниваются только панели вебмастера. Ставить в один ряд «есть в Google»
+    и «Screaming Frog дошёл» нельзя: это утверждения о разных вещах, и вывод
+    «страница есть у одного и нет у другого» из такой пары был бы бессмыслицей,
+    поданной уверенным тоном.
     """
     from .publish import indexable
 
-    by_engine = {name: set(keys)
-                 for name, keys in (funnel_result.get("engine_keys") or {}).items()}
+    panels = funnel_result.get("panel_keys")
+    if panels is None:                      # старый вызов без разделения
+        panels = funnel_result.get("engine_keys") or {}
+    by_engine = {name: set(keys) for name, keys in panels.items()}
     if len(by_engine) < 2:
         return []
 
