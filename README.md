@@ -1,5 +1,10 @@
 # indexgap
 
+[![tests](https://img.shields.io/github/actions/workflow/status/borisowlexa2010-star/IndexGap/tests.yml?branch=main&label=tests)](https://github.com/borisowlexa2010-star/IndexGap/actions/workflows/tests.yml)
+[![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/pyproject.toml)
+[![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/pyproject.toml)
+[![license](https://img.shields.io/badge/license-MIT-green)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/LICENSE)
+
 **Lint your programmatic SEO pipeline — from keywords to indexed pages.**
 
 > [Русская версия](README.ru.md)
@@ -32,12 +37,16 @@ None of this is visible page by page. Each one looks fine on its own.
 ## Install
 
 ```bash
-pip install indexgap   # once the first PyPI release is out
+pipx install indexgap   # once the first PyPI release is out
 
 # until then — from source:
 git clone https://github.com/borisowlexa2010-star/IndexGap && cd IndexGap
 pip install -e .
 ```
+
+`pipx` keeps the tool in its own environment and still puts `indexgap` on your
+PATH — `pip install` into a system Python is refused outright on most current
+distributions. If you do not have it: `python3 -m pip install --user pipx`.
 
 Then, once per project:
 

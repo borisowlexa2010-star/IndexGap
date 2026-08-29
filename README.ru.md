@@ -1,5 +1,10 @@
 # indexgap
 
+[![tests](https://img.shields.io/github/actions/workflow/status/borisowlexa2010-star/IndexGap/tests.yml?branch=main&label=tests)](https://github.com/borisowlexa2010-star/IndexGap/actions/workflows/tests.yml)
+[![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/pyproject.toml)
+[![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/pyproject.toml)
+[![license](https://img.shields.io/badge/license-MIT-green)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/LICENSE)
+
 > [English README](README.md) · это полная русская версия.
 
 Контроль качества programmatic-конвейера: сотни однотипных страниц из данных,
@@ -34,12 +39,16 @@
 ## Установка
 
 ```bash
-pip install indexgap   # после первого релиза на PyPI
+pipx install indexgap   # после первого релиза на PyPI
 
 # пока его нет — из исходников:
 git clone https://github.com/borisowlexa2010-star/IndexGap && cd IndexGap
 pip install -e .
 ```
+
+`pipx` держит инструмент в отдельном окружении и всё равно кладёт `indexgap`
+в PATH, а `pip install` в системный Python на современных дистрибутивах просто
+запрещён. Если pipx нет: `python3 -m pip install --user pipx`.
 
 После этого команда `indexgap` доступна из любого каталога — в том числе
 из каталога вашего сайта.
