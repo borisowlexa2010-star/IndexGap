@@ -505,6 +505,9 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
     return {
         "issues": issues,
         "repeated_skeletons": seams["repeated"],
+        # Не только счётчик, но и сама связь: `brief` кладёт в наряд строку
+        # датасета, чтобы человек чинил числа по данным, а не по памяти.
+        "matched": matched,
         "matched_rows": len(matched),
         "ambiguous": ambiguous,
         "facts_checked": facts_checked,

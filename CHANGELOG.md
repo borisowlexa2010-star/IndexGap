@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.4.0 — 2026-08-29
+
+`indexgap brief` — the check's findings turned into work orders, without the
+package writing a word of the text.
+
+* **New `brief` command.** A report answers "what is wrong with me"; a brief
+  answers "what do I do". Each finding now carries an imperative fix, and the
+  findings are laid out as markdown files next to the pages they belong to,
+  ready for a person or an agent to pick up.
+* **It still writes no text, deliberately.** This is not caution. The package's
+  central check compares the numbers on a page against the row of the dataset
+  that produced it. If the package supplied those numbers itself, the check
+  would be checking its own output and would always be green.
+* **Three placement rules, or it would just be the report again.** On the live
+  2,970-page catalogue the check reports 6,074 findings; `brief` writes 966
+  work orders. A finding that fires on nearly every page (or nearly every page
+  of one language) is a property of the template and gets one brief, not 2,919.
+  Near-duplicates are fixed as a group — a single page out of a group of 17
+  cannot be fixed alone — so 588 duplicate findings become 72 group briefs.
+  robots.txt, markup and hreflang clusters belong to the site, not to a page.
+* **Each brief carries what the fix has to satisfy**: the profile's thresholds,
+  the dataset row as the only permitted source of numbers, and the command that
+  verifies the result. Thresholds come from the project's own config, so a
+  brief never asks for 250 words where the check demands 400.
+* **Dry run by default**, like `notify` and `cite`: it says how many briefs it
+  would write and where, and creates nothing without `--write`. `--limit`
+  (50 by default) keeps the heaviest pages first — 892 briefs is not a task
+  list, it is a second report. 20 new tests (301 total).
+
 ## 1.3.0 — 2026-08-29
 
 `indexgap cite` — measuring whether AI search cites you, and one bug the work

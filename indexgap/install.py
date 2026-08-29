@@ -306,7 +306,10 @@ def write_config(root: str, detected: dict, force: bool = False) -> tuple:
 
 GITIGNORE_LINES = (".indexgap-manifest.json", "indexgap-check.html", "indexgap-check.json",
                    "indexgap-doctor.html", "indexgap-doctor.json", "indexgap-portfolio.html",
-                   "indexgap-portfolio.json")
+                   "indexgap-portfolio.json", "indexgap-cite.json",
+                   # Наряды перезаписываются каждым прогоном: держать их
+                   # в истории — значит хранить устаревшие задания.
+                   "indexgap-briefs/")
 
 
 def update_gitignore(root: str) -> bool:

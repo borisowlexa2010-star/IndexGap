@@ -24,6 +24,6 @@ jobs:
       - name: Check the CLI starts and every command is reachable
         run: |
           python -m indexgap --help
-          for cmd in init plan check sitemap notify portfolio profiles doctor; do
+          for cmd in init plan check brief sitemap notify portfolio profiles doctor cite; do
             python -m indexgap "$cmd" --help > /dev/null
           done

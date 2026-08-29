@@ -102,3 +102,38 @@ indexgap check ./content --site https://example.com --dataset keywords.csv --str
 
 Exits non-zero when there are critical findings, so the pipeline does not
 publish something unfinished.
+
+## Repair briefs
+
+```bash
+indexgap brief ./content --site https://example.com --dataset keywords.csv --write
+```
+
+Lays the same findings out as work orders in `indexgap-briefs/`: each carries an
+imperative "what to do", the profile's thresholds, and the dataset row — the
+only permitted source of numbers for that page.
+
+Read the briefs in this order:
+
+1. `_template.md` — what fires on nearly every page. That is one edit to the
+   template, not hundreds of edits to pages. Always start here: some of the
+   other briefs disappear on their own once it is done.
+2. `_site.md` — robots.txt, markup, the links between language versions.
+3. `_duplicates/group-NNN.md` — near-duplicate groups. The brief is written for
+   the group: a single page out of one cannot be fixed alone. Keep one, pull the
+   rest apart by intent, and do **not** link them to each other.
+4. The remaining files — one per page, heaviest first (`--limit`, 50 by
+   default; `0` means all of them).
+
+Without `--write` this is a dry run: the command says how many briefs it would
+write and where, and creates nothing.
+
+Briefs are overwritten on every run — they are a report, not a source file.
+Keep your own edits in the pages.
+
+**The package does not write the text, and must not.** It states the task; you
+write the words. The reason is not caution: the central check compares the
+numbers on a page against the dataset row, and if the package supplied those
+numbers itself the check would be checking its own output and would always be
+green. A fixed page must contain no number that is absent from its dataset row
+— if the data is not there, the section is not written at all.

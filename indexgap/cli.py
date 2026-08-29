@@ -22,9 +22,11 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 
 from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
-               install, portfolio, profiles, publish, report, settings, sources)
+               install, portfolio, profiles, publish, repair, report, settings,
+               sources)
 from . import i18n
 from .i18n import tr
 from .core import (SourceError, check_site_url, load_manifest, load_pages,
@@ -247,7 +249,15 @@ def _write_json(path, payload):
 
 # ── команды ───────────────────────────────────────────────────────────────────
 
-def cmd_check(args):
+def _analyse(args):
+    """
+    Общая часть `check` и `brief`: загрузить страницы, применить профиль,
+    прогнать все локальные проверки.
+
+    Наряды выписываются по тем же находкам, что попадают в отчёт. Считай
+    `brief` их сам — он бы со временем разошёлся с `check`, и человек получил
+    бы задание чинить то, чего в отчёте нет.
+    """
     apply_project_defaults(args)
     pages = _load(args)
     rows = _read_rows(args)
@@ -291,6 +301,19 @@ def cmd_check(args):
         aeo_result = aeo.run(pages, robots_path, cfg=project.get("aeo"))
         analysis["issues"] += aeo_result["issues"]
 
+    analysis["issues"] = checks.sort_issues(analysis["issues"])
+    return {"pages": pages, "rows": rows, "project": project,
+            "analysis": analysis, "notes": notes,
+            "template_notes": checks.template_wide(analysis["issues"],
+                                                   len(pages), pages=pages),
+            "content": content_result, "aeo": aeo_result}
+
+
+def cmd_check(args):
+    got = _analyse(args)
+    pages, project, analysis = got["pages"], got["project"], got["analysis"]
+    notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
+
     funnel_result = causes = cross = None
     sitemap_urls = None
     by_engine, by_source = _collect_indexed(args)
@@ -307,8 +330,7 @@ def cmd_check(args):
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
 
-    analysis["issues"] = checks.sort_issues(analysis["issues"])
-    notes += checks.template_wide(analysis["issues"], len(pages), pages=pages)
+    notes += got["template_notes"]
 
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(args.out), site=args.site,
@@ -367,6 +389,63 @@ def _guess_robots(args):
         if os.path.isfile(candidate):
             return candidate
     return ""
+
+
+def cmd_brief(args):
+    """
+    Наряды на починку: те же находки, но в виде заданий рядом со страницами.
+
+    Отчёт отвечает на вопрос «что со мной не так», наряд — «что мне сделать».
+    Между ними на живом каталоге разница в две тысячи строк: находки схлопнуты
+    в свойства шаблона, дубли собраны в группы, страницы отсортированы
+    по тяжести. Текст по-прежнему пишет человек или агент — пакет только
+    формулирует задачу.
+    """
+    got = _analyse(args)
+    pages, project, analysis = got["pages"], got["project"], got["analysis"]
+
+    briefs = repair.build(
+        pages, analysis, cfg=project.get("checks"),
+        template_notes=got["template_notes"],
+        rows_by_key=(got["content"] or {}).get("matched"),
+        profile_title=project.get("_profile_title", ""), site=args.site,
+        root=args.root)
+
+    by_kind = Counter(b["kind"] for b in briefs)
+    page_briefs = by_kind.get("page", 0)
+    if not briefs:
+        print(tr("\nЧинить нечего: ни одной находки, на которую выписывается наряд."))
+        return 0
+
+    print(tr("\nНарядов: {a0}", a0=len(briefs)))
+    if by_kind.get("template"):
+        print(tr("  шаблон — 1 наряд вместо находок почти на всех страницах"))
+    if by_kind.get("site"):
+        print(tr("  сайт целиком — 1 наряд: robots.txt, разметка, языковые версии"))
+    if by_kind.get("group"):
+        print(tr("  групп почти-дублей — {a0}: чинятся группой, поштучно нельзя",
+                 a0=by_kind['group']))
+    if page_briefs:
+        shown = min(page_briefs, args.limit) if args.limit else page_briefs
+        print(tr("  страниц — {a0}", a0=page_briefs)
+              + (tr(" (запишем {a0} самых тяжёлых)", a0=shown)
+                 if shown < page_briefs else ""))
+
+    if not args.write:
+        print(tr("\nЭто пробный прогон: ни одного файла не создано. "
+                 "Чтобы разложить наряды — добавь --write."))
+        return 0
+
+    result = repair.write(briefs, args.out_dir, args.limit)
+    print(tr("\nЗаписано в {a0}: {a1} файл(ов)",
+             a0=result['dir'], a1=len(result['written'])))
+    if result["skipped"]:
+        print(tr("  не выписано на {a0} страниц(ы): предел --limit. "
+                 "Почини эти и прогони ещё раз — часть остальных уйдёт вместе "
+                 "с шаблоном.", a0=result['skipped']))
+    print(tr("Наряды перезаписываются при каждом прогоне: это отчёт, "
+             "а не исходник. Свои правки держи в страницах, а не в них."))
+    return 0
 
 
 def cmd_sitemap(args):
@@ -887,6 +966,23 @@ def build_parser():
     p.add_argument("--strict", action="store_true",
                    help=tr("ненулевой код возврата при критичных находках — для CI"))
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("brief",
+                       help=tr("наряды на починку: находки проверки — заданиями рядом со страницами"))
+    common(p)
+    p.add_argument("--out-dir", default="indexgap-briefs",
+                   help=tr("куда класть наряды"))
+    p.add_argument("--limit", type=int, default=50,
+                   help=tr("сколько нарядов на страницы выписать: сначала самые тяжёлые. 0 — все"))
+    p.add_argument("--dataset", help=tr("семантика (CSV или XLSX): её строки попадают в наряд как единственный источник чисел"))
+    p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом в датасете"))
+    p.add_argument("--robots", help=tr("путь к robots.txt проекта"))
+    p.add_argument("--no-content", action="store_true", help=tr("пропустить проверки текста"))
+    p.add_argument("--no-aeo", action="store_true",
+                   help=tr("пропустить проверки машинной читаемости"))
+    p.add_argument("--write", action="store_true",
+                   help=tr("действительно создать файлы; без него — пробный прогон"))
+    p.set_defaults(func=cmd_brief)
 
     p = sub.add_parser("sitemap", help=tr("собрать sitemap с шардингом и честным lastmod"))
     common(p)
