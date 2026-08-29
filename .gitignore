@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.indexgap-manifest.json
+indexgap-report.html
+indexgap-report.json
+indexgap-check.html
+indexgap-check.json
+indexgap-doctor.html
+indexgap-doctor.json
+indexgap-portfolio.html
+indexgap-portfolio.json
+demo/

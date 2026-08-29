@@ -1,0 +1,34 @@
+{
+  "_комментарий": "Описание портфеля. Пути — относительно этого файла, поэтому его удобно положить рядом с репозиториями. Запуск: indexgap portfolio projects.json --reports ./reports",
+
+  "projects": [
+    {
+      "name": "visa",
+      "root": "../visatosingapore/content",
+      "site": "https://visatosingapore.com",
+      "profile": "catalog",
+      "dataset": "../visatosingapore/keywords.csv",
+      "robots": "../visatosingapore/public/robots.txt",
+      "sitemap": "../visatosingapore/public/sitemap.xml"
+    },
+    {
+      "name": "eventiq",
+      "root": "../eventiq/src/content/events",
+      "site": "https://eventiq.io",
+      "profile": "events",
+      "dataset": "../eventiq/data/events.csv"
+    },
+    {
+      "name": "rumors",
+      "root": "../rumors/content",
+      "site": "https://rumors.app",
+      "profile": "ugc"
+    },
+    {
+      "name": "reloca",
+      "root": "../reloca/out",
+      "site": "https://reloca.io",
+      "profile": "product"
+    }
+  ]
+}
