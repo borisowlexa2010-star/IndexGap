@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.5.0 — 2026-08-29
+
+The first release meant to be installed rather than cloned, and the bug that
+had to be fixed before it could be.
+
+* **Reading a one-column CSV no longer depends on the Python version.** The
+  single-column path told `csv` that the delimiter was NUL — a way of saying
+  "there is no delimiter here". CPython stores the delimiter as a code point
+  and reserves 0 for "not set", so Python 3.9 refused it outright and the read
+  died with a `TypeError`. On 3.11+ the same trick was accepted as a real
+  delimiter, which was worse: a value containing a NUL was split in two and
+  nothing said so. The delimiter is now a control character verified absent
+  from the file's own text, and a single-column file reports no delimiter at
+  all, the way the xlsx path already did. 302 tests.
+* **Install instructions that match reality.** The README promised
+  `pip install indexgap` for a package that is not on PyPI yet — the first
+  thing a visitor would try, and it would fail. Both READMEs now mark that
+  line and show the source install beside it.
+* **Repository hygiene.** The repository archive is no longer tracked, and the
+  package metadata points at the repository under its actual name.
+
 ## 1.4.0 — 2026-08-29
 
 `indexgap brief` — the check's findings turned into work orders, without the
