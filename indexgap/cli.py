@@ -306,7 +306,7 @@ def cmd_check(args):
         cross = doctor.cross_engine(funnel_result, pages)
 
     analysis["issues"] = checks.sort_issues(analysis["issues"])
-    notes += checks.template_wide(analysis["issues"], len(pages))
+    notes += checks.template_wide(analysis["issues"], len(pages), pages=pages)
 
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(args.out), site=args.site,

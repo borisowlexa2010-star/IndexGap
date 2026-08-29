@@ -170,6 +170,36 @@ losses.
 
 ---
 
+## Multilingual and multi-region
+
+A programmatic pipeline is usually multilingual, and that breaks in ways a
+single-language site never does.
+
+Text volume and title/description length are measured by each page's **script**,
+in display width — not by one language detected for the whole project. That
+distinction is not academic: on a live 2,970-page catalogue in ten languages the
+project language came out as `en`, every Chinese page was counted as English,
+and all 174 `thin` findings were false. Width also handles mixed strings, which
+is what real pages are: those Chinese titles are 43% Han and the rest Latin.
+
+Anchor length is judged only in scripts where length means something. All 914
+`vague-anchor` findings on that same site were false — "यमन" (Yemen) and "হোম"
+(Home) are three characters and complete words.
+
+**hreflang** is checked as a cluster: a missing self-reference, a one-way link
+(Google discards the whole cluster rather than counting it partly), an alternate
+that is noindex or canonicalised elsewhere, a canonical that leaves the language
+and cancels the cluster, a missing `x-default`, and language codes where a
+country code was meant — `uk` is Ukrainian, not the United Kingdom. On a
+monolingual site none of this runs.
+
+And `en-us` versus `en-gb` is **not** a duplicate. Those pages are legitimately
+near-identical; "keep one and set a canonical" would delete the regional
+version. Pairs inside one hreflang cluster are excluded from the duplicate
+check and reported separately.
+
+---
+
 ## Content-type profiles
 
 Thresholds differ across content types by substance, not taste. 250 words is
@@ -244,7 +274,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-242 scenarios. Each one is a reproduced defect found by two waves of adversarial
+261 scenarios. Each one is a reproduced defect found by two waves of adversarial
 review and one run against six live sites, plus the behaviour of profiles,
 portfolio and project installation. The rule: a finding without a test comes back.
 

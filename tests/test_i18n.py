@@ -32,6 +32,23 @@ CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 SITE = "https://example.com"
 
 
+def marked_keys():
+    """Все строки, размеченные `tr(...)`, — прямо из синтаксического дерева."""
+    import ast
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "indexgap"
+    keys = set()
+    for path in sorted(root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "tr" and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                keys.add(node.args[0].value)
+    return keys
+
+
 def english():
     os.environ["INDEXGAP_LANG"] = "en"
     i18n.set_lang("en")
@@ -49,26 +66,18 @@ class TestCatalogue(unittest.TestCase):
     def test_every_marked_string_has_an_english_translation(self):
         """
         Ключи собираются из исходников, а не из списка: список устаревает молча.
+
+        Через AST, а не регуляркой. Регулярка видела только первый фрагмент
+        неявной склейки — `tr("начало " "продолжение")` давало обрезанный ключ,
+        и тест требовал перевести строку, которой в коде нет.
         """
-        import pathlib
-        root = pathlib.Path(__file__).resolve().parent.parent / "indexgap"
-        keys = set()
-        for path in sorted(root.glob("*.py")):
-            for m in re.finditer(r'tr\("((?:[^"\\]|\\.)*)"',
-                                 path.read_text(encoding="utf-8")):
-                keys.add(eval('"' + m.group(1) + '"'))
-        missing = sorted(k for k in keys if k not in en.MESSAGES)
+        missing = sorted(k for k in marked_keys() if k not in en.MESSAGES)
         self.assertEqual(missing, [], f"без перевода осталось {len(missing)}")
 
     def test_the_catalogue_has_no_leftovers(self):
         """Ключ, которого больше нет в коде, — мусор: его никто не увидит."""
-        import pathlib
-        root = pathlib.Path(__file__).resolve().parent.parent / "indexgap"
-        source = "\n".join(p.read_text(encoding="utf-8") for p in root.glob("*.py"))
-        stale = [k for k in en.MESSAGES
-                 if 'tr("' + k.replace("\\", "\\\\").replace('"', '\\"')
-                 .replace("\n", "\\n").replace("\t", "\\t") + '"' not in source]
-        self.assertEqual(stale, [])
+        keys = marked_keys()
+        self.assertEqual(sorted(k for k in en.MESSAGES if k not in keys), [])
 
     def test_translations_keep_their_placeholders(self):
         """

@@ -27,8 +27,9 @@ import math
 import re
 from collections import Counter, defaultdict, deque
 
+from . import hreflang
 from .core import url_key
-from .settings import SCRIPTLESS, text_volume
+from .settings import display_width, text_volume
 from .i18n import tr
 
 # ── настройки, которые имеет смысл крутить под свой проект ────────────────────
@@ -324,15 +325,21 @@ def root_mismatch(pages: list, graph: dict) -> str:
     return ""
 
 
-def _length_bounds(cfg: dict, language: str) -> dict:
-    """Пороги длины зависят от письменности: 60 иероглифов — это не 60 букв."""
-    code = (language or "").split("-")[0].lower()
-    factor = cfg["cjk_length_factor"] if code in SCRIPTLESS else 1.0
+def _length_bounds(cfg: dict, language: str = "") -> dict:
+    """
+    Пороги длины. Один и тот же для всех языков — потому что меряется ширина.
+
+    Раньше здесь был множитель «для CJK», выбираемый по языку страницы.
+    На смешанной строке — а мультиязычные сайты состоят из них: иероглифы
+    плюс бренд и «Form 14A» латиницей — он ошибался в обе стороны, и выбирать
+    его приходилось по объявленному языку, который может быть неверным.
+    Ширина (`settings.display_width`) снимает и то и другое.
+    """
     return {
-        "title_min": int(cfg["title_min"] * factor),
-        "title_max": int(cfg["title_max"] * factor),
-        "description_min": int(cfg["description_min"] * factor),
-        "description_max": int(cfg["description_max"] * factor),
+        "title_min": cfg["title_min"],
+        "title_max": cfg["title_max"],
+        "description_min": cfg["description_min"],
+        "description_max": cfg["description_max"],
     }
 
 
@@ -375,7 +382,7 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
                      shells: set = None) -> list:
     """Плоский список находок: (уровень, url, код, пояснение)."""
     cfg = {**CONFIG, **(cfg or {})}
-    bounds = _length_bounds(cfg, language)
+    bounds = _length_bounds(cfg)
     shells = shells or set()
     issues = []
 
@@ -399,7 +406,7 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         if not p.title:
             issues.append(("critical", p.url, "no-title", tr("нет title")))
         else:
-            n = len(p.title)
+            n = display_width(p.title)
             if n < bounds["title_min"]:
                 issues.append(("warning", p.url, "title-short", tr("title {a0} символов", a0=n)))
             elif n > bounds["title_max"]:
@@ -408,7 +415,7 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         if not p.description:
             issues.append(("warning", p.url, "no-description", tr("нет meta description")))
         else:
-            n = len(p.description)
+            n = display_width(p.description)
             if n < bounds["description_min"] or n > bounds["description_max"]:
                 issues.append(("info", p.url, "description-length",
                                tr("description {a0} символов", a0=n)))
@@ -453,6 +460,10 @@ LEVEL_ORDER = {"critical": 0, "warning": 1, "info": 2}
 CODE_WEIGHT = {
     "stale-event": 0, "unsupported-number": 1, "still-draft": 2, "brief-left": 3,
     "noindex": 3, "nosnippet": 4, "canonical-elsewhere": 5,
+    "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
+    "hreflang-no-self": 5, "hreflang-no-return": 6,
+    "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
+    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19,
     "orphan": 6, "unreachable": 7, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
@@ -462,10 +473,12 @@ CODE_WEIGHT = {
 
 # Находки, которые и должны встречаться массово: это их природа, а не шаблон.
 NOT_TEMPLATE_WIDE = {"near-duplicate", "similar", "js-shell", "unsupported-number",
-                     "stale-event", "still-draft", "brief-left"}
+                     "stale-event", "still-draft", "brief-left",
+                     "hreflang-no-return", "hreflang-unknown-target"}
 
 
-def template_wide(issues: list, page_count: int, share: float = 0.9) -> list:
+def template_wide(issues: list, page_count: int, share: float = 0.9,
+                  pages: list = None) -> list:
     """
     Что встречается почти на всех страницах — свойство шаблона, а не список дел.
 
@@ -473,6 +486,13 @@ def template_wide(issues: list, page_count: int, share: float = 0.9) -> list:
     а `no-question-headings` — на 2 919. Формально верно, практически бесполезно:
     человек видит три тысячи «находок» и закрывает отчёт. Чинится это один раз
     в шаблоне, и сказать об этом надо один раз.
+
+    Отдельно — по языкам. У мультиязычного сайта шаблон свой у каждой версии,
+    и находка может покрывать сто процентов одного языка, оставаясь каплей
+    в общем счёте. На том же сайте `description-length` сработал на всех 289
+    китайских страницах — это 10% сайта и 100% языка. Первое ничего не значит,
+    второе значит ровно то, что описания китайской версии написаны по длине
+    латиницы: чинится один раз, в шаблоне этой версии.
     """
     if page_count < 20:
         return []
@@ -486,7 +506,38 @@ def template_wide(issues: list, page_count: int, share: float = 0.9) -> list:
         got = len(urls) / page_count
         if got >= share:
             notes.append(
-                tr("`{a0}` — на {a1} страницах из {a2} ({a3:.0%}). Это свойство шаблона, а не список страниц: чинится один раз в шаблоне и исчезает везде.", a0=code, a1=len(urls), a2=page_count, a3=got))
+                tr("`{a0}` — на {a1} страницах из {a2} ({a3:.0%}). Это свойство "
+                   "шаблона, а не список страниц: чинится один раз в шаблоне "
+                   "и исчезает везде.", a0=code, a1=len(urls), a2=page_count,
+                   a3=got))
+
+    total_by_lang = defaultdict(set)
+    where = {}
+    for page in pages or ():
+        code = (page.lang or "").split("-")[0].lower()
+        where[page.url] = code
+        if code:
+            total_by_lang[code].add(page.url)
+    if len(total_by_lang) < 2:
+        return notes
+
+    for code, urls in sorted(by_code.items()):
+        if len(urls) / page_count >= share:
+            continue                      # уже сказано про весь сайт
+        hit = defaultdict(int)
+        for url in urls:
+            language = where.get(url)
+            if language:
+                hit[language] += 1
+        for language, count in sorted(hit.items()):
+            total = len(total_by_lang.get(language) or ())
+            if total >= 20 and count / total >= share:
+                notes.append(
+                    tr("`{a0}` — на {a1} страницах языка «{a2}» из {a3}, то есть "
+                       "почти на всех. По сайту это лишь {a4:.0%}, но чинится "
+                       "один раз: в шаблоне этой языковой версии.",
+                       a0=code, a1=count, a2=language, a3=total,
+                       a4=len(urls) / page_count))
     return notes
 
 
@@ -525,8 +576,15 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     boiler = boilerplate_profile(pages, cfg, words)
     dupes = find_near_duplicates(pages, cfg, words)
     shells = {p.url for p in pages if is_shell(p, cfg)}
+    multi = hreflang.check(pages, cfg)
+    issues_hreflang = multi["issues"]
+    # Пары «один язык, разные страны» законно похожи почти дословно.
+    # Совет «поставь canonical» убил бы региональную версию, поэтому такие
+    # пары не идут в дубли вовсе.
+    regional = {tuple(sorted(pair)) for pair in multi["regional_pairs"]}
     issues = technical_issues(pages, cfg, language, shells=shells)
-    notes = list(dupes["notes"])
+    issues += issues_hreflang
+    notes = list(dupes["notes"]) + list(multi["notes"])
     for url in sorted(shells):
         issues.append(("critical", url, "js-shell",
                        tr("в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют")))
@@ -565,9 +623,18 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # Одна находка на страницу, а не на пару: двести одинаковых страниц дают
     # 19 900 пар, и блок «чинить в этом порядке» сообщал «19 900 near-duplicate».
     partners = defaultdict(list)
+    regional_shown = 0
     for a, b, j in dupes["pairs"]:
+        if tuple(sorted((a.url, b.url))) in regional:
+            regional_shown += 1
+            continue
         partners[a.url].append((j, b.url))
         partners[b.url].append((j, a.url))
+    if regional_shown:
+        notes.append(tr("{a0} пар(ы) не попали в дубли: это версии одной "
+                        "страницы для разных стран на одном языке, связанные "
+                        "hreflang. Для них canonical — ошибка.",
+                        a0=regional_shown))
     for url in sorted(partners):
         if url in shells:
             continue

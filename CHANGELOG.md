@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.2.0 — 2026-08-29
+
+Multilingual and multi-region sites. The previous versions did not support
+them — they quietly damaged them, and running against a live 2,970-page
+catalogue in ten languages showed exactly how much.
+
+* **Script, not the declared language.** Text volume and title/description
+  lengths are now measured by the script of each page, in display width.
+  Before, one project language was detected by majority and overrode every
+  page: on the live catalogue it was `en`, so all 289 Chinese pages were
+  counted as English — 201 "words" instead of 654. **All 174 `thin` findings
+  on that site were false, and all 174 were Chinese.** Width also handles what
+  a per-language factor could not: mixed strings, and the live catalogue's
+  Chinese titles are only 43% Han, the rest Latin brand names and "Form 14A".
+* **Anchor length is judged only where length means something** — Latin,
+  Cyrillic, Greek. **All 914 `vague-anchor` findings on that site were false**:
+  «यमन» (Yemen) and «হোম» (Home) are three characters and whole words. Not one
+  English page had the finding. For scripts with no vague-word list the tool
+  now says nothing, which is more honest than 295 findings out of 296.
+* **New `hreflang` module.** Missing self-reference, one-way links (Google
+  discards the whole cluster, it does not count them partly), alternates
+  pointing at noindex or foreign-canonical pages, a canonical that leaves the
+  language and cancels the cluster, missing `x-default`, and language codes
+  where a country code was meant (`uk` is Ukrainian, not the United Kingdom).
+  It stays silent on monolingual sites.
+* **Geo: same language, different country is not a duplicate.** `en-us` and
+  `en-gb` are legitimately near-identical, and the old advice — "keep one, set
+  a canonical" — would have killed the regional version. Pairs inside one
+  hreflang cluster are excluded from duplicates and reported as their own line.
+* **A finding covering one language is named as such.** On the live site
+  `description-length` hit 289 of 289 Chinese pages: 10% of the site and 100%
+  of the language. The first number means nothing, the second means the Chinese
+  template was written to Latin lengths.
+
+* **A hardcoded cluster is one finding, not thousands.** Two of the six live
+  sites print the home page's hreflang cluster on every page, self-reference
+  missing. That produced 5,498 findings on 1,100 pages — three per page for one
+  template bug. Now it is a single line naming the cause; on that site the
+  hreflang findings went 5,498 → 4.
+
+Measured on that site: findings 7,200 → 6,074, `thin` 174 → 0, `vague-anchor`
+914 → 0, `title-long` 275 → 80. 19 new tests (261 total).
+
 ## 1.1.0 — 2026-08-29
 
 English output. The package was written in Russian, and Russian stays the
