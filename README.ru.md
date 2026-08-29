@@ -34,7 +34,10 @@
 ## Установка
 
 ```bash
-git clone https://github.com/borisowlexa2010-star/indexgap && cd indexgap
+pip install indexgap   # после первого релиза на PyPI
+
+# пока его нет — из исходников:
+git clone https://github.com/borisowlexa2010-star/Indexgap && cd Indexgap
 pip install -e .
 ```
 
