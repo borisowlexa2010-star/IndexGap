@@ -6,9 +6,9 @@
 переводчик открывает `locale/en/checks.py`, а не ищет строку среди семисот.
 """
 
-from . import checks, cli, content, core, doctor, report
+from . import checks, cli, content, core, doctor, hreflang, report
 
 MESSAGES = {}
-for _part in (core, checks, report, doctor, content, cli):
+for _part in (core, checks, report, doctor, content, cli, hreflang):
     MESSAGES.update(_part.MESSAGES)
 del _part

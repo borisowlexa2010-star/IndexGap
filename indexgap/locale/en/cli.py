@@ -276,8 +276,6 @@ MESSAGES = {
     "файл со своим шаблоном брифа вместо стандартного":
         "a file with your own brief template instead of the default",
     "шаблон пути": "path template",
-    "язык вывода: en или ru. По умолчанию — из INDEXGAP_LANG ":
-        "output language: en or ru. By default taken from INDEXGAP_LANG ",
     "язык: {a0}": "language: {a0}",
     "не определён": "not detected",
 }
