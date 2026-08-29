@@ -37,7 +37,7 @@
 pip install indexgap   # после первого релиза на PyPI
 
 # пока его нет — из исходников:
-git clone https://github.com/borisowlexa2010-star/Indexgap && cd Indexgap
+git clone https://github.com/borisowlexa2010-star/IndexGap && cd IndexGap
 pip install -e .
 ```
 

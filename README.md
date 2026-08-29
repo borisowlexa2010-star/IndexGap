@@ -32,13 +32,10 @@ None of this is visible page by page. Each one looks fine on its own.
 ## Install
 
 ```bash
-pip install indexgap
-```
+pip install indexgap   # once the first PyPI release is out
 
-Not on PyPI yet — until the first release, install from source:
-
-```bash
-git clone https://github.com/borisowlexa2010-star/Indexgap && cd Indexgap
+# until then — from source:
+git clone https://github.com/borisowlexa2010-star/IndexGap && cd IndexGap
 pip install -e .
 ```
 
