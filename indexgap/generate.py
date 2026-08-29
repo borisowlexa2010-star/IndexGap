@@ -144,22 +144,39 @@ def slugify(value: str, max_len: int = None) -> str:
 
 def read_dataset(path: str) -> dict:
     """
-    Читает CSV с семантикой.
+    Читает семантику: CSV или XLSX.
 
     Кодировка определяется, а не предполагается: русский Excel сохраняет CSV
     в cp1251 с точкой с запятой, и раньше такой файл — самый частый вход —
     ронял команду двенадцатью строками стека.
     """
+    from . import sources
+
     if not os.path.exists(path):
         raise SourceError(f"Файл {path} не найден. Проверь путь и имя.")
     if os.path.isdir(path):
-        raise SourceError(f"{path} — это каталог, а нужен CSV-файл с ключами.")
-    text, encoding = read_text(path)
-    if text.lstrip()[:2] == "PK":
-        raise SourceError(
-            f"{path} — это xlsx или zip, а не CSV. В Excel: «Сохранить как» → "
-            f"«CSV UTF-8 (разделитель — запятая)».")
+        raise SourceError(f"{path} — это каталог, а нужен файл с ключами.")
 
+    with open(path, "rb") as fh:
+        signature = fh.read(2)
+    if signature == b"PK":
+        # Ahrefs, Semrush и Keys.so по умолчанию отдают xlsx. Раньше пакет
+        # отправлял человека пересохранять файл вручную — и на этом
+        # заканчивался путь того, кто не программирует.
+        rows_raw = sources.read_table(path)[0]
+        if not rows_raw:
+            raise SourceError(f"{path}: в книге нет данных.")
+        fields = [str(c).strip() for c in rows_raw[0]]
+        rows = []
+        for raw in rows_raw[1:]:
+            row = {fields[i]: str(raw[i]).strip()
+                   for i in range(min(len(fields), len(raw)))}
+            if any(v for v in row.values()):
+                rows.append(row)
+        return {"rows": rows, "fields": fields, "encoding": "xlsx",
+                "delimiter": "", "problems": []}
+
+    text, encoding = read_text(path)
     first_line = text.splitlines()[0] if text.strip() else ""
     if not any(ch in first_line for ch in ",;\t|"):
         # Один столбец: запятая внутри значения — часть ключа, а не разделитель.

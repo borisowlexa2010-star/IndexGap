@@ -23,7 +23,7 @@ import os
 import sys
 
 from . import (aeo, checks, content, doctor, engines, freshness, generate,
-               install, portfolio, profiles, publish, report, settings)
+               install, portfolio, profiles, publish, report, settings, sources)
 from .core import (SourceError, check_site_url, load_manifest, load_pages,
                    save_manifest, url_key)
 
@@ -161,22 +161,66 @@ def _serialize_issues(issues):
     return [{"level": l, "url": u, "code": c, "message": m} for l, u, c, m in issues]
 
 
-def _collect_indexed(args) -> dict:
-    """Собирает выгрузки индексации из --indexed (можно несколько) и --gsc."""
+def resolve_keyword_field(args, fields: list, path: str) -> str:
+    """
+    Находит колонку с ключом, как бы её ни назвал экспорт.
+
+    Датасет редко делают руками: он приезжает из Ahrefs («Keyword»),
+    Semrush («Keyword»), Вордстата («Фраза»), Keys.so («Запрос»),
+    Serpstat («Ключевая фраза»). Требовать колонку ровно `keyword` —
+    значит отправлять человека переименовывать столбец перед каждой командой.
+    Явный `--keyword` всегда сильнее догадки.
+    """
+    if args.keyword in fields:
+        return args.keyword
+    if args.keyword != "keyword":            # человек назвал колонку сам
+        raise SourceError(
+            f"Колонки «{args.keyword}» в {path} нет.\n"
+            f"    Есть: {', '.join(fields)}\n"
+            f"    Укажи нужную: --keyword <имя колонки>")
+    guess = sources.guess_column(fields, sources.KEYWORD_COLUMN_HINTS)
+    if guess >= 0:
+        found = fields[guess]
+        print(f"  ! колонка с ключом не названа `keyword` — взята «{found}». "
+              f"Если это не она, укажи явно: --keyword <имя колонки>")
+        args.keyword = found
+        return found
+    raise SourceError(
+        f"Колонки с ключевым словом в {path} не нашлось.\n"
+        f"    Есть: {', '.join(fields)}\n"
+        f"    Укажи нужную: --keyword <имя колонки>")
+
+
+def _collect_indexed(args) -> tuple:
+    """
+    Собирает выгрузки из --indexed (можно несколько) и --gsc.
+
+    Возвращает две части: панели вебмастера и всё остальное — Ahrefs, Semrush,
+    краулеры, аналитику. Смешивать их в одну кучу нельзя: у них разный смысл,
+    и отчёт обязан называть вещи своими именами.
+    """
     specs = list(getattr(args, "indexed", None) or [])
     if getattr(args, "gsc", None):
         specs.append(f"google={args.gsc}")
     if not specs:
-        return {}
-    result = doctor.read_sources(specs)
-    by_engine = result["by_engine"]
+        return {}, {}
+    result = doctor.read_sources(specs, site=getattr(args, "site", "") or "")
+    by_engine, by_source = result["by_engine"], result["by_source"]
     for note in result["notes"]:
         print(f"  ! {note}")
-    summary = ", ".join(f"{name}: {len(urls)}" for name, urls in sorted(by_engine.items()))
-    print(f"Индексация — {summary}")
+    if by_engine:
+        summary = ", ".join(f"{n}: {len(u)}" for n, u in sorted(by_engine.items()))
+        print(f"Индексация — {summary}")
+    if by_source:
+        summary = ", ".join(
+            f"{n} ({sources.KIND_TITLE[sources.kind_of(n)]}): {len(u)}"
+            for n, u in sorted(by_source.items()))
+        print(f"Прочие источники — {summary}")
+    for line in sources.describe(list(by_engine) + list(by_source)):
+        print(f"  что это доказывает → {line}")
     for note in engines.describe_coverage(list(by_engine)):
         print(f"  не покрыто → {note}")
-    return by_engine
+    return by_engine, by_source
 
 
 def _describe_project(project: dict, rows: list) -> None:
@@ -202,11 +246,7 @@ def _read_rows(args):
     data = generate.read_dataset(args.dataset)
     for problem in data["problems"]:
         print(f"  ! {problem}")
-    if args.keyword not in data["fields"]:
-        raise SourceError(
-            f"Колонки «{args.keyword}» в {args.dataset} нет.\n"
-            f"    Есть: {', '.join(data['fields'])}\n"
-            f"    Укажи нужную: --keyword <имя колонки>")
+    resolve_keyword_field(args, data["fields"], args.dataset)
     return data["rows"]
 
 
@@ -265,7 +305,7 @@ def cmd_check(args):
 
     funnel_result = causes = cross = None
     sitemap_urls = None
-    by_engine = _collect_indexed(args)
+    by_engine, by_source = _collect_indexed(args)
     if args.sitemap:
         sm = doctor.read_sitemap(args.sitemap)
         if sm["error"]:
@@ -273,8 +313,9 @@ def cmd_check(args):
             print("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет.")
         else:
             sitemap_urls = sm["urls"]
-    if sitemap_urls is not None or by_engine:
-        funnel_result = doctor.funnel(pages, sitemap_urls, None, by_engine=by_engine)
+    if sitemap_urls is not None or by_engine or by_source:
+        funnel_result = doctor.funnel(pages, sitemap_urls, None,
+                                      by_engine=by_engine, by_source=by_source)
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
 
@@ -451,14 +492,15 @@ def cmd_doctor(args):
                 f"    Пока он не читается, сверять не с чем — «потеряно всё» "
                 f"в такой ситуации было бы враньём.")
         sitemap_urls = sm["urls"]
-    by_engine = _collect_indexed(args)
+    by_engine, by_source = _collect_indexed(args)
     if sitemap_urls is None and not by_engine:
         raise SourceError(
             "Нужен хотя бы --sitemap или --indexed, иначе сверять не с чем.\n"
             "    --sitemap ./public/sitemap.xml\n"
             "    --indexed google=gsc.csv --indexed bing=bing.csv")
 
-    funnel_result = doctor.funnel(pages, sitemap_urls, None, by_engine=by_engine)
+    funnel_result = doctor.funnel(pages, sitemap_urls, None,
+                                  by_engine=by_engine, by_source=by_source)
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
 
@@ -508,11 +550,7 @@ def cmd_plan(args):
               f"пересохрани его в UTF-8")
     if not rows:
         raise SourceError(f"{args.dataset}: ни одной строки с данными.")
-    if args.keyword not in fields:
-        raise SourceError(
-            f"Колонки «{args.keyword}» нет.\n"
-            f"    Есть: {', '.join(fields)}\n"
-            f"    Укажи нужную: --keyword <имя колонки>")
+    resolve_keyword_field(args, fields, args.dataset)
 
     generate.check_pattern(args.pattern, fields)
 
@@ -740,12 +778,16 @@ def build_parser():
     p = sub.add_parser("check", help="все локальные проверки и отчёт")
     common(p)
     p.add_argument("--sitemap", help="путь или URL sitemap.xml для сверки")
-    p.add_argument("--indexed", action="append", metavar="[движок=]файл.csv",
-                   help="выгрузка индексации; можно указывать несколько раз: "
-                        "--indexed google=gsc.csv --indexed bing=bing.csv")
+    p.add_argument("--indexed", action="append", metavar="[источник=]файл",
+                   help="выгрузка со списком страниц: панель вебмастера, Ahrefs, "
+                        "Semrush, Screaming Frog, GA4 и другие. CSV, XLSX, JSON "
+                        "или список адресов. Можно указывать несколько раз: "
+                        "--indexed google=gsc.csv --indexed ahrefs=pages.xlsx. "
+                        "Источник определяется сам; метка нужна, когда имя файла "
+                        "ни о чём не говорит")
     p.add_argument("--gsc", help="то же, что --indexed google=... (для совместимости)")
     p.add_argument("--out", default="indexgap-check.html")
-    p.add_argument("--dataset", help="CSV семантики — включает сверку фактов с данными строк")
+    p.add_argument("--dataset", help="семантика (CSV или XLSX) — включает сверку фактов с данными строк")
     p.add_argument("--keyword", default="keyword", help="колонка с ключом в датасете")
     p.add_argument("--robots", help="путь к robots.txt проекта")
     p.add_argument("--no-content", action="store_true", help="пропустить проверки текста")
