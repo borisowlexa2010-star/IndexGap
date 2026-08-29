@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.0 — 2026-08-29
+
+English output. The package was written in Russian, and Russian stays the
+source language of every message — the translation key *is* the Russian string,
+so the Russian output costs nothing and cannot drift from the code.
+
+* **`indexgap --lang en`**, `INDEXGAP_LANG`, or your system locale. With no
+  signal at all the output is English: the package lives on GitHub, and someone
+  whose locale is unset is more likely reading English. A locale from the
+  post-Soviet region gets Russian, since no translation of its own exists yet.
+* **478 strings** translated: the CLI, the HTML report, all 49 finding-code
+  descriptions, `--help`, every error message, the content-type profiles.
+  A missing key prints in Russian rather than crashing the command.
+* **English skills.** `indexgap init` installs `SKILL.en.md` when the language
+  is English, and falls back to the Russian skill where no translation exists.
+* **Language data is not translated, and that is enforced by a test.** The
+  codemod that marked the strings also wrapped Russian stopwords, word endings,
+  counting words and export-header hints. Translating those would have silently
+  broken the checks for Russian sites whenever the report was read in English —
+  a failure invisible in the output. They were unwrapped, and `test_i18n` pins
+  them.
+* 25 new tests (242 total), including one that runs every command in English
+  and fails on a single Cyrillic character anywhere in the output.
+
 ## 1.0.0 — 2026-08-29
 
 First stable release. The eight commands, the finding codes and the shape of

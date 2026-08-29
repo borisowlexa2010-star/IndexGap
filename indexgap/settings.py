@@ -21,6 +21,7 @@ import json
 import os
 import re
 from collections import Counter
+from .i18n import tr
 
 CONFIG_NAMES = ("indexgap.json", ".indexgap.json")
 
@@ -78,9 +79,9 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
         with open(path, "r", encoding="utf-8-sig") as fh:
             user = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"Не удалось прочитать {path}: {exc}")
+        raise SystemExit(tr("Не удалось прочитать {a0}: {a1}", a0=path, a1=exc))
     if not isinstance(user, dict):
-        raise SystemExit(f"{path}: ожидался объект верхнего уровня.")
+        raise SystemExit(tr("{a0}: ожидался объект верхнего уровня.", a0=path))
     config.update(user)
     config["_path"] = path
     return config
@@ -92,7 +93,7 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
 # м², %, °C. Намеренно широко: список валют и мер мира в код не помещается
 # и устаревает, а в данных проекта нужное уже есть.
 UNIT_AFTER_NUMBER = re.compile(
-    r"\d[\d\s.,]*\s*([^\W\d_]{1,12}|[%°$€£₽¥₹]|м²|м2|km²)",
+    "\\d[\\d\\s.,]*\\s*([^\\W\\d_]{1,12}|[%°$€£₽¥₹]|м²|м2|km²)",
     re.U)
 
 

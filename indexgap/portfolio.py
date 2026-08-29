@@ -36,6 +36,7 @@ from collections import Counter, defaultdict
 
 from . import aeo, checks, content, doctor, freshness, profiles, report, settings
 from .core import SourceError, check_site_url, load_pages, read_text, url_key
+from .i18n import tr
 
 REQUIRED = ("name", "root", "site")
 
@@ -49,32 +50,31 @@ THRESHOLD_CODES = {"thin", "low-uniqueness", "title-short", "title-long",
 def read_portfolio(path: str) -> list:
     """Читает описание портфеля и превращает пути в абсолютные."""
     if not os.path.exists(path):
-        raise SourceError(f"Файл портфеля {path} не найден.")
+        raise SourceError(tr("Файл портфеля {a0} не найден.", a0=path))
     text, _ = read_text(path)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise SourceError(f"{path}: не разбирается как JSON ({exc.msg}, строка {exc.lineno}).")
+        raise SourceError(tr("{a0}: не разбирается как JSON ({a1}, строка {a2}).", a0=path, a1=exc.msg, a2=exc.lineno))
 
     specs = data.get("projects") if isinstance(data, dict) else data
     if not isinstance(specs, list) or not specs:
-        raise SourceError(f"{path}: ожидался список проектов в поле `projects`.")
+        raise SourceError(tr("{a0}: ожидался список проектов в поле `projects`.", a0=path))
 
     base = os.path.dirname(os.path.abspath(path)) or "."
     out = []
     seen = set()
     for i, spec in enumerate(specs, 1):
         if not isinstance(spec, dict):
-            raise SourceError(f"{path}: проект №{i} — не объект.")
+            raise SourceError(tr("{a0}: проект №{a1} — не объект.", a0=path, a1=i))
         missing = [k for k in REQUIRED if not str(spec.get(k) or "").strip()]
         if missing:
             raise SourceError(
-                f"{path}: у проекта №{i} нет полей " + ", ".join(missing)
-                + ".\n    Обязательные: name (имя), root (каталог со страницами), "
-                  "site (адрес сайта со схемой).")
+                tr("{a0}: у проекта №{a1} нет полей ", a0=path, a1=i) + ", ".join(missing)
+                + tr(".\n    Обязательные: name (имя), root (каталог со страницами), site (адрес сайта со схемой)."))
         name = str(spec["name"]).strip()
         if name in seen:
-            raise SourceError(f"{path}: имя проекта «{name}» повторяется.")
+            raise SourceError(tr("{a0}: имя проекта «{a1}» повторяется.", a0=path, a1=name))
         seen.add(name)
 
         resolved = dict(spec)
@@ -107,7 +107,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
     try:
         pages, problems = load_pages(spec["root"], spec["site"])
         if not pages:
-            raise SourceError(f"в {spec['root']} нет ни одной страницы")
+            raise SourceError(tr("в {a0} нет ни одной страницы", a0=spec['root']))
         result["pages"] = len(pages)
         result["notes"] += problems
 
@@ -126,8 +126,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
 
         if project["_expects_dataset"] and not rows:
             result["notes"].append(
-                f"профиль «{result['profile']}» рассчитан на страницы из датасета, "
-                f"но датасет не указан — сверка фактов не выполнялась")
+                tr("профиль «{a0}» рассчитан на страницы из датасета, но датасет не указан — сверка фактов не выполнялась", a0=result['profile']))
 
         home = spec.get("home") or (spec["site"]
                                     if url_key(spec["site"]) in {p.key for p in pages}
@@ -147,8 +146,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             result["matched_rows"] = text_result["matched_rows"]
         else:
             result["notes"].append(
-                "сверка фактов и швов шаблона выключена профилем: страницы "
-                "не порождаются датасетом, сверять не с чем")
+                tr("сверка фактов и швов шаблона выключена профилем: страницы не порождаются датасетом, сверять не с чем"))
 
         robots = spec.get("robots") or _guess_robots(spec["root"])
         analysis["issues"] += aeo.run(pages, robots, cfg=project.get("aeo"))["issues"]
@@ -163,7 +161,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         if spec.get("sitemap"):
             sm = doctor.read_sitemap(spec["sitemap"])
             if sm["error"]:
-                result["notes"].append(f"sitemap не прочитан: {sm['error']}")
+                result["notes"].append(tr("sitemap не прочитан: {a0}", a0=sm['error']))
             else:
                 funnel = doctor.funnel(pages, sm["urls"], None)
                 result["funnel"] = funnel["steps"]
@@ -178,7 +176,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         if spec.get("out"):
             result["report"] = report.build(
                 analysis, out_path=spec["out"], site=spec["site"],
-                notes=result["notes"], title=f"Проверка — {name}")
+                notes=result["notes"], title=tr("Проверка — {a0}", a0=name))
     except SourceError as exc:
         result["error"] = str(exc)
     return result

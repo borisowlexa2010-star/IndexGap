@@ -29,6 +29,7 @@ from collections import Counter, defaultdict, deque
 
 from .core import url_key
 from .settings import SCRIPTLESS, text_volume
+from .i18n import tr
 
 # ── настройки, которые имеет смысл крутить под свой проект ────────────────────
 CONFIG = {
@@ -105,10 +106,10 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
             shingles[p.url] = sh
     urls = sorted(shingles)
     if len(urls) < 2:
-        return {"pairs": [], "notes": notes, "method": "нет данных"}
+        return {"pairs": [], "notes": notes, "method": tr("нет данных")}
 
     if len(urls) <= cfg["exact_below"]:
-        method = "попарное сравнение"
+        method = tr("попарное сравнение")
         candidates = [(urls[i], urls[j])
                       for i in range(len(urls)) for j in range(i + 1, len(urls))]
     else:
@@ -144,9 +145,7 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
                     candidate_set.add((rep, other))
         if clustered:
             notes.append(
-                f"{clustered} групп(ы) страниц оказались настолько похожи, что "
-                f"сравнивались с образцом группы, а не попарно — иначе счёт "
-                f"занял бы часы. Пары внутри такой группы показаны не все.")
+                tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=clustered))
         candidates = sorted(candidate_set)
 
     by_url = {p.url: p for p in pages}
@@ -213,9 +212,7 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
     cfg = {**CONFIG, **(cfg or {})}
     if len(pages) < cfg["boilerplate_min_pages"]:
         return {"shares": {}, "skipped": (
-            f"страниц {len(pages)}, для оценки шаблонности нужно хотя бы "
-            f"{cfg['boilerplate_min_pages']} — на меньшей выборке результат "
-            f"меняется от одной добавленной страницы")}
+            tr("страниц {a0}, для оценки шаблонности нужно хотя бы {a1} — на меньшей выборке результат меняется от одной добавленной страницы", a0=len(pages), a1=cfg['boilerplate_min_pages']))}
 
     words = words or {p.url: p.words for p in pages}
 
@@ -323,11 +320,7 @@ def root_mismatch(pages: list, graph: dict) -> str:
     hits = len(unresolved & shifted)
     if hits >= max(2, len(unresolved) * 0.5):
         first = pages[0].path
-        return ("похоже, каталог не соответствует корню сайта: ссылки на страницах "
-                "короче их собственных адресов на один сегмент. Из-за этого все "
-                "страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n"
-                f"    Проверь, какой каталог отображается в корень {pages[0].url.split('/')[2]}"
-                f" — сейчас это {first.rsplit('/', 2)[0] or '.'}")
+        return (tr("похоже, каталог не соответствует корню сайта: ссылки на страницах короче их собственных адресов на один сегмент. Из-за этого все страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n    Проверь, какой каталог отображается в корень {a0} — сейчас это {a1}", a0=pages[0].url.split('/')[2], a1=first.rsplit('/', 2)[0] or '.'))
     return ""
 
 
@@ -399,44 +392,43 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
             issues.append(("warning", p.url, "source-note", note))
         if p.noindex:
             issues.append(("critical", p.url, "noindex",
-                           "страница закрыта от индексации — если это не задумано, трафика не будет"))
+                           tr("страница закрыта от индексации — если это не задумано, трафика не будет")))
         if p.nosnippet:
             issues.append(("critical", p.url, "nosnippet",
-                           "запрещён сниппет: страница может быть в индексе, но в ответы "
-                           "ИИ-поиска и в расширенную выдачу не попадёт"))
+                           tr("запрещён сниппет: страница может быть в индексе, но в ответы ИИ-поиска и в расширенную выдачу не попадёт")))
         if not p.title:
-            issues.append(("critical", p.url, "no-title", "нет title"))
+            issues.append(("critical", p.url, "no-title", tr("нет title")))
         else:
             n = len(p.title)
             if n < bounds["title_min"]:
-                issues.append(("warning", p.url, "title-short", f"title {n} символов"))
+                issues.append(("warning", p.url, "title-short", tr("title {a0} символов", a0=n)))
             elif n > bounds["title_max"]:
                 issues.append(("info", p.url, "title-long",
-                               f"title {n} символов, обрежется в выдаче"))
+                               tr("title {a0} символов, обрежется в выдаче", a0=n)))
         if not p.description:
-            issues.append(("warning", p.url, "no-description", "нет meta description"))
+            issues.append(("warning", p.url, "no-description", tr("нет meta description")))
         else:
             n = len(p.description)
             if n < bounds["description_min"] or n > bounds["description_max"]:
                 issues.append(("info", p.url, "description-length",
-                               f"description {n} символов"))
+                               tr("description {a0} символов", a0=n)))
 
         h1 = [t for lvl, t in p.headings if lvl == 1]
         if not p.headings:
-            issues.append(("warning", p.url, "no-headings", "на странице нет заголовков"))
+            issues.append(("warning", p.url, "no-headings", tr("на странице нет заголовков")))
         elif not h1:
             issues.append(("warning", p.url, "no-h1",
-                           "нет H1 — поисковику нечем определить, о чём страница"))
+                           tr("нет H1 — поисковику нечем определить, о чём страница")))
         elif len(h1) > 1:
-            issues.append(("info", p.url, "many-h1", f"H1 на странице {len(h1)}, нужен один"))
+            issues.append(("info", p.url, "many-h1", tr("H1 на странице {a0}, нужен один", a0=len(h1))))
 
         if p.canonical and url_key(p.canonical) != p.key:
             issues.append(("critical", p.url, "canonical-elsewhere",
-                           f"canonical указывает на {p.canonical} — страница отдаёт вес другой"))
+                           tr("canonical указывает на {a0} — страница отдаёт вес другой", a0=p.canonical)))
         volume = text_volume(p, language)
         if volume < cfg["thin_words"]:
             issues.append(("warning", p.url, "thin",
-                           f"объём текста ≈ {volume} — тонкая страница"))
+                           tr("объём текста ≈ {a0} — тонкая страница", a0=volume)))
 
     issues = [i for i in issues if not (i[1] in shells and i[2] in SHELL_DEPENDENT)]
 
@@ -444,12 +436,12 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         if len(urls) > 1:
             for u in sorted(urls):
                 issues.append(("warning", u, "duplicate-title",
-                               f"такой же title ещё у {len(urls) - 1} страниц"))
+                               tr("такой же title ещё у {a0} страниц", a0=len(urls) - 1)))
     for desc, urls in sorted(descriptions.items()):
         if len(urls) > 1:
             for u in sorted(urls):
                 issues.append(("info", u, "duplicate-description",
-                               f"такой же description ещё у {len(urls) - 1} страниц"))
+                               tr("такой же description ещё у {a0} страниц", a0=len(urls) - 1)))
     return issues
 
 
@@ -494,9 +486,7 @@ def template_wide(issues: list, page_count: int, share: float = 0.9) -> list:
         got = len(urls) / page_count
         if got >= share:
             notes.append(
-                f"`{code}` — на {len(urls)} страницах из {page_count} ({got:.0%}). "
-                "Это свойство шаблона, а не список страниц: чинится один раз "
-                "в шаблоне и исчезает везде.")
+                tr("`{a0}` — на {a1} страницах из {a2} ({a3:.0%}). Это свойство шаблона, а не список страниц: чинится один раз в шаблоне и исчезает везде.", a0=code, a1=len(urls), a2=page_count, a3=got))
     return notes
 
 
@@ -539,43 +529,38 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     notes = list(dupes["notes"])
     for url in sorted(shells):
         issues.append(("critical", url, "js-shell",
-                       "в исходном HTML нет текста — его рисует JavaScript, "
-                       "а краулеры ИИ-поиска его не исполняют"))
+                       tr("в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют")))
     if shells:
         share = len(shells) / len(pages) if pages else 0
         notes.append(
-            f"пустых JS-каркасов: {len(shells)} из {len(pages)} ({share:.0%}). "
-            "На этих страницах не считались объём текста, уникальность, дубли "
-            "и ссылки — в исходном HTML их неоткуда взять. Это одна беда, "
-            "а не четыре: появится серверный HTML — проверки заработают.")
+            tr("пустых JS-каркасов: {a0} из {a1} ({a2:.0%}). На этих страницах не считались объём текста, уникальность, дубли и ссылки — в исходном HTML их неоткуда взять. Это одна беда, а не четыре: появится серверный HTML — проверки заработают.", a0=len(shells), a1=len(pages), a2=share))
     if boiler["skipped"]:
-        notes.append("шаблонность не оценивалась: " + boiler["skipped"])
+        notes.append(tr("шаблонность не оценивалась: ") + boiler["skipped"])
     mismatch = root_mismatch(pages, graph)
     if mismatch:
         notes.append(mismatch)
     if graph["home_missing"]:
         notes.append(
-            "главной страницы нет среди разобранных файлов, поэтому глубина клика "
-            "и недостижимость не считались. Проверь --site и корень каталога.")
+            tr("главной страницы нет среди разобранных файлов, поэтому глубина клика и недостижимость не считались. Проверь --site и корень каталога."))
 
     for url, share in sorted(boiler["shares"].items()):
         if share < cfg["unique_share_min"] and url not in shells:
             issues.append(("critical", url, "low-uniqueness",
-                           f"только {share:.0%} текста уникально — остальное шаблон"))
+                           tr("только {a0:.0%} текста уникально — остальное шаблон", a0=share)))
     for url in graph["orphans"]:
         if url not in shells:
             issues.append(("critical", url, "orphan",
-                           "ни одна внутренняя ссылка не ведёт на страницу"))
+                           tr("ни одна внутренняя ссылка не ведёт на страницу")))
     for url in graph["unreachable"]:
         if url not in graph["orphans"] and url not in shells:
             issues.append(("critical", url, "unreachable",
-                           "до страницы нельзя дойти от главной по ссылкам"))
+                           tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
         if url in shells:
             continue
         if d > cfg["max_click_depth"]:
             issues.append(("warning", url, "deep",
-                           f"{d} кликов от главной — краулер доходит редко"))
+                           tr("{a0} кликов от главной — краулер доходит редко", a0=d)))
 
     # Одна находка на страницу, а не на пару: двести одинаковых страниц дают
     # 19 900 пар, и блок «чинить в этом порядке» сообщал «19 900 near-duplicate».
@@ -588,14 +573,13 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             continue
         found = sorted(partners[url], reverse=True)
         best, other = found[0]
-        more = f" и ещё {len(found) - 1}" if len(found) > 1 else ""
+        more = tr(" и ещё {a0}", a0=len(found) - 1) if len(found) > 1 else ""
         if best >= cfg["near_duplicate"]:
             issues.append(("critical", url, "near-duplicate",
-                           f"совпадает на {best:.0%} со страницей {other}{more} — "
-                           f"поисковик оставит в индексе одну"))
+                           tr("совпадает на {a0:.0%} со страницей {a1}{a2} — поисковик оставит в индексе одну", a0=best, a1=other, a2=more)))
         else:
             issues.append(("info", url, "similar",
-                           f"похожа на {best:.0%} на {other}{more}"))
+                           tr("похожа на {a0:.0%} на {a1}{a2}", a0=best, a1=other, a2=more)))
 
     # Дубли живут группами, а не парами. На живом каталоге виз 588 страниц
     # с кодом `near-duplicate` оказались 62 группами одинаковых по смыслу
@@ -607,9 +591,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     if groups:
         biggest = max(len(g) for g in groups)
         notes.append(
-            f"почти-дубли образуют {len(groups)} групп(ы), в самой большой "
-            f"{biggest} страниц. Чинится по группам: одна остаётся, остальные "
-            "переписываются под другой интент или отдают ей canonical.")
+            tr("почти-дубли образуют {a0} групп(ы), в самой большой {a1} страниц. Чинится по группам: одна остаётся, остальные переписываются под другой интент или отдают ей canonical.", a0=len(groups), a1=biggest))
 
     # Две пустые оболочки совпадают на 100% — и это ничего не значит.
     # Пока они оставались в `duplicates`, счётчик «похожих пар» показывал

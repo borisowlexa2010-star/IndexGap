@@ -30,6 +30,7 @@ import os
 import re
 
 from .checks import is_shell
+from .i18n import tr
 
 CONFIG = {
     "answer_min": 40,           # символов в прямом ответе
@@ -51,22 +52,19 @@ PREAMBLE = (
 )
 
 QUESTION = re.compile(
-    r"^(как|что|где|когда|почему|зачем|сколько|какой|какая|какие|какое|кто|можно ли|нужно ли|"
-    r"how|what|where|when|why|who|which|can|do|does|is|are)\b|[?？]\s*$", re.I | re.U)
+    "^(как|что|где|когда|почему|зачем|сколько|какой|какая|какие|какое|кто|можно ли|нужно ли|how|what|where|when|why|who|which|can|do|does|is|are)\\b|[?？]\\s*$", re.I | re.U)
 
 # Кто ходит за содержимым для ИИ-ответов и что теряется при блокировке.
 AI_AGENTS = {
-    "oai-searchbot": "ChatGPT не покажет страницу в ответах своего поиска",
-    "gptbot": "OpenAI не будет использовать страницу для обучения "
-              "(на показ в поиске это не влияет)",
-    "chatgpt-user": "ChatGPT не сможет открыть страницу по прямой просьбе пользователя",
-    "perplexitybot": "Perplexity не проиндексирует страницу",
-    "claudebot": "Anthropic не будет использовать страницу",
-    "claude-searchbot": "Claude не покажет страницу в ответах с поиском",
-    "google-extended": "Gemini не будет использовать страницу для обучения "
-                       "(на AI Overviews не влияет)",
-    "applebot-extended": "Apple Intelligence не будет использовать страницу",
-    "bingbot": "Bing не проиндексирует страницу — а вместе с ним Copilot",
+    "oai-searchbot": tr("ChatGPT не покажет страницу в ответах своего поиска"),
+    "gptbot": tr("OpenAI не будет использовать страницу для обучения (на показ в поиске это не влияет)"),
+    "chatgpt-user": tr("ChatGPT не сможет открыть страницу по прямой просьбе пользователя"),
+    "perplexitybot": tr("Perplexity не проиндексирует страницу"),
+    "claudebot": tr("Anthropic не будет использовать страницу"),
+    "claude-searchbot": tr("Claude не покажет страницу в ответах с поиском"),
+    "google-extended": tr("Gemini не будет использовать страницу для обучения (на AI Overviews не влияет)"),
+    "applebot-extended": tr("Apple Intelligence не будет использовать страницу"),
+    "bingbot": tr("Bing не проиндексирует страницу — а вместе с ним Copilot"),
 }
 
 
@@ -81,10 +79,10 @@ def read_robots(path: str) -> dict:
     if not path:
         return {"found": False, "rules": {}, "sitemaps": []}
     if os.path.isdir(path):
-        return {"found": False, "error": f"{path} — это каталог, а нужен файл",
+        return {"found": False, "error": tr("{a0} — это каталог, а нужен файл", a0=path),
                 "rules": {}, "sitemaps": []}
     if not os.path.exists(path):
-        return {"found": False, "error": f"файла {path} нет",
+        return {"found": False, "error": tr("файла {a0} нет", a0=path),
                 "rules": {}, "sitemaps": []}
     try:
         text, _ = read_text(path)
@@ -142,29 +140,26 @@ def check_robots(robots: dict) -> list:
     if not robots.get("found"):
         if robots.get("error"):
             issues.append(("warning", "robots.txt", "robots-unreadable",
-                           f"robots.txt не прочитан: {robots['error']}"))
+                           tr("robots.txt не прочитан: {a0}", a0=robots['error'])))
         else:
             issues.append(("info", "robots.txt", "no-robots",
-                           "robots.txt не найден — это не ошибка, но и не контроль: "
-                           "передай путь через --robots, чтобы проверить"))
+                           tr("robots.txt не найден — это не ошибка, но и не контроль: передай путь через --robots, чтобы проверить")))
         return issues
 
     rules = robots.get("rules") or {}
     star = rules.get("*") or {}
     if _blocks_everything(star):
         issues.append(("critical", "robots.txt", "robots-blocks-all",
-                       "Disallow: / для всех агентов — сайт закрыт от всех "
-                       "поисковиков целиком"))
+                       tr("Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком")))
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
         if entry and _blocks_everything(entry):
-            level = "critical" if "не покажет" in why or "не проиндексирует" in why else "info"
+            level = "critical" if tr("не покажет") in why or tr("не проиндексирует") in why else "info"
             issues.append((level, "robots.txt", "ai-crawler-blocked",
-                           f"{agent} закрыт: {why}"))
+                           tr("{a0} закрыт: {a1}", a0=agent, a1=why)))
     if not robots.get("sitemaps"):
         issues.append(("info", "robots.txt", "robots-no-sitemap",
-                       "в robots.txt не указан Sitemap — строка "
-                       "`Sitemap: https://…/sitemap.xml` стоит копейки"))
+                       tr("в robots.txt не указан Sitemap — строка `Sitemap: https://…/sitemap.xml` стоит копейки")))
     return issues
 
 
@@ -185,22 +180,19 @@ def check_answer(page, cfg: dict = None) -> list:
     paragraphs = [p for p in (page.paragraphs or []) if len(p) > 20]
     if not paragraphs:
         return [("warning", page.url, "no-answer",
-                 "не нашёл ни одного абзаца — цитировать нечего")]
+                 tr("не нашёл ни одного абзаца — цитировать нечего"))]
     first = paragraphs[0]
     issues = []
     lowered = first.lower().lstrip("«\"'— -")
     if lowered.startswith(PREAMBLE):
         issues.append(("warning", page.url, "answer-preamble",
-                       f"первый абзац начинается с разгона «{first[:40]}…» — "
-                       f"ИИ-поиск цитирует ответ, а не вступление"))
+                       tr("первый абзац начинается с разгона «{a0}…» — ИИ-поиск цитирует ответ, а не вступление", a0=first[:40])))
     elif len(first) < cfg["answer_min"]:
         issues.append(("info", page.url, "answer-short",
-                       f"первый абзац короче {cfg['answer_min']} символов — "
-                       f"на самостоятельный ответ не тянет"))
+                       tr("первый абзац короче {a0} символов — на самостоятельный ответ не тянет", a0=cfg['answer_min'])))
     elif len(first) > cfg["answer_max"]:
         issues.append(("info", page.url, "answer-long",
-                       f"первый абзац {len(first)} символов — для цитирования "
-                       f"лучше уложить ответ в {cfg['answer_max']}"))
+                       tr("первый абзац {a0} символов — для цитирования лучше уложить ответ в {a1}", a0=len(first), a1=cfg['answer_max'])))
     return issues
 
 
@@ -219,23 +211,18 @@ def check_extractable(page, cfg: dict = None) -> list:
         # регулярки гасило проверку целиком.
         if questions / len(subheads) < cfg["question_share"]:
             issues.append(("info", page.url, "no-question-headings",
-                           f"вопросов среди подзаголовков {questions} из "
-                           f"{len(subheads)} — формат «вопрос → ответ» "
-                           f"цитируется заметно чаще"))
+                           tr("вопросов среди подзаголовков {a0} из {a1} — формат «вопрос → ответ» цитируется заметно чаще", a0=questions, a1=len(subheads))))
     long_paragraphs = [p for p in (page.paragraphs or []) if len(p) > cfg["long_paragraph"]]
     if long_paragraphs:
         issues.append(("info", page.url, "long-paragraph",
-                       f"{len(long_paragraphs)} абзац(ев) длиннее "
-                       f"{cfg['long_paragraph']} символов — такой блок трудно "
-                       f"процитировать целиком"))
+                       tr("{a0} абзац(ев) длиннее {a1} символов — такой блок трудно процитировать целиком", a0=len(long_paragraphs), a1=cfg['long_paragraph'])))
     blocks = page.blocks or {}
     if page.word_count > 400 and not blocks.get("li") and not blocks.get("table"):
         issues.append(("info", page.url, "no-structure",
-                       "в тексте нет ни списков, ни таблиц — структурные элементы "
-                       "повышают шанс попасть в ответ"))
+                       tr("в тексте нет ни списков, ни таблиц — структурные элементы повышают шанс попасть в ответ")))
     if blocks.get("img") and blocks.get("img_no_alt"):
         issues.append(("info", page.url, "img-no-alt",
-                       f"{blocks['img_no_alt']} изображени(й) без alt"))
+                       tr("{a0} изображени(й) без alt", a0=blocks['img_no_alt'])))
     return issues
 
 
@@ -253,9 +240,7 @@ def check_shell(page, cfg: dict = None) -> list:
     cfg = {**CONFIG, **(cfg or {})}
     if is_shell(page, cfg):
         return [("critical", page.url, "js-shell",
-                 f"в исходном HTML {page.word_count} слов при "
-                 f"{(page.blocks or {}).get('script', 0)} скриптах — краулеры "
-                 f"ИИ-поиска не исполняют JavaScript и увидят пустую страницу")]
+                 tr("в исходном HTML {a0} слов при {a1} скриптах — краулеры ИИ-поиска не исполняют JavaScript и увидят пустую страницу", a0=page.word_count, a1=(page.blocks or {}).get('script', 0)))]
     return []
 
 
@@ -274,8 +259,7 @@ def check_jsonld(page) -> list:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
             issues.append(("warning", page.url, "jsonld-broken",
-                           f"блок JSON-LD не парсится ({exc.msg}) — для поисковика "
-                           f"его просто нет"))
+                           tr("блок JSON-LD не парсится ({a0}) — для поисковика его просто нет", a0=exc.msg)))
             continue
         for item in _ld_items(data):
             # Контейнер `@graph` сам по себе типа не имеет — это обёртка,
@@ -283,7 +267,7 @@ def check_jsonld(page) -> list:
             # получала за неё ложную находку.
             if "@type" not in item and not {"@graph", "@context"} & set(item):
                 issues.append(("info", page.url, "jsonld-no-type",
-                               "в блоке JSON-LD нет @type"))
+                               tr("в блоке JSON-LD нет @type")))
             if "faqpage" in _ld_types(item):
                 haystack = (page.text or "").lower()
                 missing = []
@@ -298,9 +282,7 @@ def check_jsonld(page) -> list:
                         missing.append(question)
                 if missing:
                     issues.append(("warning", page.url, "jsonld-faq-invisible",
-                                   f"{len(missing)} вопрос(ов) из FAQPage нет "
-                                   f"в видимом тексте — разметка, не совпадающая "
-                                   f"со страницей, это риск ручных санкций"))
+                                   tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
     return issues
 
 
@@ -355,10 +337,10 @@ def check_provenance(page) -> list:
         has_date = True
     if not has_date:
         issues.append(("info", page.url, "no-date",
-                       "нет машиночитаемой даты публикации или обновления"))
+                       tr("нет машиночитаемой даты публикации или обновления")))
     if not has_author:
         issues.append(("info", page.url, "no-author",
-                       "не указан автор или организация — сигнал E-E-A-T"))
+                       tr("не указан автор или организация — сигнал E-E-A-T")))
     return issues
 
 
@@ -379,7 +361,5 @@ def run(pages: list, robots_path: str = "", cfg: dict = None) -> dict:
     return {
         "issues": issues,
         "robots": robots,
-        "note": "Проверено то, что не мешает машине взять ответ со страницы. "
-                "Попадание в ответы ИИ-поиска определяется в основном вне сайта: "
-                "упоминания и позиция в обычной выдаче. Пакет на это не влияет.",
+        "note": tr("Проверено то, что не мешает машине взять ответ со страницы. Попадание в ответы ИИ-поиска определяется в основном вне сайта: упоминания и позиция в обычной выдаче. Пакет на это не влияет."),
     }

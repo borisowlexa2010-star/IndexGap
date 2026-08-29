@@ -30,6 +30,7 @@ import shutil
 from collections import Counter
 
 from .core import SourceError, DEFAULT_EXTS, SKIP_DIRS, read_text
+from .i18n import tr
 
 SKILL_DIR = os.path.join(".claude", "skills")
 CONFIG_NAME = "indexgap.json"
@@ -185,7 +186,7 @@ def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:
 
     path = os.path.join(root, content_dir) if content_dir else root
     if not os.path.isdir(path):
-        return "catalog", "каталог страниц не найден, взят профиль по умолчанию"
+        return "catalog", tr("каталог страниц не найден, взят профиль по умолчанию")
 
     pages, dated, html, total, short = 0, 0, 0, 0, 0
     for dirpath, dirnames, filenames in os.walk(path):
@@ -213,16 +214,16 @@ def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:
             break
 
     if not pages:
-        return "catalog", "страниц не найдено, взят профиль по умолчанию"
+        return "catalog", tr("страниц не найдено, взят профиль по умолчанию")
     if dated / pages >= 0.4:
-        return "events", f"у {dated} из {pages} страниц есть дата во фронтматтере"
+        return "events", tr("у {a0} из {a1} страниц есть дата во фронтматтере", a0=dated, a1=pages)
     if pages <= 40 and html / pages >= 0.6:
-        return "product", f"{pages} страниц, почти все собранный HTML — похоже на лендинги"
+        return "product", tr("{a0} страниц, почти все собранный HTML — похоже на лендинги", a0=pages)
     if not dataset and short / pages >= 0.5:
-        return "ugc", f"датасета нет, {short} из {pages} страниц короткие — похоже на ленту"
+        return "ugc", tr("датасета нет, {a0} из {a1} страниц короткие — похоже на ленту", a0=short, a1=pages)
     if dataset:
-        return "catalog", f"рядом лежит датасет {os.path.basename(dataset)}"
-    return "catalog", f"{pages} страниц без явных признаков другого типа"
+        return "catalog", tr("рядом лежит датасет {a0}", a0=os.path.basename(dataset))
+    return "catalog", tr("{a0} страниц без явных признаков другого типа", a0=pages)
 
 
 # ── запись ────────────────────────────────────────────────────────────────────
@@ -237,7 +238,7 @@ def skills_source() -> str:
         os.path.abspath(__file__))), "skills")
     if os.path.isdir(fallback):
         return fallback
-    raise SourceError("не найден каталог скиллов внутри пакета — переустанови indexgap")
+    raise SourceError(tr("не найден каталог скиллов внутри пакета — переустанови indexgap"))
 
 
 def install_skills(target_root: str) -> list:
@@ -246,11 +247,22 @@ def install_skills(target_root: str) -> list:
 
     Скиллы перезаписываются всегда: это знание об инструменте, оно обновляется
     вместе с ним и не содержит ничего, что человек мог бы там настроить.
+
+    Язык берётся тот же, что у остального вывода. Рядом с русским `SKILL.md`
+    лежит `SKILL.en.md`; если перевода для языка нет, ставится русский —
+    скилл на понятном агенту языке лучше, чем отсутствие скилла.
     """
+    from .i18n import get_lang
+
     source = skills_source()
+    lang = get_lang()
     written = []
     for name in sorted(os.listdir(source)):
         skill_file = os.path.join(source, name, "SKILL.md")
+        if lang != "ru":
+            localized = os.path.join(source, name, f"SKILL.{lang}.md")
+            if os.path.isfile(localized):
+                skill_file = localized
         if not os.path.isfile(skill_file):
             continue
         destination = os.path.join(target_root, SKILL_DIR, name)
@@ -258,7 +270,7 @@ def install_skills(target_root: str) -> list:
         shutil.copyfile(skill_file, os.path.join(destination, "SKILL.md"))
         written.append(os.path.join(SKILL_DIR, name, "SKILL.md"))
     if not written:
-        raise SourceError("в пакете не оказалось ни одного скилла")
+        raise SourceError(tr("в пакете не оказалось ни одного скилла"))
     return written
 
 
@@ -272,9 +284,7 @@ def write_config(root: str, detected: dict, force: bool = False) -> tuple:
         return path, False
 
     config = {
-        "_комментарий": "Настройки этого проекта. Профиль задаёт пороги по типу "
-                        "контента; всё, что написано здесь явно, сильнее профиля. "
-                        "Ключ IndexNow сюда не пишется: он свой у каждого сайта.",
+        "_комментарий": tr("Настройки этого проекта. Профиль задаёт пороги по типу контента; всё, что написано здесь явно, сильнее профиля. Ключ IndexNow сюда не пишется: он свой у каждого сайта."),
         "profile": detected["profile"],
         "site": detected["site"],
         # `pages` — путь к страницам. Раздел настроек текстовых проверок
@@ -329,19 +339,7 @@ def update_agents_md(root: str, detected: dict, create: bool = False) -> str:
     if not os.path.isfile(path) and not create:
         return ""
     block = (
-        f"{AGENTS_START}\n"
-        f"## SEO-конвейер\n\n"
-        f"В проекте установлен indexgap. Профиль контента — "
-        f"`{detected['profile']}`, страницы в `{detected['content']}`.\n\n"
-        f"Перед публикацией сгенерированных страниц:\n\n"
-        f"```bash\n"
-        f"indexgap check {detected['content']} --site {detected['site'] or '<адрес сайта>'}"
-        f"{' --dataset ' + detected['dataset'] if detected.get('dataset') else ''}\n"
-        f"```\n\n"
-        f"Полные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики "
-        f"(`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap "
-        f"и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`).\n"
-        f"{AGENTS_END}"
+        tr("{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`).\n{a6}", a0=AGENTS_START, a1=detected['profile'], a2=detected['content'], a3=detected['content'], a4=detected['site'] or '<адрес сайта>', a5=' --dataset ' + detected['dataset'] if detected.get('dataset') else '', a6=AGENTS_END)
     )
     existing = ""
     if os.path.isfile(path):
@@ -376,11 +374,11 @@ def run(root: str, site: str = "", content: str = "", profile: str = "",
     """Собирает всё вместе. Возвращает отчёт о том, что сделано и что понято."""
     root = os.path.abspath(root or ".")
     if not os.path.isdir(root):
-        raise SourceError(f"Каталога {root} нет.")
+        raise SourceError(tr("Каталога {a0} нет.", a0=root))
 
     detected_content = content or detect_content_dir(root)
     detected_dataset = dataset or detect_dataset(root)
-    detected_profile, why = ((profile, "задан флагом") if profile
+    detected_profile, why = ((profile, tr("задан флагом")) if profile
                              else detect_profile(root, detected_content, detected_dataset))
     detected = {
         "content": detected_content or "./content",
