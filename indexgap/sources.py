@@ -41,6 +41,7 @@ import re
 import zipfile
 
 from .core import SourceError, read_text
+from .i18n import tr
 
 # ── что источник доказывает ───────────────────────────────────────────────────
 
@@ -51,20 +52,19 @@ THIRDPARTY = "thirdparty"  # чужой индекс
 LIST = "list"              # просто список адресов
 
 KIND_TITLE = {
-    INDEX: "панель вебмастера",
-    ANALYTICS: "аналитика",
-    CRAWL: "краулер",
-    THIRDPARTY: "сторонний индекс",
-    LIST: "список адресов",
+    INDEX: tr("панель вебмастера"),
+    ANALYTICS: tr("аналитика"),
+    CRAWL: tr("краулер"),
+    THIRDPARTY: tr("сторонний индекс"),
+    LIST: tr("список адресов"),
 }
 
 KIND_PROVES = {
-    INDEX: "поисковик знает про страницу — прямой ответ",
-    ANALYTICS: "на страницу был визит, значит она в индексе; "
-               "молчание не значит обратного",
-    CRAWL: "краулер дошёл до страницы — это обход, а не индексация",
-    THIRDPARTY: "страница есть в индексе стороннего сервиса, а не поисковика",
-    LIST: "просто перечень адресов — что он значит, знаешь только ты",
+    INDEX: tr("поисковик знает про страницу — прямой ответ"),
+    ANALYTICS: tr("на страницу был визит, значит она в индексе; молчание не значит обратного"),
+    CRAWL: tr("краулер дошёл до страницы — это обход, а не индексация"),
+    THIRDPARTY: tr("страница есть в индексе стороннего сервиса, а не поисковика"),
+    LIST: tr("просто перечень адресов — что он значит, знаешь только ты"),
 }
 
 
@@ -86,7 +86,7 @@ TOOLS = {
                       "header": ("avg. click position", "avg click position",
                                  "clicks", "impressions")},
 
-    "yandex":        {"kind": INDEX, "title": "Яндекс.Вебмастер",
+    "yandex":        {"kind": INDEX, "title": tr("Яндекс.Вебмастер"),
                       "file": ("yandex", "яндекс", "вебмастер"),
                       "header": ("адрес страницы", "показы", "переходы",
                                  "статус", "последнее посещение")},
@@ -127,7 +127,7 @@ TOOLS = {
                       "file": ("oncrawl",), "header": ("urlpath", "fetched")},
     "netpeak":       {"kind": CRAWL, "title": "Netpeak Spider",
                       "file": ("netpeak",), "header": ("код ответа", "глубина")},
-    "sitemap":       {"kind": CRAWL, "title": "карта сайта",
+    "sitemap":       {"kind": CRAWL, "title": tr("карта сайта"),
                       "file": ("sitemap",), "header": ()},
 
     # сторонние индексы
@@ -208,7 +208,7 @@ def _read_xlsx(path: str) -> list:
                     shared.append("".join(t.text or "" for t in si.iter(_XML_NS + "t")))
             sheets = sorted(n for n in names if _SHEET_RE.search(n))
             if not sheets:
-                raise SourceError(f"{path}: в книге нет ни одного листа.")
+                raise SourceError(tr("{a0}: в книге нет ни одного листа.", a0=path))
             import xml.etree.ElementTree as ET
             root = ET.fromstring(book.read(sheets[0]))
             rows = []
@@ -231,9 +231,7 @@ def _read_xlsx(path: str) -> list:
             return rows
     except zipfile.BadZipFile:
         raise SourceError(
-            f"{path}: файл начинается как zip-архив, но не открывается ни как "
-            f"xlsx, ни как книга Excel. Если это архив выгрузки — распакуй его "
-            f"и передай файл изнутри; если книга — пересохрани её или отдай CSV.")
+            tr("{a0}: файл начинается как zip-архив, но не открывается ни как xlsx, ни как книга Excel. Если это архив выгрузки — распакуй его и передай файл изнутри; если книга — пересохрани её или отдай CSV.", a0=path))
 
 
 def _read_lines(text: str) -> list:
@@ -296,9 +294,9 @@ def read_table(path: str) -> tuple:
     выгрузку из Ahrefs люди регулярно сохраняют как `.csv`, будучи xlsx.
     """
     if not os.path.exists(path):
-        raise SourceError(f"Файл не найден: {path}")
+        raise SourceError(tr("Файл не найден: {a0}", a0=path))
     if os.path.isdir(path):
-        raise SourceError(f"{path} — это каталог, а нужен файл выгрузки.")
+        raise SourceError(tr("{a0} — это каталог, а нужен файл выгрузки.", a0=path))
 
     with open(path, "rb") as fh:
         head = fh.read(4)
@@ -413,11 +411,11 @@ def index_grade(names: list) -> str:
     if not kinds:
         return ""
     if kinds == {INDEX}:
-        return "Хотя бы в одном индексе"
+        return tr("Хотя бы в одном индексе")
     if kinds <= {INDEX, ANALYTICS}:
-        return "Известно поисковику или было посещено"
+        return tr("Известно поисковику или было посещено")
     if kinds == {CRAWL}:
-        return "Найдено краулером (это обход, а не индекс)"
+        return tr("Найдено краулером (это обход, а не индекс)")
     if kinds == {THIRDPARTY}:
-        return "Известно стороннему сервису (не индекс поисковика)"
-    return "Есть хотя бы в одном источнике"
+        return tr("Известно стороннему сервису (не индекс поисковика)")
+    return tr("Есть хотя бы в одном источнике")

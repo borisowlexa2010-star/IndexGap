@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter, defaultdict
+from .i18n import tr
 
 CONFIG = {
     "template_share": 0.70,      # доля страниц с одинаковым скелетом заголовков
@@ -55,8 +56,7 @@ PERCENT = re.compile(r"(" + NUMBER + r")\s*%")
 # Отрицательный просмотр назад отсекает «топ-10», «айфон-15», «ГОСТ-12»:
 # число, приклеенное к слову дефисом, — часть названия, а не мера.
 GENERIC_FACT = re.compile(
-    r"(?<![^\W\d_]-)(?<!\d)(" + NUMBER + r")[  \u00a0]?"
-    r"(м²|м2|km²|[^\W\d_]{1,14}|[%°$€£₽¥₹])", re.U)
+    r"(?<![^\W\d_]-)(?<!\d)(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|[^\\W\\d_]{1,14}|[%°$€£₽¥₹])", re.U)
 
 # Слова, которые после числа не делают его фактом: это нумерация и служебное.
 NON_UNITS = {
@@ -330,10 +330,10 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         if unknown_strong:
             issues.append((
                 "critical", page.url, "unsupported-number",
-                "в тексте есть числа, которых нет в данных: "
+                tr("в тексте есть числа, которых нет в данных: ")
                 + ", ".join(f"{n} {u}".strip() for n, u in
                             sorted(unknown_strong.items())[:6])
-                + (" и ещё" if len(unknown_strong) > 6 else "")))
+                + (tr(" и ещё") if len(unknown_strong) > 6 else "")))
         if unknown_weak:
             # Одна строка на страницу и уровень «мелочь»: это список
             # для просмотра глазами, а не приговор. Раньше каждое такое
@@ -343,9 +343,9 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                             key=lambda kv: (-len(kv[0]), kv[0]))[:8]
             issues.append((
                 "info", page.url, "check-by-eye",
-                "числа, которых нет в данных — просмотри глазами: "
+                tr("числа, которых нет в данных — просмотри глазами: ")
                 + ", ".join(f"{n} {u}".strip() for n, u in listed)
-                + (f" и ещё {len(unknown_weak) - len(listed)}"
+                + (tr(" и ещё {a0}", a0=len(unknown_weak) - len(listed))
                    if len(unknown_weak) > len(listed) else "")))
     return issues
 
@@ -358,7 +358,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     cfg = {**CONFIG, **(cfg or {})}
     if len(pages) < cfg["min_pages_for_seams"]:
         return {"issues": [], "repeated": [],
-                "skipped": f"страниц {len(pages)} — мало для оценки шаблонности"}
+                "skipped": tr("страниц {a0} — мало для оценки шаблонности", a0=len(pages))}
 
     skeletons = defaultdict(list)
     for page in pages:
@@ -378,8 +378,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
             for url in sorted(urls):
                 issues.append((
                     "warning", url, "template-skeleton",
-                    f"те же {len(skeleton)} заголовков в том же порядке ещё "
-                    f"у {len(urls) - 1} страниц"))
+                    tr("те же {a0} заголовков в том же порядке ещё у {a1} страниц", a0=len(skeleton), a1=len(urls) - 1)))
 
     # Одинаковое начало текста — второй признак штамповки. Считается по основному
     # тексту: раньше сюда попадало меню, и находка срабатывала на любом сайте.
@@ -393,7 +392,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
             for url in sorted(urls):
                 issues.append((
                     "warning", url, "same-opening",
-                    f"первые слова текста совпадают ещё у {len(urls) - 1} страниц"))
+                    tr("первые слова текста совпадают ещё у {a0} страниц", a0=len(urls) - 1)))
 
     return {"issues": issues,
             "repeated": sorted(repeated, key=lambda r: (-r["count"], r["headings"])),
@@ -438,7 +437,7 @@ def check_brief(pages: list, cfg: dict = None) -> list:
         status = (page.meta.get("status") or "").lower()
         if status in ("draft", "черновик", "todo"):
             issues.append(("critical", page.url, "still-draft",
-                           f"status: {status} — страница помечена как незаконченная"))
+                           tr("status: {a0} — страница помечена как незаконченная", a0=status)))
 
         vague_list = {v.lower() for v in cfg.get("vague_anchors", ())}
         # Названия городов — «Омск», «Сочи», «Тула» — короткие и совершенно
@@ -448,7 +447,7 @@ def check_brief(pages: list, cfg: dict = None) -> list:
                            or _uninformative_length(a, cfg))]
         if vague:
             issues.append(("info", page.url, "vague-anchor",
-                           "неинформативные анкоры: "
+                           tr("неинформативные анкоры: ")
                            + ", ".join(f"«{a}»" for a in vague[:4])))
     return issues
 
@@ -476,12 +475,10 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
 
     notes = []
     if seams.get("skipped"):
-        notes.append("швы шаблона не оценивались: " + seams["skipped"])
+        notes.append(tr("швы шаблона не оценивались: ") + seams["skipped"])
     if ambiguous:
         notes.append(
-            f"{len(ambiguous)} страниц(ы) подошли сразу к нескольким строкам "
-            f"датасета — сверка фактов для них не делалась. Добавь `keyword` "
-            f"во фронтматтер, чтобы связь была однозначной.")
+            tr("{a0} страниц(ы) подошли сразу к нескольким строкам датасета — сверка фактов для них не делалась. Добавь `keyword` во фронтматтер, чтобы связь была однозначной.", a0=len(ambiguous)))
 
     return {
         "issues": issues,

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, timedelta
+from .i18n import tr
 
 CONFIG = {
     # Сколько дней после события страница ещё считается уместной в индексе:
@@ -116,20 +117,14 @@ def check(pages: list, cfg: dict = None, today: date = None) -> dict:
         if indexable(page):
             issues.append((
                 "critical", page.url, "stale-event",
-                f"дата {latest.isoformat()} прошла более {cfg['grace_days']} дней "
-                f"назад, а страница открыта для индексации — поисковик показывает "
-                f"людям то, чего уже нет. Закрой noindex, поставь редирект "
-                f"на актуальную или перепиши в отчёт о прошедшем"))
+                tr("дата {a0} прошла более {a1} дней назад, а страница открыта для индексации — поисковик показывает людям то, чего уже нет. Закрой noindex, поставь редирект на актуальную или перепиши в отчёт о прошедшем", a0=latest.isoformat(), a1=cfg['grace_days'])))
         else:
             issues.append((
                 "info", page.url, "stale-closed",
-                f"дата {latest.isoformat()} прошла, страница уже закрыта "
-                f"от индексации — это правильно"))
+                tr("дата {a0} прошла, страница уже закрыта от индексации — это правильно", a0=latest.isoformat())))
 
     share = dated / len(pages) if pages else 0
     note = ""
     if pages and share < cfg["min_dated_share"]:
-        note = (f"даты нашлись только у {dated} страниц из {len(pages)}. "
-                f"Для датированного контента это мало: без машиночитаемой даты "
-                f"нельзя ни проверить актуальность, ни показать её в выдаче")
+        note = (tr("даты нашлись только у {a0} страниц из {a1}. Для датированного контента это мало: без машиночитаемой даты нельзя ни проверить актуальность, ни показать её в выдаче", a0=dated, a1=len(pages)))
     return {"issues": issues, "dated": dated, "stale": stale, "note": note}

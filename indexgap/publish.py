@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 from xml.sax.saxutils import escape
 
 from .core import SourceError, url_key
+from .i18n import tr
 
 MAX_URLS_PER_FILE = 45000          # запас к лимиту 50 000
 INDEXNOW_BATCH = 10000             # лимит протокола
@@ -50,9 +51,7 @@ def check_key(key: str) -> str:
     key = (key or "").strip()
     if not KEY_RE.match(key):
         raise SourceError(
-            "Ключ IndexNow — это 8–128 символов из латиницы, цифр и дефиса, "
-            "которые ты придумываешь сам (например uuid без скобок).\n"
-            "    Он же станет именем файла в корне сайта: /<ключ>.txt")
+            tr("Ключ IndexNow — это 8–128 символов из латиницы, цифр и дефиса, которые ты придумываешь сам (например uuid без скобок).\n    Он же станет именем файла в корне сайта: /<ключ>.txt"))
     return key
 
 
@@ -291,8 +290,7 @@ def submit_indexnow(urls: list, base_url: str, key: str,
             # долбить сервер двадцатью заведомо провальными запросами нет.
             if e.code in (400, 403, 422, 429) or e.code >= 500:
                 results.append({"batch": 0, "status": "stopped",
-                                "error": "остановился, чтобы не усугублять; "
-                                         "принятые батчи сохранены"})
+                                "error": tr("остановился, чтобы не усугублять; принятые батчи сохранены")})
                 break
         except Exception as e:                       # noqa: BLE001
             # urlopen оборачивает в URLError не всё: таймаут чтения прилетает
@@ -308,8 +306,8 @@ def submit_indexnow(urls: list, base_url: str, key: str,
 
 def _explain_indexnow(code: int) -> str:
     return {
-        400: "неверный формат запроса",
-        403: "ключ не найден по keyLocation — проверь, что файл лежит в корне и доступен",
-        422: "URL не принадлежат указанному host, либо ключ не совпадает",
-        429: "слишком часто — притормози и повтори позже",
-    }.get(code, "неизвестная ошибка")
+        400: tr("неверный формат запроса"),
+        403: tr("ключ не найден по keyLocation — проверь, что файл лежит в корне и доступен"),
+        422: tr("URL не принадлежат указанному host, либо ключ не совпадает"),
+        429: tr("слишком часто — притормози и повтори позже"),
+    }.get(code, tr("неизвестная ошибка"))

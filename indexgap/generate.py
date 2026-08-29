@@ -35,6 +35,7 @@ import unicodedata
 from collections import Counter, defaultdict
 
 from .core import read_text, SourceError
+from .i18n import tr
 
 CONFIG = {
     "min_fields_filled": 0.0,     # 0 — не отбраковывать, только предупреждать
@@ -153,9 +154,9 @@ def read_dataset(path: str) -> dict:
     from . import sources
 
     if not os.path.exists(path):
-        raise SourceError(f"Файл {path} не найден. Проверь путь и имя.")
+        raise SourceError(tr("Файл {a0} не найден. Проверь путь и имя.", a0=path))
     if os.path.isdir(path):
-        raise SourceError(f"{path} — это каталог, а нужен файл с ключами.")
+        raise SourceError(tr("{a0} — это каталог, а нужен файл с ключами.", a0=path))
 
     with open(path, "rb") as fh:
         signature = fh.read(2)
@@ -165,7 +166,7 @@ def read_dataset(path: str) -> dict:
         # заканчивался путь того, кто не программирует.
         rows_raw = sources.read_table(path)[0]
         if not rows_raw:
-            raise SourceError(f"{path}: в книге нет данных.")
+            raise SourceError(tr("{a0}: в книге нет данных.", a0=path))
         fields = [str(c).strip() for c in rows_raw[0]]
         rows = []
         for raw in rows_raw[1:]:
@@ -198,10 +199,10 @@ def read_dataset(path: str) -> dict:
     duplicates = [name for name, count in Counter(fields).items() if count > 1 and name]
     if duplicates:
         problems.append(
-            "в шапке повторяются колонки: " + ", ".join(sorted(duplicates))
-            + " — останется только последняя из одноимённых")
+            tr("в шапке повторяются колонки: ") + ", ".join(sorted(duplicates))
+            + tr(" — останется только последняя из одноимённых"))
     if not fields or fields == [""]:
-        raise SourceError(f"{path}: не удалось прочитать шапку — файл пустой?")
+        raise SourceError(tr("{a0}: не удалось прочитать шапку — файл пустой?", a0=path))
 
     ragged = []
     for number, raw in enumerate(reader, start=2):
@@ -218,8 +219,7 @@ def read_dataset(path: str) -> dict:
     if ragged:
         shown = ", ".join(str(n) for n in ragged[:5])
         problems.append(
-            f"в {len(ragged)} строк(ах) колонок больше, чем в шапке — лишнее "
-            f"отброшено (строки {shown}{' и далее' if len(ragged) > 5 else ''})")
+            tr("в {a0} строк(ах) колонок больше, чем в шапке — лишнее отброшено (строки {a1}{a2})", a0=len(ragged), a1=shown, a2=' и далее' if len(ragged) > 5 else ''))
     return {"rows": rows, "fields": fields, "encoding": encoding,
             "delimiter": getattr(dialect, "delimiter", ","), "problems": problems}
 
@@ -247,11 +247,11 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     for key, idxs in sorted(exact.items()):
         if not key:
             for i in idxs:
-                rejected.append({"row": i + 2, "reason": "пустой ключ", "keyword": ""})
+                rejected.append({"row": i + 2, "reason": tr("пустой ключ"), "keyword": ""})
             continue
         if len(idxs) > 1:
             for i in idxs[1:]:
-                rejected.append({"row": i + 2, "reason": "точный дубль ключа", "keyword": key})
+                rejected.append({"row": i + 2, "reason": tr("точный дубль ключа"), "keyword": key})
         kept.append(idxs[0])
 
     empty_columns = Counter()
@@ -268,28 +268,27 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
         share = filled / len(variables) if variables else 1.0
         if variables and cfg["min_fields_filled"] and share < cfg["min_fields_filled"]:
             rejected.append({"row": i + 2, "keyword": key,
-                             "reason": f"заполнено {filled} из {len(variables)} полей"})
+                             "reason": tr("заполнено {a0} из {a1} полей", a0=filled, a1=len(variables))})
             continue
 
         if not re.search(r"\w", key, flags=re.UNICODE):
             rejected.append({"row": i + 2, "keyword": key,
-                             "reason": "ключ не содержит ни одной буквы или цифры"})
+                             "reason": tr("ключ не содержит ни одной буквы или цифры")})
             continue
 
         slug = slugify(key)
         if slug in seen_slugs:
             rejected.append({"row": i + 2, "keyword": key,
-                             "reason": f"slug совпадает с «{seen_slugs[slug]}»"})
+                             "reason": tr("slug совпадает с «{a0}»", a0=seen_slugs[slug])})
             continue
         seen_slugs[slug] = key
         survivors.append((i, key, slug, row))
 
     for column, count in sorted(empty_columns.items()):
         if count == len(kept) and kept:
-            warnings.append(f"колонка «{column}» пуста во всех строках — "
-                            f"её можно удалить из файла")
+            warnings.append(tr("колонка «{a0}» пуста во всех строках — её можно удалить из файла", a0=column))
         elif count > len(kept) * 0.5 and kept:
-            warnings.append(f"колонка «{column}» пуста в {count} строках из {len(kept)}")
+            warnings.append(tr("колонка «{a0}» пуста в {a1} строках из {a2}", a0=column, a1=count, a2=len(kept)))
 
     # Синонимичные интенты: одинаковый смысловой состав ключа.
     groups = defaultdict(list)
@@ -309,7 +308,7 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     for pos, (i, key, slug, row) in enumerate(survivors):
         if pos in drop:
             rejected.append({"row": i + 2, "keyword": key,
-                             "reason": "тот же интент, что и у другой строки"})
+                             "reason": tr("тот же интент, что и у другой строки")})
 
     return {
         "keep": final,
@@ -328,36 +327,7 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
 # требуют разных разделов, и навязывать им общий скелет — верный способ
 # получить те самые шаблонные швы, которые пакет потом ловит.
 # Свой шаблон подставляется через --brief.
-DEFAULT_BRIEF = """---
-title: ""
-description: ""
-keyword: {keyword_yaml}
-status: draft
----
-
-<!-- БРИФ ДЛЯ АГЕНТА. Удали этот блок, когда страница написана.
-
-Ключ: {keyword}
-Данные строки:
-{variables}
-
-Требования:
-  * title {title_min}–{title_max} символов, содержит ключ,
-    не совпадает с другими страницами;
-  * description {desc_min}–{desc_max} символов, без повтора title;
-  * не меньше {min_words} слов осмысленного текста;
-  * первый абзац — прямой ответ на запрос, 40–320 символов, без разгона
-    вроде «в этой статье мы рассмотрим»: именно его цитируют ИИ-поиск
-    и блок быстрых ответов;
-  * структура — под данные строки и под то, что человеку нужно решить
-    на этой странице. НЕ переноси одни и те же разделы со страницы на страницу:
-    одинаковый скелет заголовков читается как штамповка;
-  * минимум {min_links} ссылки на соседние страницы этого раздела,
-    анкоры описательные — иначе страница останется сиротой;
-  * ничего не выдумывать. Каждое число должно быть в данных строки.
-    Если данных нет, раздел не пишем.
--->
-"""
+DEFAULT_BRIEF = tr("---\ntitle: \"\"\ndescription: \"\"\nkeyword: {keyword_yaml}\nstatus: draft\n---\n\n<!-- БРИФ ДЛЯ АГЕНТА. Удали этот блок, когда страница написана.\n\nКлюч: {keyword}\nДанные строки:\n{variables}\n\nТребования:\n  * title {title_min}–{title_max} символов, содержит ключ,\n    не совпадает с другими страницами;\n  * description {desc_min}–{desc_max} символов, без повтора title;\n  * не меньше {min_words} слов осмысленного текста;\n  * первый абзац — прямой ответ на запрос, 40–320 символов, без разгона\n    вроде «в этой статье мы рассмотрим»: именно его цитируют ИИ-поиск\n    и блок быстрых ответов;\n  * структура — под данные строки и под то, что человеку нужно решить\n    на этой странице. НЕ переноси одни и те же разделы со страницы на страницу:\n    одинаковый скелет заголовков читается как штамповка;\n  * минимум {min_links} ссылки на соседние страницы этого раздела,\n    анкоры описательные — иначе страница останется сиротой;\n  * ничего не выдумывать. Каждое число должно быть в данных строки.\n    Если данных нет, раздел не пишем.\n-->\n")
 
 _BAD_SEGMENT = re.compile(r"[\\/:*?\"<>|\x00-\x1f]")
 
@@ -393,14 +363,12 @@ def check_pattern(pattern: str, fields: list) -> None:
                 names.add(name.split(".")[0].split("[")[0])
     except ValueError as exc:
         raise SourceError(
-            f"--pattern «{pattern}»: {exc}. Фигурные скобки должны быть парными, "
-            f"а внутри них — имя колонки.")
+            tr("--pattern «{a0}»: {a1}. Фигурные скобки должны быть парными, а внутри них — имя колонки.", a0=pattern, a1=exc))
     known = set(fields) | {"slug", "keyword"}
     unknown = sorted(names - known)
     if unknown:
         raise SourceError(
-            f"--pattern «{pattern}»: колонок " + ", ".join(unknown) + " в датасете нет.\n"
-            f"    Доступны: " + ", ".join(sorted(known)))
+            tr("--pattern «{a0}»: колонок ", a0=pattern) + ", ".join(unknown) + tr(" в датасете нет.\n    Доступны: ") + ", ".join(sorted(known)))
 
 
 def write_tasks(audit: dict, out_dir: str, keyword_field: str,
@@ -424,7 +392,7 @@ def write_tasks(audit: dict, out_dir: str, keyword_field: str,
         try:
             rel = path_pattern.format(**fields)
         except (KeyError, IndexError, ValueError) as exc:
-            failed.append({"keyword": key, "reason": f"шаблон пути: {exc}"})
+            failed.append({"keyword": key, "reason": tr("шаблон пути: {a0}", a0=exc)})
             continue
         # Пустая колонка в шаблоне даёт `/файл.md` или `a//b.md`. Раньше ведущий
         # слеш делал путь абсолютным, каталог назначения отбрасывался, и файлы
@@ -432,15 +400,14 @@ def write_tasks(audit: dict, out_dir: str, keyword_field: str,
         if not rel.strip() or rel.startswith(("/", "\\")) or "//" in rel.replace("\\", "/") \
                 or rel.endswith(("/", "\\")):
             failed.append({"keyword": key,
-                           "reason": "в шаблоне пути пустое значение колонки — "
-                                     "заполни её или убери из --pattern"})
+                           "reason": tr("в шаблоне пути пустое значение колонки — заполни её или убери из --pattern")})
             continue
         path = os.path.abspath(os.path.join(root, rel))
         # Пустое значение колонки или `..` в шаблоне раньше уводили запись
         # за пределы каталога — вплоть до корня файловой системы.
         if os.path.commonpath([root, path]) != root:
             failed.append({"keyword": key,
-                           "reason": "шаблон уводит файл за пределы --out-dir"})
+                           "reason": tr("шаблон уводит файл за пределы --out-dir")})
             continue
         if os.path.exists(path):
             skipped.append(path)
@@ -452,16 +419,13 @@ def write_tasks(audit: dict, out_dir: str, keyword_field: str,
             body = brief.format(
                 keyword=_brief_value(key).replace('"', "'"),
                 keyword_yaml=_yaml_value(key),
-                variables=variables or "  (нет)",
+                variables=variables or tr("  (нет)"),
                 min_words=min_words, min_links=min_links,
                 title_min=title_min, title_max=title_max,
                 desc_min=desc_min, desc_max=desc_max)
         except (KeyError, IndexError, ValueError) as exc:
             raise SourceError(
-                f"--brief: в шаблоне есть подстановка {exc}, которой пакет не знает.\n"
-                f"    Доступны: keyword, keyword_yaml, variables, min_words, min_links, "
-                f"title_min, title_max, desc_min, desc_max.\n"
-                f"    Если нужны фигурные скобки как текст — удвой их: {{{{ и }}}}.")
+                tr("--brief: в шаблоне есть подстановка {a0}, которой пакет не знает.\n    Доступны: keyword, keyword_yaml, variables, min_words, min_links, title_min, title_max, desc_min, desc_max.\n    Если нужны фигурные скобки как текст — удвой их: {{{{ и }}}}.", a0=exc))
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(body)
         written.append(path)

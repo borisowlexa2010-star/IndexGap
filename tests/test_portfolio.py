@@ -17,6 +17,8 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import language  # noqa: F401  — закрепляет русский язык вывода
+
 from indexgap import freshness, portfolio, profiles, report
 from indexgap.core import SourceError
 

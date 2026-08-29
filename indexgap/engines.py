@@ -22,6 +22,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from .i18n import tr
 
 REGISTRY_URL = "https://www.indexnow.org/searchengines.json"
 REGISTRY_CACHE = "engines.json"
@@ -59,9 +60,8 @@ FALLBACK_PARTICIPANTS = {
 # Кто НЕ участвует и что с этим делать. Показывается человеку явно:
 # молчаливое «отправлено» создаёт ложное ощущение, что покрыты все.
 NON_PARTICIPANTS = {
-    "google": "не поддерживает IndexNow. Остаются sitemap и Search Console — "
-              "проверка индексации в отчёте, отправка через интерфейс.",
-    "baidu": "своя система подачи, требует отдельной регистрации.",
+    "google": tr("не поддерживает IndexNow. Остаются sitemap и Search Console — проверка индексации в отчёте, отправка через интерфейс."),
+    "baidu": tr("своя система подачи, требует отдельной регистрации."),
 }
 
 
@@ -78,12 +78,12 @@ def fetch_participants(cache_path_dir: str = None, timeout: int = 15,
             with open(cache_path, "r", encoding="utf-8") as fh:
                 cached = json.load(fh)
             if age < CACHE_TTL and isinstance(cached, dict) and cached:
-                return {"participants": cached, "source": "кэш"}
+                return {"participants": cached, "source": tr("кэш")}
         except (OSError, json.JSONDecodeError):
             pass
 
     if offline:
-        return {"participants": dict(FALLBACK_PARTICIPANTS), "source": "встроенный список"}
+        return {"participants": dict(FALLBACK_PARTICIPANTS), "source": tr("встроенный список")}
 
     try:
         with urllib.request.urlopen(REGISTRY_URL, timeout=timeout) as resp:
@@ -94,11 +94,11 @@ def fetch_participants(cache_path_dir: str = None, timeout: int = 15,
                     json.dump(data, fh, ensure_ascii=False, indent=2)
             except OSError:
                 pass
-            return {"participants": data, "source": "реестр indexnow.org"}
+            return {"participants": data, "source": tr("реестр indexnow.org")}
     except (urllib.error.URLError, json.JSONDecodeError, ValueError, TimeoutError):
         pass
 
-    return {"participants": dict(FALLBACK_PARTICIPANTS), "source": "встроенный список"}
+    return {"participants": dict(FALLBACK_PARTICIPANTS), "source": tr("встроенный список")}
 
 
 # ── распознавание выгрузок из панелей вебмастера ──────────────────────────────

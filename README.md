@@ -73,6 +73,10 @@ indexgap portfolio projects.json    # every site you own, in one run
 indexgap profiles                   # what the content-type presets change
 ```
 
+Output is English by default, Russian with `--lang ru` (or `INDEXGAP_LANG`, or
+your system locale). That includes the HTML report, every finding description,
+`--help`, and the skills `indexgap init` installs into your project.
+
 Understands both built HTML and Markdown sources with frontmatter. Input file
 encoding is detected, not assumed: UTF-16, BOM, and the cp1251 CSVs that
 Russian Excel produces all read correctly. Exports are read as they come —
@@ -240,7 +244,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-217 scenarios. Each one is a reproduced defect found by two waves of adversarial
+242 scenarios. Each one is a reproduced defect found by two waves of adversarial
 review and one run against six live sites, plus the behaviour of profiles,
 portfolio and project installation. The rule: a finding without a test comes back.
 

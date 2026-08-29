@@ -21,6 +21,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import language  # noqa: F401  — закрепляет русский язык вывода
+
 from indexgap import aeo, checks, cli, content, core, doctor, engines, generate, publish
 from indexgap.core import SourceError
 

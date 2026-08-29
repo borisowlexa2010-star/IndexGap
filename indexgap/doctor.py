@@ -39,6 +39,7 @@ from xml.etree import ElementTree
 
 from . import sources
 from .core import read_text, url_key, SourceError
+from .i18n import tr
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 
@@ -56,7 +57,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
     не попал в sitemap целиком».
     """
     if _depth > 3:
-        return {"urls": [], "error": "слишком глубокая вложенность sitemap-индексов"}
+        return {"urls": [], "error": tr("слишком глубокая вложенность sitemap-индексов")}
     # Индекс, ссылающийся сам на себя, раскручивался в сотни тысяч разборов
     # и мегабайты текста ошибки — а по сети это были бы столько же запросов.
     _seen = set() if _seen is None else _seen
@@ -69,25 +70,25 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
                 data = resp.read()
         else:
             if not os.path.exists(source):
-                return {"urls": [], "error": f"файл {source} не найден"}
+                return {"urls": [], "error": tr("файл {a0} не найден", a0=source)}
             with open(source, "rb") as fh:
                 data = fh.read()
     except urllib.error.HTTPError as exc:
-        return {"urls": [], "error": f"{source} отдал {exc.code}"}
+        return {"urls": [], "error": tr("{a0} отдал {a1}", a0=source, a1=exc.code)}
     except (urllib.error.URLError, OSError) as exc:
-        return {"urls": [], "error": f"{source} не читается: {exc}"}
+        return {"urls": [], "error": tr("{a0} не читается: {a1}", a0=source, a1=exc)}
 
     if data[:2] == b"\x1f\x8b":
         import gzip
         try:
             data = gzip.decompress(data)
         except OSError as exc:
-            return {"urls": [], "error": f"{source}: не удалось распаковать gzip ({exc})"}
+            return {"urls": [], "error": tr("{a0}: не удалось распаковать gzip ({a1})", a0=source, a1=exc)}
 
     try:
         root = ElementTree.fromstring(data)
     except ElementTree.ParseError as exc:
-        return {"urls": [], "error": f"{source}: это не похоже на XML ({exc})"}
+        return {"urls": [], "error": tr("{a0}: это не похоже на XML ({a1})", a0=source, a1=exc)}
 
     tag = root.tag.rsplit("}", 1)[-1]
     if tag == "sitemapindex":
@@ -113,7 +114,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
     urls = [el.text.strip() for el in root.iter()
             if el.text and el.tag.rsplit("}", 1)[-1] == "loc"]
     if not urls:
-        return {"urls": [], "error": f"{source}: в файле нет ни одного <loc>"}
+        return {"urls": [], "error": tr("{a0}: в файле нет ни одного <loc>", a0=source)}
     return {"urls": urls, "error": ""}
 
 
@@ -149,7 +150,7 @@ def read_indexed(csv_path: str, site: str = "") -> dict:
     """
     rows, encoding = _read_rows(csv_path)
     if not rows:
-        raise SourceError(f"{csv_path}: файл пустой.")
+        raise SourceError(tr("{a0}: файл пустой.", a0=csv_path))
 
     found = sources.guess_column(rows[0], URL_COLUMN_HINTS)
     col = found if found >= 0 else None
@@ -160,10 +161,7 @@ def read_indexed(csv_path: str, site: str = "") -> dict:
         start = 0
     if col is None:
         raise SourceError(
-            f"{csv_path}: не нашёл колонку с адресами страниц.\n"
-            f"    Заголовки файла: " + ", ".join(str(c) for c in rows[0][:8]) + "\n"
-            f"    Нужен экспорт, где есть столбец с адресами "
-            f"(в Search Console — «Страницы», не «Запросы»).")
+            tr("{a0}: не нашёл колонку с адресами страниц.\n    Заголовки файла: ", a0=csv_path) + ", ".join(str(c) for c in rows[0][:8]) + tr("\n    Нужен экспорт, где есть столбец с адресами (в Search Console — «Страницы», не «Запросы»)."))
 
     base = (site or "").rstrip("/")
     out, seen, relative, skipped = [], set(), 0, 0
@@ -187,17 +185,13 @@ def read_indexed(csv_path: str, site: str = "") -> dict:
 
     notes = []
     if relative and base:
-        notes.append(f"{os.path.basename(csv_path)}: {relative} адресов были "
-                     f"относительными путями — достроены до {base}/…")
+        notes.append(tr("{a0}: {a1} адресов были относительными путями — достроены до {a2}/…", a0=os.path.basename(csv_path), a1=relative, a2=base))
     if skipped:
-        notes.append(f"{os.path.basename(csv_path)}: {skipped} строк содержат "
-                     f"пути вида /guide/… без домена, а --site не задан — "
-                     f"они пропущены. Передай --site, чтобы их учесть.")
+        notes.append(tr("{a0}: {a1} строк содержат пути вида /guide/… без домена, а --site не задан — они пропущены. Передай --site, чтобы их учесть.", a0=os.path.basename(csv_path), a1=skipped))
     if not out:
         raise SourceError(
-            f"{csv_path}: колонка «{rows[0][col] if col < len(rows[0]) else col}» "
-            f"нашлась, но ни одного адреса в ней нет."
-            + ("\n    В файле только относительные пути — передай --site."
+            tr("{a0}: колонка «{a1}» нашлась, но ни одного адреса в ней нет.", a0=csv_path, a1=rows[0][col] if col < len(rows[0]) else col)
+            + (tr("\n    В файле только относительные пути — передай --site.")
                if relative else ""))
     return {"urls": out, "encoding": encoding, "notes": notes}
 
@@ -226,26 +220,21 @@ def read_sources(specs: list, site: str = "") -> dict:
             if not confident:
                 unlabeled.add(name)
                 notes.append(
-                    f"{os.path.basename(path)}: не удалось уверенно определить "
-                    f"источник, файл засчитан как «{name}» "
-                    f"({sources.KIND_TITLE[kind]}). Если это не так, укажи явно: "
-                    f"--indexed google={path} или --indexed ahrefs={path}")
+                    tr("{a0}: не удалось уверенно определить источник, файл засчитан как «{a1}» ({a2}). Если это не так, укажи явно: --indexed google={a3} или --indexed ahrefs={a4}", a0=os.path.basename(path), a1=name, a2=sources.KIND_TITLE[kind], a3=path, a4=path))
         result = read_indexed(path, site)
         notes += result.get("notes", [])
         urls = set(result["urls"])
         kinds[name] = kind
         target = out if kind == sources.INDEX else extra
         if name in target:
-            notes.append(f"две выгрузки помечены как «{name}» — они объединены; "
-                         f"если это разные источники, задай метки явно")
+            notes.append(tr("две выгрузки помечены как «{a0}» — они объединены; если это разные источники, задай метки явно", a0=name))
             target[name] |= urls
         else:
             target[name] = urls
 
     if not out and extra:
         notes.append(
-            "панели вебмастера среди выгрузок нет. Воронка построена на том, "
-            "что есть, но подпись шага это учитывает: "
+            tr("панели вебмастера среди выгрузок нет. Воронка построена на том, что есть, но подпись шага это учитывает: ")
             + "; ".join(sources.describe(list(extra))) + ".")
     return {"by_engine": out, "by_source": extra, "kinds": kinds,
             "notes": notes, "unlabeled": sorted(unlabeled)}
@@ -292,30 +281,30 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     indexed_unknown = sorted(in_index - generated) if in_index is not None else []
 
     steps = [
-        {"name": "Сгенерировано", "count": len(generated)},
-        {"name": "Пригодно к индексации", "count": len(publishable),
+        {"name": tr("Сгенерировано"), "count": len(generated)},
+        {"name": tr("Пригодно к индексации"), "count": len(publishable),
          "lost": len(blocked),
-         "why": "noindex или canonical на другую страницу"},
+         "why": tr("noindex или canonical на другую страницу")},
     ]
     if in_sitemap is not None:
-        steps.append({"name": "В sitemap", "count": len(in_sitemap & publishable),
+        steps.append({"name": tr("В sitemap"), "count": len(in_sitemap & publishable),
                       "lost": len(publishable - in_sitemap),
-                      "why": "страница есть на диске, но в sitemap не попала"})
+                      "why": tr("страница есть на диске, но в sitemap не попала")})
     if in_index is not None:
         # Счёт и потери берутся от одного множества `known`, иначе воронка
         # росла: закрытая от индексации страница, ещё сидящая в индексе,
         # давала «в индексе 3» после «в sitemap 2».
-        label = sources.index_grade(list(engines_keys)) or "Хотя бы в одном индексе"
+        label = sources.index_grade(list(engines_keys)) or tr("Хотя бы в одном индексе")
         steps.append({"name": label, "count": len(known & in_index),
                       "lost": len(known - in_index),
-                      "why": "источник знает про URL, но страницы в нём нет"})
+                      "why": tr("источник знает про URL, но страницы в нём нет")})
         for name in sorted(engines_keys):
             hit = engines_keys[name] & known
             kind = sources.kind_of(name)
             suffix = "" if kind == sources.INDEX else f" ({sources.KIND_TITLE[kind]})"
-            steps.append({"name": f"  из них в {name}{suffix}", "count": len(hit),
+            steps.append({"name": tr("  из них в {a0}{a1}", a0=name, a1=suffix), "count": len(hit),
                           "lost": len((known & in_index) - hit),
-                          "why": f"есть в других источниках, но не в {name}",
+                          "why": tr("есть в других источниках, но не в {a0}", a0=name),
                           "engine": name, "kind": kind})
 
     foreign = []
@@ -324,19 +313,14 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     # улучшение — самый дорогой вид уверенной неправды.
     if panels and others:
         foreign.append(
-            "в шаг засчитаны источники, которые индексом не являются "
-            f"({', '.join(sorted(others))}). Реальную индексацию показывают "
-            f"строки панелей: {', '.join(sorted(panels))}.")
+            tr("в шаг засчитаны источники, которые индексом не являются ({a0}). Реальную индексацию показывают строки панелей: {a1}.", a0=', '.join(sorted(others)), a1=', '.join(sorted(panels))))
     elif others and not panels:
         foreign.append(
-            "панели вебмастера среди выгрузок нет, поэтому строгого ответа "
-            "«в индексе или нет» здесь не будет: "
+            tr("панели вебмастера среди выгрузок нет, поэтому строгого ответа «в индексе или нет» здесь не будет: ")
             + "; ".join(sources.describe(list(others))) + ".")
     if in_index is not None and generated and not (in_index & generated) and in_index:
         foreign.append(
-            f"ни один из {len(in_index)} адресов выгрузки не совпал с адресами сайта. "
-            f"Скорее всего, это экспорт другого проекта или другой домен "
-            f"(проверь --site). Раздел индексации ниже смысла не имеет.")
+            tr("ни один из {a0} адресов выгрузки не совпал с адресами сайта. Скорее всего, это экспорт другого проекта или другой домен (проверь --site). Раздел индексации ниже смысла не имеет.", a0=len(in_index)))
 
     return {
         "steps": steps,
@@ -393,9 +377,9 @@ def cross_engine(funnel_result: dict, pages: list) -> list:
         return sorted(display.get(k, k) for k in keys)
 
     out = [{
-        "kind": "везде",
+        "kind": tr("везде"),
         "count": len(everywhere),
-        "note": "во всех подключённых индексах — здесь вопросов нет",
+        "note": tr("во всех подключённых индексах — здесь вопросов нет"),
         "urls": [],
     }]
 
@@ -403,22 +387,18 @@ def cross_engine(funnel_result: dict, pages: list) -> list:
         missing = (anywhere - keys)
         if missing:
             out.append({
-                "kind": f"нет только в {name}",
+                "kind": tr("нет только в {a0}", a0=name),
                 "count": len(missing),
-                "note": f"другие поисковики страницу приняли, значит она доступна "
-                        f"и валидна. Причина на стороне {name}: оценка качества "
-                        f"или более медленная индексация — техническими правками "
-                        f"это обычно не лечится",
+                "note": tr("другие поисковики страницу приняли, значит она доступна и валидна. Причина на стороне {a0}: оценка качества или более медленная индексация — техническими правками это обычно не лечится", a0=name),
                 "urls": show(missing)[:50],
             })
 
     nowhere = expected - anywhere
     if nowhere:
         out.append({
-            "kind": "нигде",
+            "kind": tr("нигде"),
             "count": len(nowhere),
-            "note": "ни один поисковик не добавил в индекс — это техническая "
-                    "проблема, ищите причину в разделе ниже",
+            "note": tr("ни один поисковик не добавил в индекс — это техническая проблема, ищите причину в разделе ниже"),
             "urls": show(nowhere)[:50],
         })
     return out
@@ -453,17 +433,16 @@ def explain(funnel_result: dict, analysis: dict) -> list:
     no_title = _keys({p.url for p in analysis["pages"] if not p.title})
 
     buckets = [
-        ("сироты и недостижимые от главной", not_indexed & orphans,
-         "добавить ссылки на них с хабовых страниц раздела"),
-        ("почти-дубли других страниц", not_indexed & dupes,
-         "переписать под разные интенты или оставить одну, а с остальных "
-         "поставить canonical на неё — связывать их ссылками между собой нельзя"),
-        ("тонкие страницы", not_indexed & thin,
-         "добавить содержимое или убрать из индекса"),
-        ("глубже допустимого клика", not_indexed & deep,
-         "поднять выше в структуре"),
-        ("без title", not_indexed & no_title,
-         "заполнить title — без него страница почти не имеет шансов"),
+        (tr("сироты и недостижимые от главной"), not_indexed & orphans,
+         tr("добавить ссылки на них с хабовых страниц раздела")),
+        (tr("почти-дубли других страниц"), not_indexed & dupes,
+         tr("переписать под разные интенты или оставить одну, а с остальных поставить canonical на неё — связывать их ссылками между собой нельзя")),
+        (tr("тонкие страницы"), not_indexed & thin,
+         tr("добавить содержимое или убрать из индекса")),
+        (tr("глубже допустимого клика"), not_indexed & deep,
+         tr("поднять выше в структуре")),
+        (tr("без title"), not_indexed & no_title,
+         tr("заполнить title — без него страница почти не имеет шансов")),
     ]
     explained = set()
     for name, keys, fix in buckets:
@@ -474,9 +453,8 @@ def explain(funnel_result: dict, analysis: dict) -> list:
 
     rest = not_indexed - explained
     if rest:
-        out.append({"cause": "причина не установлена локально",
+        out.append({"cause": tr("причина не установлена локально"),
                     "count": len(rest),
-                    "fix": "проверить в Search Console статус конкретных URL "
-                           "и время с публикации",
+                    "fix": tr("проверить в Search Console статус конкретных URL и время с публикации"),
                     "urls": sorted(display.get(k, k) for k in rest)[:50]})
     return out

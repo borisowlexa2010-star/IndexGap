@@ -24,6 +24,8 @@ import sys
 
 from . import (aeo, checks, content, doctor, engines, freshness, generate,
                install, portfolio, profiles, publish, report, settings, sources)
+from . import i18n
+from .i18n import tr
 from .core import (SourceError, check_site_url, load_manifest, load_pages,
                    save_manifest, url_key)
 
@@ -72,9 +74,7 @@ def apply_project_defaults(args) -> str:
         data = json.loads(text)
     except (SourceError, json.JSONDecodeError) as exc:
         raise SourceError(
-            f"{path} не читается: {exc}.\n"
-            f"    Это файл настроек проекта. Поправь его или удали "
-            f"и запусти `indexgap init` заново.")
+            tr("{a0} не читается: {a1}.\n    Это файл настроек проекта. Поправь его или удали и запусти `indexgap init` заново.", a0=path, a1=exc))
     if not isinstance(data, dict):
         return ""
 
@@ -97,10 +97,7 @@ def apply_project_defaults(args) -> str:
 def _load(args):
     if not args.root or not args.site:
         raise SourceError(
-            "Не хватает данных о проекте.\n"
-            "    Либо укажи их явно: indexgap check ./content --site https://example.com\n"
-            "    Либо один раз выполни `indexgap init` в корне проекта — тогда\n"
-            "    ежедневная команда станет просто `indexgap check`.")
+            tr("Не хватает данных о проекте.\n    Либо укажи их явно: indexgap check ./content --site https://example.com\n    Либо один раз выполни `indexgap init` в корне проекта — тогда\n    ежедневная команда станет просто `indexgap check`."))
     site = check_site_url(args.site)
     args.site = site
     pages, problems = load_pages(args.root, site)
@@ -108,13 +105,12 @@ def _load(args):
         print(f"  ! {problem}")
     if not pages:
         if not os.path.exists(args.root):
-            raise SourceError(f"Каталога {args.root} нет. Проверь путь.")
+            raise SourceError(tr("Каталога {a0} нет. Проверь путь.", a0=args.root))
         if os.path.isfile(args.root):
-            raise SourceError(f"{args.root} — это файл, а нужен каталог со страницами.")
+            raise SourceError(tr("{a0} — это файл, а нужен каталог со страницами.", a0=args.root))
         raise SourceError(
-            f"В {args.root} нет ни одной страницы (.html, .htm, .md, .markdown).\n"
-            f"    Если страницы лежат глубже — укажи нужный подкаталог.")
-    print(f"Разобрано страниц: {len(pages)}")
+            tr("В {a0} нет ни одной страницы (.html, .htm, .md, .markdown).\n    Если страницы лежат глубже — укажи нужный подкаталог.", a0=args.root))
+    print(tr("Разобрано страниц: {a0}", a0=len(pages)))
     return pages
 
 
@@ -142,8 +138,7 @@ def check_out_path(path: str) -> str:
     — ровно то, что человек говорит агенту.
     """
     if os.path.isdir(path):
-        raise SourceError(f"--out {path} — это каталог. Укажи имя файла, "
-                          f"например {os.path.join(path, 'indexgap-check.html')}")
+        raise SourceError(tr("--out {a0} — это каталог. Укажи имя файла, например {a1}", a0=path, a1=os.path.join(path, 'indexgap-check.html')))
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as fh:
@@ -152,8 +147,7 @@ def check_out_path(path: str) -> str:
             head = ""
         if REPORT_MARK not in head:
             raise SourceError(
-                f"--out {path} уже существует и это не отчёт пакета.\n"
-                f"    Перезаписывать чужой файл я не буду — укажи другое имя.")
+                tr("--out {a0} уже существует и это не отчёт пакета.\n    Перезаписывать чужой файл я не буду — укажи другое имя.", a0=path))
     return path
 
 
@@ -175,20 +169,15 @@ def resolve_keyword_field(args, fields: list, path: str) -> str:
         return args.keyword
     if args.keyword != "keyword":            # человек назвал колонку сам
         raise SourceError(
-            f"Колонки «{args.keyword}» в {path} нет.\n"
-            f"    Есть: {', '.join(fields)}\n"
-            f"    Укажи нужную: --keyword <имя колонки>")
+            tr("Колонки «{a0}» в {a1} нет.\n    Есть: {a2}\n    Укажи нужную: --keyword <имя колонки>", a0=args.keyword, a1=path, a2=', '.join(fields)))
     guess = sources.guess_column(fields, sources.KEYWORD_COLUMN_HINTS)
     if guess >= 0:
         found = fields[guess]
-        print(f"  ! колонка с ключом не названа `keyword` — взята «{found}». "
-              f"Если это не она, укажи явно: --keyword <имя колонки>")
+        print(tr("  ! колонка с ключом не названа `keyword` — взята «{a0}». Если это не она, укажи явно: --keyword <имя колонки>", a0=found))
         args.keyword = found
         return found
     raise SourceError(
-        f"Колонки с ключевым словом в {path} не нашлось.\n"
-        f"    Есть: {', '.join(fields)}\n"
-        f"    Укажи нужную: --keyword <имя колонки>")
+        tr("Колонки с ключевым словом в {a0} не нашлось.\n    Есть: {a1}\n    Укажи нужную: --keyword <имя колонки>", a0=path, a1=', '.join(fields)))
 
 
 def _collect_indexed(args) -> tuple:
@@ -210,16 +199,16 @@ def _collect_indexed(args) -> tuple:
         print(f"  ! {note}")
     if by_engine:
         summary = ", ".join(f"{n}: {len(u)}" for n, u in sorted(by_engine.items()))
-        print(f"Индексация — {summary}")
+        print(tr("Индексация — {a0}", a0=summary))
     if by_source:
         summary = ", ".join(
             f"{n} ({sources.KIND_TITLE[sources.kind_of(n)]}): {len(u)}"
             for n, u in sorted(by_source.items()))
-        print(f"Прочие источники — {summary}")
+        print(tr("Прочие источники — {a0}", a0=summary))
     for line in sources.describe(list(by_engine) + list(by_source)):
-        print(f"  что это доказывает → {line}")
+        print(tr("  что это доказывает → {a0}", a0=line))
     for note in engines.describe_coverage(list(by_engine)):
-        print(f"  не покрыто → {note}")
+        print(tr("  не покрыто → {a0}", a0=note))
     return by_engine, by_source
 
 
@@ -227,17 +216,17 @@ def _describe_project(project: dict, rows: list) -> None:
     """Показывает, что пакет понял про проект. Молчаливая автонастройка опаснее явной."""
     parts = []
     language = project.get("language")
-    parts.append(f"язык: {language or 'не определён'}")
+    parts.append(tr("язык: {a0}", a0=language or tr("не определён")))
     units = project.get("fact_units") or []
     if units:
-        origin = "из датасета" if project.get("_derived_units") else "из конфига"
-        parts.append(f"единицы фактов ({origin}): {', '.join(units[:8])}"
+        origin = tr("из датасета") if project.get("_derived_units") else tr("из конфига")
+        parts.append(tr("единицы фактов ({a0}): {a1}", a0=origin, a1=', '.join(units[:8]))
                      + (" …" if len(units) > 8 else ""))
     elif rows:
-        parts.append("единиц измерения в датасете нет — сверка идёт по всем числам")
+        parts.append(tr("единиц измерения в датасете нет — сверка идёт по всем числам"))
     if project.get("_path"):
-        parts.append(f"конфиг: {os.path.basename(project['_path'])}")
-    print("Проект — " + "; ".join(parts))
+        parts.append(tr("конфиг: {a0}", a0=os.path.basename(project['_path'])))
+    print(tr("Проект — ") + "; ".join(parts))
 
 
 def _read_rows(args):
@@ -264,7 +253,7 @@ def cmd_check(args):
     project = settings.resolve(args.root, pages, rows, args.keyword, args.config)
     project = profiles.apply(project, args.profile or project.get("profile"))
     _describe_project(project, rows)
-    print(f"Профиль — {project['_profile_title']} ({project['_profile']})")
+    print(tr("Профиль — {a0} ({a1})", a0=project['_profile_title'], a1=project['_profile']))
 
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
@@ -273,9 +262,7 @@ def cmd_check(args):
 
     content_result = None
     if project["_skip_facts"]:
-        notes.append("сверка фактов и швов шаблона выключена профилем "
-                     f"«{project['_profile']}»: страницы не порождаются датасетом, "
-                     "сверять не с чем. Молчание здесь — не «всё хорошо»")
+        notes.append(tr("сверка фактов и швов шаблона выключена профилем «{a0}»: страницы не порождаются датасетом, сверять не с чем. Молчание здесь — не «всё хорошо»", a0=project['_profile']))
     elif not args.no_content:
         cfg = dict(project.get("content") or {})
         cfg["vague_anchors"] = project.get("vague_anchors", [])
@@ -284,16 +271,15 @@ def cmd_check(args):
         analysis["issues"] += content_result["issues"]
         notes += content_result.get("notes") or []
         if rows:
-            print(f"Сверено с датасетом: {content_result['matched_rows']} из {len(pages)}")
+            print(tr("Сверено с датасетом: {a0} из {a1}", a0=content_result['matched_rows'], a1=len(pages)))
             if content_result["unmatched"]:
-                print(f"  не сопоставлено: {len(content_result['unmatched'])} "
-                      f"(проверь keyword во фронтматтере или имена папок)")
+                print(tr("  не сопоставлено: {a0} (проверь keyword во фронтматтере или имена папок)", a0=len(content_result['unmatched'])))
 
     if project["_checks_freshness"]:
         fresh = freshness.check(pages)
         analysis["issues"] += fresh["issues"]
-        print(f"Датировано страниц: {fresh['dated']} из {len(pages)}"
-              + (f", просрочено {fresh['stale']}" if fresh["stale"] else ""))
+        print(tr("Датировано страниц: {a0} из {a1}", a0=fresh['dated'], a1=len(pages))
+              + (tr(", просрочено {a0}", a0=fresh['stale']) if fresh["stale"] else ""))
         if fresh["note"]:
             notes.append(fresh["note"])
 
@@ -309,8 +295,8 @@ def cmd_check(args):
     if args.sitemap:
         sm = doctor.read_sitemap(args.sitemap)
         if sm["error"]:
-            print(f"  ! sitemap не прочитан: {sm['error']}")
-            print("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет.")
+            print(tr("  ! sitemap не прочитан: {a0}", a0=sm['error']))
+            print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
         else:
             sitemap_urls = sm["urls"]
     if sitemap_urls is not None or by_engine or by_source:
@@ -325,7 +311,7 @@ def cmd_check(args):
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(args.out), site=args.site,
                              cross=cross, notes=notes,
-                             title="Проверка перед публикацией")
+                             title=tr("Проверка перед публикацией"))
     json_path = os.path.splitext(args.out)[0] + ".json"
     _write_json(json_path, {
         "site": args.site,
@@ -355,11 +341,9 @@ def cmd_check(args):
     # ни того, ни другого нет, поэтому показывать её в этих счётчиках —
     # значит четыре раза сообщить об одной беде.
     reported = sum(1 for i in analysis["issues"] if i[2] == "orphan")
-    print(f"Критично: {crit}   Внимание: {warn}   "
-          f"Сирот: {reported}   "
-          f"Похожих пар: {len(analysis['duplicates'])}")
+    print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
     _print_first_things(analysis["issues"])
-    print(f"Отчёт: {html_path}\nДанные: {json_path}")
+    print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
     return 1 if (crit and args.strict) else 0
 
 
@@ -369,7 +353,7 @@ def _print_first_things(issues):
     counts = Counter(code for level, _, code, _ in issues if level == "critical")
     if not counts:
         return
-    print("Чинить в этом порядке:")
+    print(tr("Чинить в этом порядке:"))
     for code, count in counts.most_common(3):
         print(f"  {count:>5}  {code} — {report.CODE_HELP.get(code, '')[:80]}")
 
@@ -389,24 +373,20 @@ def cmd_sitemap(args):
     manifest_path = os.path.join(args.root, MANIFEST)
     manifest = load_manifest(manifest_path)
     if manifest.pop("_broken", False):
-        print("  ! манифест был повреждён и прочитан как пустой — "
-              "у всех страниц будет сегодняшний lastmod")
+        print(tr("  ! манифест был повреждён и прочитан как пустой — у всех страниц будет сегодняшний lastmod"))
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
                                    public_prefix=args.public_prefix)
     save_manifest(manifest_path, result["manifest"])
-    print(f"Включено: {result['included']}   "
-          f"Исключено (noindex, canonical, черновики): {result['excluded']}")
+    print(tr("Включено: {a0}   Исключено (noindex, canonical, черновики): {a1}", a0=result['included'], a1=result['excluded']))
     if result["drafts"]:
-        print(f"  черновиков не опубликовано: {len(result['drafts'])} "
-              f"(status: draft во фронтматтере)")
+        print(tr("  черновиков не опубликовано: {a0} (status: draft во фронтматтере)", a0=len(result['drafts'])))
     for path in result["files"]:
         print(f"  {path}")
     for path in result["removed"]:
-        print(f"  удалён устаревший шард: {path}")
+        print(tr("  удалён устаревший шард: {a0}", a0=path))
     if args.out_dir and not args.public_prefix and result["included"] > publish.MAX_URLS_PER_FILE:
-        print("  ! шардов больше одного: если ./public не корень сайта, "
-              "укажи --public-prefix, иначе индекс будет ссылаться не туда")
+        print(tr("  ! шардов больше одного: если ./public не корень сайта, укажи --public-prefix, иначе индекс будет ссылаться не туда"))
     return 0
 
 
@@ -417,49 +397,44 @@ def cmd_notify(args):
     manifest_path = os.path.join(args.root, MANIFEST)
     manifest = load_manifest(manifest_path)
     if manifest.pop("_broken", False):
-        print("  ! манифест повреждён и прочитан как пустой — очередь считается "
-              "с нуля.")
-        print("    С --send это отправит ВЕСЬ сайт. Если это не то, что нужно, "
-              "восстанови .indexgap-manifest.json из истории.")
+        print(tr("  ! манифест повреждён и прочитан как пустой — очередь считается с нуля."))
+        print(tr("    С --send это отправит ВЕСЬ сайт. Если это не то, что нужно, восстанови .indexgap-manifest.json из истории."))
     diff = publish.diff_changed(pages, manifest)
 
     urls = diff["new"] + diff["changed"]
-    print(f"Новых: {len(diff['new'])}   Изменённых: {len(diff['changed'])}   "
-          f"Без изменений: {len(diff['unchanged'])}   Пропало: {len(diff['removed'])}")
+    print(tr("Новых: {a0}   Изменённых: {a1}   Без изменений: {a2}   Пропало: {a3}", a0=len(diff['new']), a1=len(diff['changed']), a2=len(diff['unchanged']), a3=len(diff['removed'])))
     if not urls:
-        print("Отправлять нечего.")
+        print(tr("Отправлять нечего."))
         return 0
 
     registry = engines.fetch_participants(offline=args.offline)
     names = ", ".join(sorted(registry["participants"]))
-    print(f"Получат уведомление ({registry['source']}): {names}")
+    print(tr("Получат уведомление ({a0}): {a1}", a0=registry['source'], a1=names))
     for note in engines.describe_coverage(list(registry["participants"])):
-        print(f"  не получат → {note}")
+        print(tr("  не получат → {a0}", a0=note))
 
     if args.write_key:
         target = args.key_dir or args.out_dir
         if not target:
-            print("  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, "
-                  "а не рядом с исходниками.")
-            print("    Укажи каталог публикации: --key-dir ./public")
+            print(tr("  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками."))
+            print(tr("    Укажи каталог публикации: --key-dir ./public"))
             return 1
         path = publish.write_key_file(target, key)
-        print(f"Файл ключа: {path}")
-        print(f"  он должен открываться как {args.site.rstrip('/')}/{key}.txt")
+        print(tr("Файл ключа: {a0}", a0=path))
+        print(tr("  он должен открываться как {a0}/{a1}.txt", a0=args.site.rstrip('/'), a1=key))
 
     outcome = publish.submit_indexnow(urls, args.site, key,
                                       key_location=args.key_location,
                                       dry_run=not args.send)
     for r in outcome["results"]:
         status = r.get("status")
-        line = f"  батч {r.get('batch')}: {status}"
+        line = tr("  батч {a0}: {a1}", a0=r.get('batch'), a1=status)
         if r.get("error"):
             line += f" — {r['error']}"
         print(line)
 
     if not args.send:
-        print(f"Это пробный прогон: {len(urls)} URL готовы к отправке. "
-              f"Чтобы отправить — добавь --send.")
+        print(tr("Это пробный прогон: {a0} URL готовы к отправке. Чтобы отправить — добавь --send.", a0=len(urls)))
         return 0
 
     accepted = outcome["accepted"]
@@ -467,10 +442,9 @@ def cmd_notify(args):
         save_manifest(manifest_path,
                       publish.mark_notified(manifest, pages, accepted))
     if len(accepted) == len(urls):
-        print("Отправлено, очередь очищена.")
+        print(tr("Отправлено, очередь очищена."))
         return 0
-    print(f"Принято {len(accepted)} из {len(urls)}. Принятые отмечены и повторно "
-          f"не поедут; остальные останутся в очереди.")
+    print(tr("Принято {a0} из {a1}. Принятые отмечены и повторно не поедут; остальные останутся в очереди.", a0=len(accepted), a1=len(urls)))
     return 1
 
 
@@ -488,16 +462,12 @@ def cmd_doctor(args):
         sm = doctor.read_sitemap(args.sitemap)
         if sm["error"]:
             raise SourceError(
-                f"sitemap не прочитан: {sm['error']}\n"
-                f"    Пока он не читается, сверять не с чем — «потеряно всё» "
-                f"в такой ситуации было бы враньём.")
+                tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['error']))
         sitemap_urls = sm["urls"]
     by_engine, by_source = _collect_indexed(args)
     if sitemap_urls is None and not by_engine:
         raise SourceError(
-            "Нужен хотя бы --sitemap или --indexed, иначе сверять не с чем.\n"
-            "    --sitemap ./public/sitemap.xml\n"
-            "    --indexed google=gsc.csv --indexed bing=bing.csv")
+            tr("Нужен хотя бы --sitemap или --indexed, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv"))
 
     funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                   by_engine=by_engine, by_source=by_source)
@@ -506,11 +476,11 @@ def cmd_doctor(args):
 
     print()
     for step in funnel_result["steps"]:
-        lost = f"  (потеряно {step['lost']}: {step['why']})" if step.get("lost") else ""
+        lost = tr("  (потеряно {a0}: {a1})", a0=step['lost'], a1=step['why']) if step.get("lost") else ""
         print(f"  {step['name']:<28} {step['count']:>6}{lost}")
 
     if cross:
-        print("\nСравнение поисковиков:")
+        print(tr("\nСравнение поисковиков:"))
         for c in cross:
             if c["count"]:
                 print(f"  {c['count']:>5}  {c['kind']}")
@@ -520,7 +490,7 @@ def cmd_doctor(args):
         print(f"\n  ! {note}")
 
     if causes:
-        print("\nПочему страницы не в индексе:")
+        print(tr("\nПочему страницы не в индексе:"))
         for c in causes:
             print(f"  {c['count']:>5}  {c['cause']}\n         → {c['fix']}")
 
@@ -530,13 +500,13 @@ def cmd_doctor(args):
     path = report.build(analysis, funnel_result, causes,
                         out_path=check_out_path(args.out),
                         site=args.site, cross=cross, notes=notes,
-                        title="Разбор потерь")
+                        title=tr("Разбор потерь"))
     json_path = os.path.splitext(args.out)[0] + ".json"
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
                             "notes": notes})
-    print(f"\nОтчёт: {path}\nДанные: {json_path}")
-    print("Проверки текста здесь не запускались — это делает `indexgap check`.")
+    print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
+    print(tr("Проверки текста здесь не запускались — это делает `indexgap check`."))
     return 0
 
 
@@ -546,19 +516,18 @@ def cmd_plan(args):
     for problem in data["problems"]:
         print(f"  ! {problem}")
     if data["encoding"] not in ("utf-8", "utf-8-sig"):
-        print(f"  ! файл прочитан как {data['encoding']}; для надёжности "
-              f"пересохрани его в UTF-8")
+        print(tr("  ! файл прочитан как {a0}; для надёжности пересохрани его в UTF-8", a0=data['encoding']))
     if not rows:
-        raise SourceError(f"{args.dataset}: ни одной строки с данными.")
+        raise SourceError(tr("{a0}: ни одной строки с данными.", a0=args.dataset))
     resolve_keyword_field(args, fields, args.dataset)
 
     generate.check_pattern(args.pattern, fields)
 
     cfg = {"min_fields_filled": args.min_filled} if args.min_filled else None
     audit = generate.audit_dataset(rows, fields, args.keyword, cfg)
-    print(f"Строк в датасете: {audit['total']}")
-    print(f"К генерации:      {len(audit['keep'])}")
-    print(f"Отбраковано:      {len(audit['rejected'])}")
+    print(tr("Строк в датасете: {a0}", a0=audit['total']))
+    print(tr("К генерации:      {a0}", a0=len(audit['keep'])))
+    print(tr("Отбраковано:      {a0}", a0=len(audit['rejected'])))
     reasons = {}
     for r in audit["rejected"]:
         reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
@@ -567,11 +536,10 @@ def cmd_plan(args):
     for warning in audit["warnings"]:
         print(f"  ! {warning}")
     if audit["near_synonyms"]:
-        print(f"\nОдин интент, разные формулировки "
-              f"(показаны первые 10 из {len(audit['near_synonyms'])}):")
+        print(tr("\nОдин интент, разные формулировки (показаны первые 10 из {a0}):", a0=len(audit['near_synonyms'])))
         for a, b, _ in audit["near_synonyms"][:10]:
             print(f"    «{a}»  ↔  «{b}»")
-        print("    Оставлена первая. Если это разные страницы — поправь ключи.")
+        print(tr("    Оставлена первая. Если это разные страницы — поправь ключи."))
 
     if args.json:
         _write_json(args.json, {
@@ -581,7 +549,7 @@ def cmd_plan(args):
             "near_synonyms": [{"kept": a, "dropped": b} for a, b, _ in audit["near_synonyms"]],
             "warnings": audit["warnings"],
         })
-        print(f"Разбор целиком: {args.json}")
+        print(tr("Разбор целиком: {a0}", a0=args.json))
 
     if args.write:
         brief = generate.DEFAULT_BRIEF
@@ -592,17 +560,17 @@ def cmd_plan(args):
                                       path_pattern=args.pattern,
                                       brief=brief,
                                       min_words=args.min_words)
-        print(f"\nСоздано заготовок: {len(result['written'])} в {args.out_dir}")
+        print(tr("\nСоздано заготовок: {a0} в {a1}", a0=len(result['written']), a1=args.out_dir))
         if result["skipped"]:
-            print(f"Пропущено (файл уже есть): {len(result['skipped'])}")
+            print(tr("Пропущено (файл уже есть): {a0}", a0=len(result['skipped'])))
         for failure in result["failed"][:10]:
             print(f"  ! «{failure['keyword']}»: {failure['reason']}")
         if result["failed"]:
-            print(f"  Не записано строк: {len(result['failed'])}")
+            print(tr("  Не записано строк: {a0}", a0=len(result['failed'])))
         if result["written"]:
-            print("Дальше: попроси агента заполнить их по брифу внутри каждого файла.")
+            print(tr("Дальше: попроси агента заполнить их по брифу внутри каждого файла."))
     else:
-        print("\nЭто разбор без записи. Чтобы создать заготовки — добавь --write.")
+        print(tr("\nЭто разбор без записи. Чтобы создать заготовки — добавь --write."))
     return 0
 
 
@@ -613,55 +581,50 @@ def cmd_init(args):
                          force=args.force, agents=args.agents)
     d = result["detected"]
 
-    print(f"Проект: {result['root']}\n")
-    print("Что понято про проект:")
-    print(f"  страницы   {d['content']}"
-          + ("   (угадано — проверь)" if d["content_guessed"] else ""))
-    print(f"  сайт       {d['site'] or 'НЕ НАЙДЕН — впиши в indexgap.json'}"
-          + ("   (угадано — проверь)" if d["site"] and d["site_guessed"] else ""))
-    print(f"  тип        {d['profile']}   ({d['profile_why']})")
+    print(tr("Проект: {a0}\n", a0=result['root']))
+    print(tr("Что понято про проект:"))
+    print(tr("  страницы   {a0}", a0=d['content'])
+          + (tr("   (угадано — проверь)") if d["content_guessed"] else ""))
+    print(tr("  сайт       {a0}", a0=d['site'] or 'НЕ НАЙДЕН — впиши в indexgap.json')
+          + (tr("   (угадано — проверь)") if d["site"] and d["site_guessed"] else ""))
+    print(tr("  тип        {a0}   ({a1})", a0=d['profile'], a1=d['profile_why']))
     if d["dataset"]:
-        print(f"  датасет    {d['dataset']}")
+        print(tr("  датасет    {a0}", a0=d['dataset']))
     else:
-        print("  датасет    не найден — сверка фактов работать не будет")
+        print(tr("  датасет    не найден — сверка фактов работать не будет"))
 
-    print("\nЧто установлено:")
+    print(tr("\nЧто установлено:"))
     for path in result["skills"]:
         print(f"  {path}")
     print(f"  {os.path.basename(result['config'])}"
-          + ("" if result["config_written"] else "   (уже был, не тронут)"))
+          + ("" if result["config_written"] else tr("   (уже был, не тронут)")))
     if result["gitignore"]:
-        print("  .gitignore — дописаны служебные файлы")
+        print(tr("  .gitignore — дописаны служебные файлы"))
     if result["agents"]:
-        print(f"  {os.path.basename(result['agents'])} — блок для Codex")
+        print(tr("  {a0} — блок для Codex", a0=os.path.basename(result['agents'])))
 
-    print("\nСкиллы подхватит агент в этом проекте: Claude Code читает "
-          ".claude/skills сам.")
+    print(tr("\nСкиллы подхватит агент в этом проекте: Claude Code читает .claude/skills сам."))
     if not result["agents"]:
-        print("Если работаешь в Codex — добавь блок в AGENTS.md: "
-              "`indexgap init --agents`")
+        print(tr("Если работаешь в Codex — добавь блок в AGENTS.md: `indexgap init --agents`"))
 
     if not d["site"]:
-        print("\n! Адрес сайта определить не удалось. Впиши его в indexgap.json "
-              "полем `site`, иначе проверять нечего.")
+        print(tr("\n! Адрес сайта определить не удалось. Впиши его в indexgap.json полем `site`, иначе проверять нечего."))
         return 1
 
-    print("\nСледующая команда:")
+    print(tr("\nСледующая команда:"))
     dataset = f" --dataset {d['dataset']}" if d["dataset"] else ""
     print(f"  indexgap check {d['content']} --site {d['site'].rstrip('/')}{dataset}")
     if args.key:
         key = install.new_indexnow_key()
-        print(f"\nНовый ключ IndexNow для ЭТОГО проекта: {key}")
-        print("  Он привязан к домену файлом в корне сайта. Ключ от другого "
-              "проекта здесь не сработает — протокол ответит 403.")
-        print(f"  indexgap notify {d['content']} --site {d['site'].rstrip('/')} "
-              f"--key {key} --write-key --key-dir <каталог публикации>")
+        print(tr("\nНовый ключ IndexNow для ЭТОГО проекта: {a0}", a0=key))
+        print(tr("  Он привязан к домену файлом в корне сайта. Ключ от другого проекта здесь не сработает — протокол ответит 403."))
+        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=d['content'], a1=d['site'].rstrip('/'), a2=key))
     return 0
 
 
 def cmd_portfolio(args):
     specs = portfolio.read_portfolio(args.portfolio)
-    print(f"Проектов в портфеле: {len(specs)}")
+    print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
     results = []
     for spec in specs:
         if not spec.get("out") and args.reports:
@@ -672,10 +635,7 @@ def cmd_portfolio(args):
             print(f"  ✗ {spec['name']}: {result['error'].splitlines()[0]}")
             continue
         counts = result["counts"]
-        print(f"  · {spec['name']:<20} {result['pages']:>6} стр.  "
-              f"критично {counts.get('critical', 0):>4}  "
-              f"внимание {counts.get('warning', 0):>4}  "
-              f"[{result['profile']}]")
+        print(tr("  · {a0:<20} {a1:>6} стр.  критично {a2:>4}  внимание {a3:>4}  [{a4}]", a0=spec['name'], a1=result['pages'], a2=counts.get('critical', 0), a3=counts.get('warning', 0), a4=result['profile']))
 
     patterns = portfolio.common_patterns(results)
     uniques = portfolio.unique_findings(results)
@@ -683,19 +643,17 @@ def cmd_portfolio(args):
     page_patterns = [p for p in patterns if p.get("scope", "page") == "page"]
     site_patterns = [p for p in patterns if p.get("scope") == "site"]
     if page_patterns:
-        print("\nОбщие грабли на страницах (доля страниц проекта):")
+        print(tr("\nОбщие грабли на страницах (доля страниц проекта):"))
         for p in page_patterns[:10]:
             shares = ", ".join(f"{n} {p['detail'][n]['share']:.0%}" for n in p["projects"])
-            mark = "  ← похоже на непонастроенный порог" if p.get("threshold_suspect") else ""
-            print(f"  {p['code']:<24} {p['project_count']} проекта: {shares}{mark}")
+            mark = tr("  ← похоже на непонастроенный порог") if p.get("threshold_suspect") else ""
+            print(tr("  {a0:<24} {a1} проекта: {a2}{a3}", a0=p['code'], a1=p['project_count'], a2=shares, a3=mark))
         if any(p.get("threshold_suspect") for p in page_patterns):
-            print("    Порог, срабатывающий почти на всех страницах всех проектов, —"
-                  "\n    это вопрос к порогу, а не к страницам. Правится в indexgap.json"
-                  "\n    или профилем: `indexgap profiles`.")
+            print(tr("    Порог, срабатывающий почти на всех страницах всех проектов, —\n    это вопрос к порогу, а не к страницам. Правится в indexgap.json\n    или профилем: `indexgap profiles`."))
     else:
-        print("\nНи одна страничная находка не повторилась в двух проектах.")
+        print(tr("\nНи одна страничная находка не повторилась в двух проектах."))
     if site_patterns:
-        print("\nОбщее в настройке сайтов:")
+        print(tr("\nОбщее в настройке сайтов:"))
         for p in site_patterns[:6]:
             print(f"  {p['code']:<24} {', '.join(p['projects'])}")
 
@@ -706,16 +664,16 @@ def cmd_portfolio(args):
         "patterns": patterns,
         "unique": uniques,
     })
-    print(f"\nСводный отчёт: {path}\nДанные: {json_path}")
+    print(tr("\nСводный отчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     failed = [r for r in results if r["error"]]
     if failed:
-        print(f"Не проверено проектов: {len(failed)}")
+        print(tr("Не проверено проектов: {a0}", a0=len(failed)))
     total_critical = sum((r.get("counts") or {}).get("critical", 0) for r in results)
     return 1 if (args.strict and (failed or total_critical)) else 0
 
 
 def cmd_profiles(args):
-    print("Профили типов контента:\n")
+    print(tr("Профили типов контента:\n"))
     for name in sorted(profiles.PROFILES):
         profile = profiles.PROFILES[name]
         print(f"  {name}  —  {profile['title']}")
@@ -728,125 +686,144 @@ def cmd_profiles(args):
 
 # ── разбор аргументов ─────────────────────────────────────────────────────────
 
+def preset_language(argv=None):
+    """
+    Язык надо знать ДО того, как построен разборщик аргументов.
+
+    Тексты `--help` вычисляются в момент сборки парсера, то есть раньше, чем
+    argparse доберётся до `--lang`. Поэтому флаг вычитывается из argv руками:
+    иначе `indexgap --lang en check --help` печатал бы русскую справку.
+    """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    lang = ""
+    for i, item in enumerate(argv):
+        if item.startswith("--lang="):
+            lang = item.split("=", 1)[1]
+        elif item == "--lang" and i + 1 < len(argv):
+            lang = argv[i + 1]
+    return i18n.set_lang(lang)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
-        prog="indexgap", description="Контроль качества programmatic-конвейера")
+        prog="indexgap", description=tr("Контроль качества programmatic-конвейера"))
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p):
         p.add_argument("root", nargs="?", default="",
-                       help="каталог со страницами; по умолчанию из indexgap.json")
+                       help=tr("каталог со страницами; по умолчанию из indexgap.json"))
         p.add_argument("--site", default="",
-                       help="адрес сайта целиком; по умолчанию из indexgap.json")
-        p.add_argument("--home", help="URL главной; по умолчанию — сам --site")
+                       help=tr("адрес сайта целиком; по умолчанию из indexgap.json"))
+        p.add_argument("--home", help=tr("URL главной; по умолчанию — сам --site"))
         p.add_argument("--config", default="",
-                       help="путь к indexgap.json; по умолчанию ищется рядом со страницами")
+                       help=tr("путь к indexgap.json; по умолчанию ищется рядом со страницами"))
         p.add_argument("--profile", default="",
-                       help="тип контента: catalog, events, ugc, product. "
-                            "Меняет пороги и набор проверок — см. `indexgap profiles`")
+                       help=tr("тип контента: catalog, events, ugc, product. Меняет пороги и набор проверок — см. `indexgap profiles`"))
 
     p = sub.add_parser("init",
-                       help="установить в проект: скиллы для агента и конфиг")
-    p.add_argument("dir", nargs="?", default=".", help="каталог проекта")
-    p.add_argument("--site", default="", help="адрес сайта, если определить не удалось")
-    p.add_argument("--content", default="", help="каталог со страницами")
+                       help=tr("установить в проект: скиллы для агента и конфиг"))
+    p.add_argument("dir", nargs="?", default=".", help=tr("каталог проекта"))
+    p.add_argument("--site", default="", help=tr("адрес сайта, если определить не удалось"))
+    p.add_argument("--content", default="", help=tr("каталог со страницами"))
     p.add_argument("--profile", default="",
-                   help="тип контента: catalog, events, ugc, product")
-    p.add_argument("--dataset", default="", help="CSV с семантикой")
+                   help=tr("тип контента: catalog, events, ugc, product"))
+    p.add_argument("--dataset", default="", help=tr("CSV с семантикой"))
     p.add_argument("--key", action="store_true",
-                   help="сгенерировать новый ключ IndexNow для этого проекта")
+                   help=tr("сгенерировать новый ключ IndexNow для этого проекта"))
     p.add_argument("--agents", action="store_true",
-                   help="создать AGENTS.md для Codex, если его нет")
+                   help=tr("создать AGENTS.md для Codex, если его нет"))
     p.add_argument("--force", action="store_true",
-                   help="перезаписать существующий indexgap.json")
+                   help=tr("перезаписать существующий indexgap.json"))
     p.set_defaults(func=cmd_init)
 
-    p = sub.add_parser("plan", help="разобрать семантику и разложить заготовки под генерацию")
-    p.add_argument("dataset", help="CSV с семантикой")
-    p.add_argument("--keyword", default="keyword", help="колонка с ключом")
-    p.add_argument("--out-dir", default="content", help="куда класть заготовки")
-    p.add_argument("--pattern", default="{slug}/index.md", help="шаблон пути")
+    p = sub.add_parser("plan", help=tr("разобрать семантику и разложить заготовки под генерацию"))
+    p.add_argument("dataset", help=tr("CSV с семантикой"))
+    p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом"))
+    p.add_argument("--out-dir", default="content", help=tr("куда класть заготовки"))
+    p.add_argument("--pattern", default="{slug}/index.md", help=tr("шаблон пути"))
     p.add_argument("--min-words", type=int, default=350)
     p.add_argument("--min-filled", type=float, default=0.0,
-                   help="доля заполненных колонок, ниже которой строка отбраковывается "
-                        "(по умолчанию 0 — не отбраковывать)")
-    p.add_argument("--brief", help="файл со своим шаблоном брифа вместо стандартного")
-    p.add_argument("--json", help="куда записать разбор целиком")
-    p.add_argument("--write", action="store_true", help="действительно создать файлы")
+                   help=tr("доля заполненных колонок, ниже которой строка отбраковывается (по умолчанию 0 — не отбраковывать)"))
+    p.add_argument("--brief", help=tr("файл со своим шаблоном брифа вместо стандартного"))
+    p.add_argument("--json", help=tr("куда записать разбор целиком"))
+    p.add_argument("--write", action="store_true", help=tr("действительно создать файлы"))
     p.set_defaults(func=cmd_plan)
 
-    p = sub.add_parser("check", help="все локальные проверки и отчёт")
+    p = sub.add_parser("check", help=tr("все локальные проверки и отчёт"))
     common(p)
-    p.add_argument("--sitemap", help="путь или URL sitemap.xml для сверки")
-    p.add_argument("--indexed", action="append", metavar="[источник=]файл",
-                   help="выгрузка со списком страниц: панель вебмастера, Ahrefs, "
-                        "Semrush, Screaming Frog, GA4 и другие. CSV, XLSX, JSON "
-                        "или список адресов. Можно указывать несколько раз: "
-                        "--indexed google=gsc.csv --indexed ahrefs=pages.xlsx. "
-                        "Источник определяется сам; метка нужна, когда имя файла "
-                        "ни о чём не говорит")
-    p.add_argument("--gsc", help="то же, что --indexed google=... (для совместимости)")
+    p.add_argument("--sitemap", help=tr("путь или URL sitemap.xml для сверки"))
+    p.add_argument("--indexed", action="append", metavar=tr("[источник=]файл"),
+                   help=tr("выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4 и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит"))
+    p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
     p.add_argument("--out", default="indexgap-check.html")
-    p.add_argument("--dataset", help="семантика (CSV или XLSX) — включает сверку фактов с данными строк")
-    p.add_argument("--keyword", default="keyword", help="колонка с ключом в датасете")
-    p.add_argument("--robots", help="путь к robots.txt проекта")
-    p.add_argument("--no-content", action="store_true", help="пропустить проверки текста")
+    p.add_argument("--dataset", help=tr("семантика (CSV или XLSX) — включает сверку фактов с данными строк"))
+    p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом в датасете"))
+    p.add_argument("--robots", help=tr("путь к robots.txt проекта"))
+    p.add_argument("--no-content", action="store_true", help=tr("пропустить проверки текста"))
     p.add_argument("--no-aeo", action="store_true",
-                   help="пропустить проверки машинной читаемости")
+                   help=tr("пропустить проверки машинной читаемости"))
     p.add_argument("--strict", action="store_true",
-                   help="ненулевой код возврата при критичных находках — для CI")
+                   help=tr("ненулевой код возврата при критичных находках — для CI"))
     p.set_defaults(func=cmd_check)
 
-    p = sub.add_parser("sitemap", help="собрать sitemap с шардингом и честным lastmod")
+    p = sub.add_parser("sitemap", help=tr("собрать sitemap с шардингом и честным lastmod"))
     common(p)
-    p.add_argument("--out-dir", help="куда писать; по умолчанию рядом со страницами")
+    p.add_argument("--out-dir", help=tr("куда писать; по умолчанию рядом со страницами"))
     p.add_argument("--public-prefix", default="",
-                   help="путь, по которому файлы будут доступны на сайте, "
-                        "если --out-dir не корень публикации")
+                   help=tr("путь, по которому файлы будут доступны на сайте, если --out-dir не корень публикации"))
     p.set_defaults(func=cmd_sitemap)
 
-    p = sub.add_parser("notify", help="сообщить об изменившихся страницах через IndexNow")
+    p = sub.add_parser("notify", help=tr("сообщить об изменившихся страницах через IndexNow"))
     common(p)
     p.add_argument("--key", required=True,
-                   help="ключ IndexNow: 8–128 символов латиницы и цифр, "
-                        "который ты придумываешь сам")
-    p.add_argument("--key-location", help="URL файла ключа, если он не в корне")
-    p.add_argument("--out-dir", help="каталог публикации")
-    p.add_argument("--key-dir", help="куда положить файл ключа — это КОРЕНЬ САЙТА")
-    p.add_argument("--write-key", action="store_true", help="создать файл ключа")
+                   help=tr("ключ IndexNow: 8–128 символов латиницы и цифр, который ты придумываешь сам"))
+    p.add_argument("--key-location", help=tr("URL файла ключа, если он не в корне"))
+    p.add_argument("--out-dir", help=tr("каталог публикации"))
+    p.add_argument("--key-dir", help=tr("куда положить файл ключа — это КОРЕНЬ САЙТА"))
+    p.add_argument("--write-key", action="store_true", help=tr("создать файл ключа"))
     p.add_argument("--send", action="store_true",
-                   help="действительно отправить; без него — пробный прогон")
+                   help=tr("действительно отправить; без него — пробный прогон"))
     p.add_argument("--offline", action="store_true",
-                   help="не ходить за реестром участников, взять встроенный список")
+                   help=tr("не ходить за реестром участников, взять встроенный список"))
     p.set_defaults(func=cmd_notify)
 
     p = sub.add_parser("portfolio",
-                       help="один прогон по нескольким проектам и сводный разбор")
-    p.add_argument("portfolio", help="JSON с описанием проектов")
+                       help=tr("один прогон по нескольким проектам и сводный разбор"))
+    p.add_argument("portfolio", help=tr("JSON с описанием проектов"))
     p.add_argument("--out", default="indexgap-portfolio.html")
     p.add_argument("--reports", default="",
-                   help="каталог для отдельных отчётов по каждому проекту")
+                   help=tr("каталог для отдельных отчётов по каждому проекту"))
     p.add_argument("--strict", action="store_true",
-                   help="ненулевой код возврата при критичных находках — для CI")
+                   help=tr("ненулевой код возврата при критичных находках — для CI"))
     p.set_defaults(func=cmd_portfolio)
 
-    p = sub.add_parser("profiles", help="какие бывают типы контента и чем отличаются")
+    p = sub.add_parser("profiles", help=tr("какие бывают типы контента и чем отличаются"))
     p.set_defaults(func=cmd_profiles)
 
-    p = sub.add_parser("doctor", help="воронка: сгенерировано → sitemap → индексы поисковиков")
+    p = sub.add_parser("doctor", help=tr("воронка: сгенерировано → sitemap → индексы поисковиков"))
     common(p)
-    p.add_argument("--sitemap", help="путь или URL sitemap.xml")
-    p.add_argument("--indexed", action="append", metavar="[движок=]файл.csv",
-                   help="выгрузка индексации; несколько раз для разных поисковиков")
-    p.add_argument("--gsc", help="то же, что --indexed google=... (для совместимости)")
+    p.add_argument("--sitemap", help=tr("путь или URL sitemap.xml"))
+    p.add_argument("--indexed", action="append", metavar=tr("[движок=]файл.csv"),
+                   help=tr("выгрузка индексации; несколько раз для разных поисковиков"))
+    p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
     p.add_argument("--out", default="indexgap-doctor.html")
     p.set_defaults(func=cmd_doctor)
+    ap._subparsers_map = dict(sub.choices)
     return ap
 
 
 def main(argv=None):
     _setup_output()
-    args = build_parser().parse_args(argv)
+    preset_language(argv)
+    parser = build_parser()
+    # `--lang` принимается и до команды, и после неё: человек пишет
+    # `indexgap --lang en check` и `indexgap check --lang en` примерно поровну.
+    lang_help = tr("язык вывода: en или ru. По умолчанию — из INDEXGAP_LANG "
+                   "или системной локали, иначе английский")
+    parser.add_argument("--lang", choices=i18n.LANGS, help=lang_help)
+    for subparser in getattr(parser, "_subparsers_map", {}).values():
+        subparser.add_argument("--lang", choices=i18n.LANGS, help=lang_help)
+    args = parser.parse_args(argv)
     try:
         return args.func(args)
     except SourceError as exc:
@@ -861,7 +838,7 @@ def main(argv=None):
             pass
         return 0
     except KeyboardInterrupt:
-        print("\nПрервано.", file=sys.stderr)
+        print(tr("\nПрервано."), file=sys.stderr)
         return 130
 
 

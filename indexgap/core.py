@@ -31,6 +31,8 @@ from html.parser import HTMLParser
 from urllib.parse import (urljoin, urlparse, urldefrag, urlsplit, urlunsplit,
                           quote, unquote)
 
+from .i18n import tr
+
 # Содержимое этих тегов не является текстом страницы и не содержит ссылок,
 # по которым ходит краулер. `template` и `noscript` тоже: ссылка внутри
 # шаблона не существует, пока её не отрендерит скрипт.
@@ -224,13 +226,12 @@ def check_site_url(site: str) -> str:
     """
     site = (site or "").strip()
     if not site:
-        raise SourceError("Не указан адрес сайта. Добавь --site https://example.com")
+        raise SourceError(tr("Не указан адрес сайта. Добавь --site https://example.com"))
     parts = urlsplit(site)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         guess = site.split("//")[-1].strip("/")
         raise SourceError(
-            f"--site {site} — так не годится: нужен полный адрес со схемой.\n"
-            f"    Попробуй: --site https://{guess}")
+            tr("--site {a0} — так не годится: нужен полный адрес со схемой.\n    Попробуй: --site https://{a1}", a0=site, a1=guess))
     return site.rstrip("/") + "/"
 
 
@@ -272,7 +273,7 @@ def read_text(path: str) -> tuple:
         with open(path, "rb") as fh:
             data = fh.read()
     except OSError as exc:
-        raise SourceError(f"{path}: файл не читается ({exc.strerror or exc}).")
+        raise SourceError(tr("{a0}: файл не читается ({a1}).", a0=path, a1=exc.strerror or exc))
 
     for bom, encoding in BOMS:
         if data.startswith(bom):
@@ -299,7 +300,7 @@ def read_text(path: str) -> tuple:
             continue
         return text, _canonical_encoding(encoding)
     raise SourceError(
-        f"{path}: не удалось определить кодировку. Пересохрани файл в UTF-8.")
+        tr("{a0}: не удалось определить кодировку. Пересохрани файл в UTF-8.", a0=path))
 
 
 def open_text(path: str):
@@ -662,7 +663,7 @@ def load_page(path: str, root: str, base_url: str) -> Page:
     raw, encoding = read_text(path)
     notes = []
     if not is_utf8(encoding):
-        notes.append(f"файл прочитан как {encoding}, а не UTF-8")
+        notes.append(tr("файл прочитан как {a0}, а не UTF-8", a0=encoding))
 
     url = path_to_url(path, root, base_url)
     host = urlparse(base_url).netloc.lower()
@@ -676,9 +677,9 @@ def load_page(path: str, root: str, base_url: str) -> Page:
             meta = _parse_frontmatter(m.group(1))
             body = raw[m.end():]
         elif FRONTMATTER_OPEN.match(raw):
-            notes.append("фронтматтер открыт, но не закрыт: строка `---` в конце блока")
+            notes.append(tr("фронтматтер открыт, но не закрыт: строка `---` в конце блока"))
         elif raw.lstrip()[:3] == "---":
-            notes.append("фронтматтер не распознан")
+            notes.append(tr("фронтматтер не распознан"))
         matches = MD_LINK.findall(_strip_fences(body))
         hrefs = [href for _, href in matches]
         md_anchors = [text.strip() for text, _ in matches]
@@ -789,10 +790,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                                  (len(other.links), len(other.text))
                               else (other, page))
                 problems.append(
-                    f"{os.path.relpath(drop.path, root)} и "
-                    f"{os.path.relpath(keep.path, root)} дают один URL "
-                    f"{keep.url} — взят "
-                    f"{os.path.relpath(keep.path, root)}, второй пропущен")
+                    tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
                 if keep is page:
                     pages[pages.index(other)] = page
                     by_key[page.key] = page
