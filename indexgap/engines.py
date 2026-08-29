@@ -22,7 +22,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from .i18n import tr
+from .i18n import N_, tr
 
 REGISTRY_URL = "https://www.indexnow.org/searchengines.json"
 REGISTRY_CACHE = "engines.json"
@@ -60,8 +60,8 @@ FALLBACK_PARTICIPANTS = {
 # Кто НЕ участвует и что с этим делать. Показывается человеку явно:
 # молчаливое «отправлено» создаёт ложное ощущение, что покрыты все.
 NON_PARTICIPANTS = {
-    "google": tr("не поддерживает IndexNow. Остаются sitemap и Search Console — проверка индексации в отчёте, отправка через интерфейс."),
-    "baidu": tr("своя система подачи, требует отдельной регистрации."),
+    "google": N_("не поддерживает IndexNow. Остаются sitemap и Search Console — проверка индексации в отчёте, отправка через интерфейс."),
+    "baidu": N_("своя система подачи, требует отдельной регистрации."),
 }
 
 
@@ -175,5 +175,5 @@ def describe_coverage(engines_seen: list) -> list:
     seen = {e.lower() for e in engines_seen if e}
     for engine, why in NON_PARTICIPANTS.items():
         if engine not in seen:
-            notes.append(f"{engine}: {why}")
+            notes.append(f"{engine}: {tr(why)}")
     return notes

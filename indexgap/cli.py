@@ -20,9 +20,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
-from . import (aeo, checks, content, doctor, engines, freshness, generate,
+from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
                install, portfolio, profiles, publish, report, settings, sources)
 from . import i18n
 from .i18n import tr
@@ -202,7 +203,7 @@ def _collect_indexed(args) -> tuple:
         print(tr("Индексация — {a0}", a0=summary))
     if by_source:
         summary = ", ".join(
-            f"{n} ({sources.KIND_TITLE[sources.kind_of(n)]}): {len(u)}"
+            f"{n} ({tr(sources.KIND_TITLE[sources.kind_of(n)])}): {len(u)}"
             for n, u in sorted(by_source.items()))
         print(tr("Прочие источники — {a0}", a0=summary))
     for line in sources.describe(list(by_engine) + list(by_source)):
@@ -253,7 +254,8 @@ def cmd_check(args):
     project = settings.resolve(args.root, pages, rows, args.keyword, args.config)
     project = profiles.apply(project, args.profile or project.get("profile"))
     _describe_project(project, rows)
-    print(tr("Профиль — {a0} ({a1})", a0=project['_profile_title'], a1=project['_profile']))
+    print(tr("Профиль — {a0} ({a1})", a0=tr(project['_profile_title']),
+             a1=project['_profile']))
 
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
@@ -355,7 +357,7 @@ def _print_first_things(issues):
         return
     print(tr("Чинить в этом порядке:"))
     for code, count in counts.most_common(3):
-        print(f"  {count:>5}  {code} — {report.CODE_HELP.get(code, '')[:80]}")
+        print(f"  {count:>5}  {code} — {report._help(code)[:80]}")
 
 
 def _guess_robots(args):
@@ -552,7 +554,7 @@ def cmd_plan(args):
         print(tr("Разбор целиком: {a0}", a0=args.json))
 
     if args.write:
-        brief = generate.DEFAULT_BRIEF
+        brief = tr(generate.DEFAULT_BRIEF)
         if args.brief:
             from .core import read_text
             brief, _ = read_text(args.brief)
@@ -672,14 +674,134 @@ def cmd_portfolio(args):
     return 1 if (args.strict and (failed or total_critical)) else 0
 
 
+def cmd_cite(args):
+    """
+    Замер цитируемости в ИИ-поиске.
+
+    Единственная команда пакета, которой нужны ключи и деньги. Поэтому она
+    по умолчанию ничего не отправляет: сначала показывает, кого и о чём
+    спросит и сколько это будет стоить вызовов.
+    """
+    project = apply_project_defaults(args)
+    domain = args.domain or ""
+    if not domain and getattr(args, "site", ""):
+        domain = re.sub(r"^https?://", "", args.site).split("/")[0]
+    if not domain:
+        raise SourceError(
+            tr("Не указан домен, по которому считать цитируемость.\n"
+               "    --domain example.com, либо `site` в indexgap.json."))
+
+    if args.prompts:
+        prompts = cite.read_prompts(args.prompts)
+    elif args.prompt:
+        prompts = list(args.prompt)
+    elif getattr(args, "dataset", ""):
+        rows = _dataset_rows(args)
+        prompts = cite.prompts_from_keywords(rows, args.keyword, args.limit)
+        if prompts:
+            print(tr("Вопросы взяты из семантики: {a0} шт.", a0=len(prompts)))
+    else:
+        prompts = []
+    if not prompts:
+        raise SourceError(
+            tr("Не заданы вопросы. Цитируют в ответе на вопрос пользователя, "
+               "а не на запрос о компании, поэтому вопросы нужны настоящие.\n"
+               "    --prompts questions.txt, или --prompt \"…\" несколько раз,\n"
+               "    или --dataset keywords.csv, чтобы взять их из семантики."))
+
+    chosen = args.provider or cite.available()
+    unknown = [p for p in chosen if p not in cite.PROVIDERS]
+    if unknown:
+        raise SourceError(tr("Неизвестный провайдер: {a0}. Доступны: {a1}",
+                             a0=", ".join(unknown),
+                             a1=", ".join(sorted(cite.PROVIDERS))))
+    ready = [p for p in chosen if p in cite.available()]
+    if not ready:
+        print(tr("Ни одного ключа не найдено. Нужен хотя бы один:"))
+        for line in cite.missing_keys(chosen):
+            print(f"  {line}")
+        print(tr("\n  Это единственная часть пакета, которой нужны ключи "
+                 "и деньги. Всё остальное работает без них."))
+        return 2
+
+    calls = len(prompts) * len(ready) * max(1, args.runs)
+    print(tr("Домен: {a0}", a0=domain))
+    print(tr("Спросим: {a0}", a0=", ".join(cite.PROVIDERS[p]["title"] for p in ready)))
+    print(tr("Вопросов: {a0}   Прогонов на вопрос: {a1}   Всего вызовов: {a2}",
+             a0=len(prompts), a1=args.runs, a2=calls))
+    for note in cite.notes_for(ready):
+        print(f"  ! {note}")
+
+    if not args.send:
+        print(tr("\nЭто пробный прогон: ничего не отправлено. Чтобы спросить "
+                 "по-настоящему — добавь --send. Вызовы платные, счёт придёт "
+                 "на твои ключи."))
+        for prompt in prompts[:10]:
+            print(f"  · {prompt}")
+        if len(prompts) > 10:
+            print(tr("  … и ещё {a0}", a0=len(prompts) - 10))
+        return 0
+
+    done = {"n": 0}
+
+    def step(prompt, provider):
+        done["n"] += 1
+        print(f"  {done['n']}/{calls}  {provider}", end="\r", flush=True)
+
+    result = cite.measure(prompts, domain, args.brand, ready, args.runs,
+                          cfg=(_project_config(project) or {}).get("cite"),
+                          on_step=step)
+    print(" " * 40, end="\r")
+
+    by_provider = {}
+    for row in result["results"]:
+        bucket = by_provider.setdefault(row["provider"], [0, 0])
+        bucket[0] += row["cited"]
+        bucket[1] += row["runs"]
+    print(tr("\nДоля прогонов, где домен попал в источники:"))
+    for name in sorted(by_provider):
+        hit, total = by_provider[name]
+        share = hit / total if total else 0
+        print(f"  {cite.PROVIDERS[name]['title']:<18} {hit}/{total}  ({share:.0%})")
+
+    weak = [r for r in result["results"] if r["cited"] == 0]
+    if weak:
+        print(tr("\nВопросы, где не процитировали ни разу: {a0} из {a1}",
+                 a0=len(weak), a1=len(result["results"])))
+        for row in weak[:8]:
+            rivals = ", ".join(h for h, _ in row["top_competitors"][:3])
+            print(f"  · [{row['provider']}] {row['prompt'][:60]}")
+            if rivals:
+                print(tr("      вместо вас: {a0}", a0=rivals))
+    for line in result["errors"][:5]:
+        print(f"  ! {line}")
+
+    path = os.path.splitext(check_out_path(args.out))[0] + ".json"
+    _write_json(path, result)
+    print(tr("\nДанные: {a0}", a0=path))
+    return 0
+
+
+def _project_config(path):
+    if not path:
+        return {}
+    try:
+        from .core import read_text
+        text, _ = read_text(path)
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except Exception:                            # noqa: BLE001
+        return {}
+
+
 def cmd_profiles(args):
     print(tr("Профили типов контента:\n"))
     for name in sorted(profiles.PROFILES):
         profile = profiles.PROFILES[name]
-        print(f"  {name}  —  {profile['title']}")
-        print(f"      {profile['about']}")
+        print(f"  {name}  —  {tr(profile['title'])}")
+        print(f"      {tr(profile['about'])}")
         for note in profile["notes"]:
-            print(f"      · {note}")
+            print(f"      · {tr(note)}")
         print()
     return 0
 
@@ -796,6 +918,25 @@ def build_parser():
     p.add_argument("--strict", action="store_true",
                    help=tr("ненулевой код возврата при критичных находках — для CI"))
     p.set_defaults(func=cmd_portfolio)
+
+    p = sub.add_parser("cite",
+                       help=tr("замер цитируемости в ИИ-поиске (нужны свои ключи)"))
+    p.add_argument("--domain", default="", help=tr("домен, который ищем в источниках"))
+    p.add_argument("--site", default="", help=tr("адрес сайта целиком; по умолчанию из indexgap.json"))
+    p.add_argument("--brand", default="", help=tr("название бренда — ищется в тексте ответа"))
+    p.add_argument("--prompts", default="", help=tr("файл с вопросами, по одному в строке"))
+    p.add_argument("--prompt", action="append", help=tr("вопрос; можно повторять"))
+    p.add_argument("--dataset", default="", help=tr("взять вопросы из семантики"))
+    p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом в датасете"))
+    p.add_argument("--limit", type=int, default=10, help=tr("сколько вопросов взять из семантики"))
+    p.add_argument("--provider", action="append", choices=sorted(cite.PROVIDERS),
+                   help=tr("кого спрашивать; по умолчанию всех, чей ключ найден"))
+    p.add_argument("--runs", type=int, default=3,
+                   help=tr("прогонов на вопрос: ответ недетерминирован, одного мало"))
+    p.add_argument("--send", action="store_true",
+                   help=tr("действительно спросить; без него — пробный прогон"))
+    p.add_argument("--out", default="indexgap-cite.json")
+    p.set_defaults(func=cmd_cite)
 
     p = sub.add_parser("profiles", help=tr("какие бывают типы контента и чем отличаются"))
     p.set_defaults(func=cmd_profiles)

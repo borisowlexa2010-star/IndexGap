@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.0 — 2026-08-29
+
+`indexgap cite` — measuring whether AI search cites you, and one bug the work
+uncovered.
+
+* **New `cite` command.** Asks Perplexity, the OpenAI Responses API, the Gemini
+  API and Grok a set of real user questions and counts how often your domain
+  comes back in the sources. It is the only part of the package that needs API
+  keys and costs money, so it is a separate module, off by default, and sends
+  nothing without `--send` — a dry run first states how many calls it would
+  make and on whose bill.
+* **It reports a share, never yes/no.** These answers are not deterministic:
+  the same question twice returns different sources. Each question is asked
+  several times and the table shows how many runs cited you. It also records
+  who was cited instead, and brand mentions without a link.
+* **It never claims the product.** What is measured is the API. OpenAI's own
+  documentation says search is triggered by a tool and the model decides
+  whether to search, which is not how ChatGPT behaves; Gemini's API grounding
+  is not AI Overviews. Nowhere does the output say "ChatGPT cites you"; it says
+  how many runs out of N through a given API returned your domain. Every report
+  repeats that being cited is driven off-site — 0.66–0.74 correlation with
+  mentions elsewhere against 0.19 with page count.
+* **Fixed: `tr()` at module level froze the language at import.** Tables of
+  finding descriptions, profile titles and source labels were translated when
+  the module loaded — before `--lang` was parsed. `indexgap profiles --lang ru`
+  printed a Russian heading with English profile names. A half-translated report
+  looks broken, which is worse than either language. Those tables now hold the
+  key, marked with a no-op `N_()` so the catalogue still sees them, and are
+  translated at print time. 20 new tests (281 total).
+
 ## 1.2.0 — 2026-08-29
 
 Multilingual and multi-region sites. The previous versions did not support
