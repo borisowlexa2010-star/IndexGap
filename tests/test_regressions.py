@@ -501,6 +501,20 @@ class TestGenerate(Fixture):
         data = generate.read_dataset(os.path.join(self.dir, "k.csv"))
         self.assertEqual(data["rows"][0]["keyword"], "аренда, дома москва")
 
+    def test_single_column_delimiter_never_collides_with_the_content(self):
+        """Разделитель для одной колонки берётся из символов, которых в файле нет.
+
+        NUL годился бы лучше всех, но csv до 3.11 считает его «разделитель не
+        задан» и роняет чтение, а на 3.11+ молча резал бы значение по нему.
+        Наружу разделитель не выдаётся: у файла с одной колонкой его нет.
+        """
+        self.write("k.csv", "keyword\nаренда \x1f дома москва\n")
+        data = generate.read_dataset(os.path.join(self.dir, "k.csv"))
+        self.assertEqual(len(data["rows"]), 1)
+        self.assertEqual(data["rows"][0]["keyword"], "аренда \x1f дома москва")
+        self.assertEqual(data["delimiter"], "")
+        self.assertEqual(data["problems"], [])
+
     def test_longer_key_is_not_a_synonym(self):
         pairs = [("виза в сингапур", "виза в сингапур для россиян"),
                  ("iphone 15", "iphone 15 pro"),
