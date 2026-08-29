@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "indexgap"
+version = "0.6.0"
+description = "Lint your programmatic SEO pipeline — from keywords to indexed pages. No dependencies."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["seo", "programmatic-seo", "sitemap", "indexnow", "aeo", "geo"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Internet :: WWW/HTTP :: Site Management",
+]
+dependencies = []
+
+[project.scripts]
+indexgap = "indexgap.cli:main"
+
+[tool.setuptools]
+packages = ["indexgap"]
+
+[tool.setuptools.package-data]
+indexgap = ["skills/*/SKILL.md"]

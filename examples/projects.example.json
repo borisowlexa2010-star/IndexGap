@@ -1,0 +1,34 @@
+{
+  "_комментарий": "Описание портфеля. Пути — относительно этого файла, поэтому его удобно положить рядом с репозиториями. Запуск: indexgap portfolio projects.json --reports ./reports",
+
+  "projects": [
+    {
+      "name": "visa",
+      "root": "../multilingual-site/content",
+      "site": "https://multilingual-site.example",
+      "profile": "catalog",
+      "dataset": "../multilingual-site/keywords.csv",
+      "robots": "../multilingual-site/public/robots.txt",
+      "sitemap": "../multilingual-site/public/sitemap.xml"
+    },
+    {
+      "name": "events-site",
+      "root": "../events-site/src/content/events",
+      "site": "https://events-site.example",
+      "profile": "events",
+      "dataset": "../events-site/data/events.csv"
+    },
+    {
+      "name": "news-site",
+      "root": "../news-site/content",
+      "site": "https://news-site.example",
+      "profile": "ugc"
+    },
+    {
+      "name": "relocation-site",
+      "root": "../relocation-site/out",
+      "site": "https://relocation-site.io",
+      "profile": "product"
+    }
+  ]
+}

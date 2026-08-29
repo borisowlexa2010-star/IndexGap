@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor the package promises; 3.13 is the ceiling it must not break on.
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run the suite
+        run: python -m unittest discover -s tests -v
+      - name: Check the CLI starts and every command is reachable
+        run: |
+          python -m indexgap --help
+          for cmd in init plan check sitemap notify portfolio profiles doctor; do
+            python -m indexgap "$cmd" --help > /dev/null
+          done

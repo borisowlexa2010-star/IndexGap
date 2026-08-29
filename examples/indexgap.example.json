@@ -1,0 +1,41 @@
+{
+  "_комментарий": "Положите этот файл как indexgap.json в корень проекта — или получите его командой `indexgap init`. Все поля необязательные.",
+  "profile": "catalog",
+  "site": "https://example.com",
+  "pages": "./content",
+  "dataset": "./keywords.csv",
+  "language": "auto",
+  "fact_units": [],
+  "extra_fact_units": [
+    "шт",
+    "чел"
+  ],
+  "vague_anchors": [
+    "здесь",
+    "подробнее",
+    "read more",
+    "click here"
+  ],
+  "checks": {
+    "thin_words": 250,
+    "near_duplicate": 0.8,
+    "similar": 0.55,
+    "boilerplate_min_pages": 8,
+    "max_click_depth": 3,
+    "title_min": 20,
+    "title_max": 65,
+    "description_min": 70,
+    "description_max": 165
+  },
+  "aeo": {
+    "answer_min": 40,
+    "answer_max": 320,
+    "shell_words": 100,
+    "question_share": 0.3
+  },
+  "content": {
+    "template_share": 0.7,
+    "min_anchor_chars": 8,
+    "min_pages_for_seams": 5
+  }
+}
