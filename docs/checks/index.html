@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Every check indexgap runs</title>
+<meta name="description" content="Reference for all 58 checks in indexgap: level, trigger and fix for invented numbers, indexing, duplicates, hreflang and AI-search readiness.">
+<link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/index.html">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Every check indexgap runs">
+<meta property="og:description" content="Reference for all 58 checks in indexgap: level, trigger and fix for invented numbers, indexing, duplicates, hreflang and AI-search readiness.">
+<meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/index.html">
+<meta name="author" content="Alexey Borisov">
+<script type="application/ld+json">{
+ "@context":"https://schema.org","@type":"TechArticle",
+ "headline":"Every check indexgap runs","description":"Reference for all 58 checks in indexgap: level, trigger and fix for invented numbers, indexing, duplicates, hreflang and AI-search readiness.",
+ "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/index.html","inLanguage":"en",
+ "datePublished":"2026-08-29","dateModified":"2026-08-29",
+ "author":{"@type":"Person","name":"Alexey Borisov"},
+ "publisher":{"@type":"Organization","name":"indexgap"},
+ "isPartOf":{"@type":"WebSite","name":"indexgap","url":"https://borisowlexa2010-star.github.io/IndexGap"}
+}</script>
+<style>
+:root{--paper:#f7f8f8;--card:#fff;--soft:#eceff0;--ink:#151c1e;--ink2:#42504f;
+--ink3:#70807e;--rule:#d6dedd;--acc:#0d6b60;--accbg:#dbebe8;
+--crit:#9c3a25;--critbg:#f5ded8;--warn:#8a5410;--warnbg:#f3e7d2;--info:#3a5f7a;--infobg:#dee8ef;
+--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){
+--paper:#0f1615;--card:#161e1d;--soft:#1c2625;--ink:#e2eae8;--ink2:#a6b4b1;
+--ink3:#798683;--rule:#283432;--acc:#53c2ad;--accbg:#15322c;
+--crit:#e28b72;--critbg:#37211b;--warn:#d9a463;--warnbg:#32271a;--info:#8fb6cf;--infobg:#1b2831;}}
+:root[data-theme=dark]{
+--paper:#0f1615;--card:#161e1d;--soft:#1c2625;--ink:#e2eae8;--ink2:#a6b4b1;
+--ink3:#798683;--rule:#283432;--acc:#53c2ad;--accbg:#15322c;
+--crit:#e28b72;--critbg:#37211b;--warn:#d9a463;--warnbg:#32271a;--info:#8fb6cf;--infobg:#1b2831;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 5rem}
+a{color:var(--acc)}
+a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:2px}
+nav.top{display:flex;gap:1.1rem;flex-wrap:wrap;font-size:.86rem;padding-bottom:1.1rem;
+margin-bottom:2rem;border-bottom:1px solid var(--rule)}
+nav.top a{text-decoration:none;color:var(--ink2)}
+nav.top a:hover{color:var(--acc)}
+nav.top .brand{font-family:var(--mono);font-weight:600;color:var(--ink)}
+h1{font-size:2.05rem;line-height:1.15;letter-spacing:-.02em;margin:.2rem 0 .6rem;text-wrap:balance}
+h2{font-size:1.28rem;letter-spacing:-.01em;margin:2.4rem 0 .7rem}
+h3{font-size:1.03rem;margin:1.7rem 0 .4rem}
+p{margin:.75rem 0}
+.lede{font-size:1.1rem;color:var(--ink2);margin-bottom:1.6rem}
+code{font-family:var(--mono);font-size:.87em;background:var(--soft);padding:.12em .38em;border-radius:3px}
+pre{background:var(--soft);padding:.9rem 1rem;border-radius:6px;overflow-x:auto;font-size:.86rem}
+pre code{background:none;padding:0}
+.tag{display:inline-block;font-family:var(--mono);font-size:.7rem;text-transform:uppercase;
+letter-spacing:.07em;padding:.16rem .45rem;border-radius:3px;background:var(--soft);color:var(--ink3)}
+.tag.critical{background:var(--critbg);color:var(--crit)}
+.tag.warning{background:var(--warnbg);color:var(--warn)}
+.tag.info{background:var(--infobg);color:var(--info)}
+.tag.acc{background:var(--accbg);color:var(--acc)}
+.meta{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1.3rem}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:7px;padding:1rem 1.15rem;margin:1rem 0}
+.card h3{margin-top:0}
+.fix{border-left:3px solid var(--acc);background:var(--accbg);padding:.85rem 1.05rem;border-radius:0 6px 6px 0;margin:1rem 0}
+table{width:100%;border-collapse:collapse;font-size:.92rem;margin:1rem 0}
+th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+.scroll{overflow-x:auto}
+ul.plain{list-style:none;padding:0;margin:1rem 0;display:grid;gap:.5rem}
+ul.plain li{display:flex;gap:.7rem;align-items:baseline}
+ul.plain a{font-family:var(--mono);font-size:.88rem;text-decoration:none;flex:none}
+ul.plain span{color:var(--ink2);font-size:.9rem}
+footer{margin-top:4rem;padding-top:1.2rem;border-top:1px solid var(--rule);
+font-size:.85rem;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="top">
+  <a class="brand" href="../index.html">indexgap</a>
+  <a href="../checks/index.html">Checks</a>
+  <a href="../commands/index.html">Commands</a>
+  <a href="https://github.com/borisowlexa2010-star/IndexGap">GitHub</a>
+</nav>
+
+
+<h1>Every check indexgap runs</h1>
+<p class="lede">58 checks across 8 families —
+17 critical, 18 warning, 20 info.
+Each has its own page: what triggers it, why it is worth fixing, and the
+imperative fix the package hands to a person or an agent.</p>
+<p>The list is generated from the package's own registry at build time, so it is
+the same set of checks the installed version runs — not a description of them.</p>
+<h2 id="invented-facts">Invented facts</h2><p>The checks that compare what a page says against the data row that produced it. This is the part of the package that has no equivalent in a general site auditor, and the reason indexgap will not write page text for you: a generator that supplied the numbers could not then check them.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="unsupported-number.html"><code>unsupported-number</code></a></td><td><span class="tag critical">critical</span></td><td>в тексте есть числа, которых нет в данных:</td></tr><tr><td><a href="check-by-eye.html"><code>check-by-eye</code></a></td><td><span class="tag info">info</span></td><td>числа, которых нет в данных — просмотри глазами:</td></tr><tr><td><a href="source-note.html"><code>source-note</code></a></td><td><span class="tag info">info</span></td><td>source note</td></tr><tr><td><a href="still-draft.html"><code>still-draft</code></a></td><td><span class="tag critical">critical</span></td><td>status: … — страница помечена как незаконченная</td></tr><tr><td><a href="brief-left.html"><code>brief-left</code></a></td><td><span class="tag info">info</span></td><td>brief left</td></tr></tbody></table></div><h2 id="indexing">Indexing and reachability</h2><p>Whether a page can be found, crawled and kept in the index at all. Nothing further down this list matters on a page that fails here.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="noindex.html"><code>noindex</code></a></td><td><span class="tag critical">critical</span></td><td>страница закрыта от индексации — если это не задумано, трафика не будет</td></tr><tr><td><a href="nosnippet.html"><code>nosnippet</code></a></td><td><span class="tag critical">critical</span></td><td>запрещён сниппет: страница может быть в индексе, но в ответы ИИ-поиска и в расширенную выдачу не попадёт</td></tr><tr><td><a href="canonical-elsewhere.html"><code>canonical-elsewhere</code></a></td><td><span class="tag critical">critical</span></td><td>canonical указывает на … — страница отдаёт вес другой</td></tr><tr><td><a href="orphan.html"><code>orphan</code></a></td><td><span class="tag critical">critical</span></td><td>ни одна внутренняя ссылка не ведёт на страницу</td></tr><tr><td><a href="unreachable.html"><code>unreachable</code></a></td><td><span class="tag critical">critical</span></td><td>до страницы нельзя дойти от главной по ссылкам</td></tr><tr><td><a href="deep.html"><code>deep</code></a></td><td><span class="tag warning">warning</span></td><td>… кликов от главной — краулер доходит редко</td></tr><tr><td><a href="js-shell.html"><code>js-shell</code></a></td><td><span class="tag critical">critical</span></td><td>в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют</td></tr></tbody></table></div><h2 id="content">Content quality at scale</h2><p>The failures that only appear when pages are compared with each other. A single generated page always looks fine; it is the set that gives the pipeline away.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="thin.html"><code>thin</code></a></td><td><span class="tag warning">warning</span></td><td>объём текста ≈ … — тонкая страница</td></tr><tr><td><a href="low-uniqueness.html"><code>low-uniqueness</code></a></td><td><span class="tag critical">critical</span></td><td>только {a0:.0%} текста уникально — остальное шаблон</td></tr><tr><td><a href="template-skeleton.html"><code>template-skeleton</code></a></td><td><span class="tag warning">warning</span></td><td>те же … заголовков в том же порядке ещё у … страниц</td></tr><tr><td><a href="same-opening.html"><code>same-opening</code></a></td><td><span class="tag warning">warning</span></td><td>первые слова текста совпадают ещё у … страниц</td></tr><tr><td><a href="near-duplicate.html"><code>near-duplicate</code></a></td><td><span class="tag critical">critical</span></td><td>совпадает на {a0:.0%} со страницей …… — поисковик оставит в индексе одну</td></tr><tr><td><a href="similar.html"><code>similar</code></a></td><td><span class="tag info">info</span></td><td>похожа на {a0:.0%} на ……</td></tr><tr><td><a href="long-paragraph.html"><code>long-paragraph</code></a></td><td><span class="tag info">info</span></td><td>… абзац(ев) длиннее … символов — такой блок трудно процитировать целиком</td></tr></tbody></table></div><h2 id="head">Titles, descriptions and headings</h2><p>The fields a search engine reads first and a person sees before deciding to click. On a generated site each of these is written once, in a template, and is therefore either right everywhere or wrong everywhere.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="no-title.html"><code>no-title</code></a></td><td><span class="tag critical">critical</span></td><td>нет title</td></tr><tr><td><a href="title-short.html"><code>title-short</code></a></td><td><span class="tag warning">warning</span></td><td>title … символов</td></tr><tr><td><a href="title-long.html"><code>title-long</code></a></td><td><span class="tag info">info</span></td><td>title … символов, обрежется в выдаче</td></tr><tr><td><a href="duplicate-title.html"><code>duplicate-title</code></a></td><td><span class="tag warning">warning</span></td><td>такой же title ещё у … страниц</td></tr><tr><td><a href="no-description.html"><code>no-description</code></a></td><td><span class="tag warning">warning</span></td><td>нет meta description</td></tr><tr><td><a href="description-length.html"><code>description-length</code></a></td><td><span class="tag info">info</span></td><td>description … символов</td></tr><tr><td><a href="duplicate-description.html"><code>duplicate-description</code></a></td><td><span class="tag info">info</span></td><td>такой же description ещё у … страниц</td></tr><tr><td><a href="no-h1.html"><code>no-h1</code></a></td><td><span class="tag warning">warning</span></td><td>нет H1 — поисковику нечем определить, о чём страница</td></tr><tr><td><a href="many-h1.html"><code>many-h1</code></a></td><td><span class="tag info">info</span></td><td>H1 на странице …, нужен один</td></tr><tr><td><a href="no-headings.html"><code>no-headings</code></a></td><td><span class="tag warning">warning</span></td><td>на странице нет заголовков</td></tr><tr><td><a href="no-structure.html"><code>no-structure</code></a></td><td><span class="tag info">info</span></td><td>в тексте нет ни списков, ни таблиц — структурные элементы повышают шанс попасть в ответ</td></tr><tr><td><a href="img-no-alt.html"><code>img-no-alt</code></a></td><td><span class="tag info">info</span></td><td>… изображени(й) без alt</td></tr><tr><td><a href="vague-anchor.html"><code>vague-anchor</code></a></td><td><span class="tag info">info</span></td><td>неинформативные анкоры:</td></tr></tbody></table></div><h2 id="hreflang">hreflang and language versions</h2><p>hreflang is mutual, self-inclusive and per-page — three properties a template gets wrong in three different ways. These checks validate the cluster as a whole rather than the tag in isolation.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="hreflang-missing.html"><code>hreflang-missing</code></a></td><td><span class="tag warning">warning</span></td><td>на сайте есть версии на разных языках, а у этой</td></tr><tr><td><a href="hreflang-no-self.html"><code>hreflang-no-self</code></a></td><td><span class="tag critical">critical</span></td><td>в кластере нет ссылки на саму эту страницу —</td></tr><tr><td><a href="hreflang-no-return.html"><code>hreflang-no-return</code></a></td><td><span class="tag critical">critical</span></td><td>страница ссылается на …, а та не ссылается</td></tr><tr><td><a href="hreflang-bad-code.html"><code>hreflang-bad-code</code></a></td><td><span class="tag warning">warning</span></td><td>у альтернативы «…» пустой href</td></tr><tr><td><a href="hreflang-unknown-target.html"><code>hreflang-unknown-target</code></a></td><td><span class="tag info">info</span></td><td>альтернатива … не найдена среди разобранных</td></tr><tr><td><a href="hreflang-lang-mismatch.html"><code>hreflang-lang-mismatch</code></a></td><td><span class="tag warning">warning</span></td><td>self-ссылка объявлена как «…», а страница</td></tr><tr><td><a href="hreflang-canonical-conflict.html"><code>hreflang-canonical-conflict</code></a></td><td><span class="tag critical">critical</span></td><td>canonical ведёт на версию другого языка (…) —</td></tr><tr><td><a href="hreflang-target-blocked.html"><code>hreflang-target-blocked</code></a></td><td><span class="tag warning">warning</span></td><td>альтернатива … закрыта от индексации или</td></tr><tr><td><a href="hreflang-static-cluster.html"><code>hreflang-static-cluster</code></a></td><td><span class="tag critical">critical</span></td><td>… страниц из … объявляют один и тот же набор</td></tr></tbody></table></div><h2 id="aeo">AI search and answer extraction</h2><p>AI search retrieves passages and quotes them. These checks ask whether a page contains anything that survives being lifted out of it.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="no-question-headings.html"><code>no-question-headings</code></a></td><td><span class="tag info">info</span></td><td>вопросов среди подзаголовков … из … — формат «вопрос → ответ» цитируется заметно чаще</td></tr><tr><td><a href="no-answer.html"><code>no-answer</code></a></td><td><span class="tag warning">warning</span></td><td>не нашёл ни одного абзаца — цитировать нечего</td></tr><tr><td><a href="answer-short.html"><code>answer-short</code></a></td><td><span class="tag info">info</span></td><td>первый абзац короче … символов — на самостоятельный ответ не тянет</td></tr><tr><td><a href="answer-long.html"><code>answer-long</code></a></td><td><span class="tag info">info</span></td><td>первый абзац … символов — для цитирования лучше уложить ответ в …</td></tr><tr><td><a href="answer-preamble.html"><code>answer-preamble</code></a></td><td><span class="tag warning">warning</span></td><td>первый абзац начинается с разгона «……» — ИИ-поиск цитирует ответ, а не вступление</td></tr><tr><td><a href="jsonld-broken.html"><code>jsonld-broken</code></a></td><td><span class="tag warning">warning</span></td><td>блок JSON-LD не парсится (…) — для поисковика его просто нет</td></tr><tr><td><a href="jsonld-no-type.html"><code>jsonld-no-type</code></a></td><td><span class="tag info">info</span></td><td>в блоке JSON-LD нет @type</td></tr><tr><td><a href="jsonld-faq-invisible.html"><code>jsonld-faq-invisible</code></a></td><td><span class="tag warning">warning</span></td><td>… вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций</td></tr><tr><td><a href="no-author.html"><code>no-author</code></a></td><td><span class="tag info">info</span></td><td>не указан автор или организация — сигнал E-E-A-T</td></tr><tr><td><a href="no-date.html"><code>no-date</code></a></td><td><span class="tag info">info</span></td><td>нет машиночитаемой даты публикации или обновления</td></tr><tr><td><a href="ai-crawler-blocked.html"><code>ai-crawler-blocked</code></a></td><td><span class="tag info">info</span></td><td>ai crawler blocked</td></tr></tbody></table></div><h2 id="robots">robots.txt</h2><p>Site-level findings: one file, one fix, reported once rather than per page.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="robots-blocks-all.html"><code>robots-blocks-all</code></a></td><td><span class="tag critical">critical</span></td><td>Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком</td></tr><tr><td><a href="robots-no-sitemap.html"><code>robots-no-sitemap</code></a></td><td><span class="tag info">info</span></td><td>в robots.txt не указан Sitemap — строка `Sitemap: https://…/sitemap.xml` стоит копейки</td></tr><tr><td><a href="robots-unreadable.html"><code>robots-unreadable</code></a></td><td><span class="tag warning">warning</span></td><td>robots.txt не прочитан: …</td></tr><tr><td><a href="no-robots.html"><code>no-robots</code></a></td><td><span class="tag info">info</span></td><td>robots.txt не найден — это не ошибка, но и не контроль: передай путь через --robots, чтобы проверить</td></tr></tbody></table></div><h2 id="freshness">Freshness</h2><p>Pages whose usefulness has an expiry date, still open for indexing after it passed.</p><div class="scroll"><table><thead><tr><th>Check</th><th>Level</th><th>What it reports</th></tr></thead><tbody><tr><td><a href="stale-event.html"><code>stale-event</code></a></td><td><span class="tag critical">critical</span></td><td>дата … прошла более … дней назад, а страница открыта для индексации — поисковик показывает людям то, чего уже нет. Закрой noindex, поставь редирект на актуальную или перепиши в отчёт о прошедшем</td></tr><tr><td><a href="stale-closed.html"><code>stale-closed</code></a></td><td><span class="tag info">info</span></td><td>дата … прошла, страница уже закрыта от индексации — это правильно</td></tr></tbody></table></div>
+
+<footer>
+  <p>By Alexey Borisov. Published <time datetime="2026-08-29">29 August 2026</time>,
+  for indexgap 1.5.0.</p>
+  <p>indexgap 1.5.0 — quality control for programmatic SEO pipelines.
+  Python 3.9+, standard library only. MIT.
+  <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
+  <p>This site is generated from the package's own check registry by
+  <code>tools/build_docs.py</code>, so it cannot drift from the code it documents.</p>
+</footer>
+</div>
+</body>
+</html>
