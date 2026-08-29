@@ -1,55 +1,52 @@
 # Как выложить это на GitHub
 
-Репозиторий уже собран: ветка `main`, история, тег `v1.0.0`, CI.
-Осталось создать пустой публичный репозиторий и отправить туда всё.
+Репозиторий уже собран: ветка `main`, вся история, теги `v1.0.0` … `v1.4.0`, CI.
+Осталось отправить его в пустой репозиторий на GitHub.
 
-## Вариант 1 — через gh (быстрее всего)
+Репозиторий создан: <https://github.com/borisowlexa2010-star/Indexgap>
+(имя с заглавной `I` — так его создал GitHub, и в командах ниже оно ровно такое).
 
-```bash
-cd indexgap
-gh repo create indexgap --public --source=. --remote=origin --push \
-  --description "Lint your programmatic SEO pipeline — from keywords to indexed pages. Pure Python stdlib, no dependencies, no API keys."
-git push origin --tags
-```
-
-## Вариант 2 — вручную
-
-1. На https://github.com/new создать репозиторий `indexgap`, **Public**,
-   без README, без .gitignore, без лицензии — всё это уже здесь,
-   иначе будет конфликт при первом push.
-2. Затем:
+## Отправить
 
 ```bash
 cd indexgap
-git remote add origin https://github.com/borisowlexa2010-star/indexgap.git
+git remote add origin https://github.com/borisowlexa2010-star/Indexgap.git
 git push -u origin main
 git push origin --tags
 ```
 
+Если репозиторий создавали с README, лицензией или `.gitignore` — первый push
+упрётся в конфликт: всё это уже есть в истории. Тогда либо удалить
+и создать пустой, либо один раз `git push --force -u origin main`.
+
 ## Сразу после первого push
+
+**Описание** — Settings → About, одной строкой:
+
+> Quality control for programmatic-SEO pipelines: catches invented numbers,
+> template-wide breakage, near-duplicates and broken hreflang before you
+> publish. Zero dependencies, Python 3.9+, English and Russian output.
+
+**Сайт** — там же: `https://almas.vc/courses/ai-programmatic-seo`
 
 **Темы** — Settings → About → Topics:
 
 ```
-seo  programmatic-seo  sitemap  indexnow  aeo  geo  search-console
-python  cli  no-dependencies  site-audit
+seo  programmatic-seo  technical-seo  content-quality  hreflang  sitemap
+indexnow  search-console  aeo  llm-seo  python  cli  zero-dependencies
+static-site-generator  quality-assurance
 ```
 
-**Описание** — там же, одной строкой:
-
-> Lint your programmatic SEO pipeline — from keywords to indexed pages.
-> Pure Python stdlib, no dependencies, no API keys.
-
 **Проверить, что CI позеленел.** `.github/workflows/tests.yml` гоняет
-217 тестов на Python 3.9, 3.11 и 3.13 и проверяет, что все восемь команд
+301 тест на Python 3.9, 3.11 и 3.13 и проверяет, что все девять команд
 запускаются. Значок можно вынести в README:
 
 ```markdown
-![tests](https://github.com/borisowlexa2010-star/indexgap/actions/workflows/tests.yml/badge.svg)
+![tests](https://github.com/borisowlexa2010-star/Indexgap/actions/workflows/tests.yml/badge.svg)
 ```
 
-**Создать релиз** из тега `v1.0.0` — Releases → Draft a new release →
-выбрать тег → «Generate release notes» или скопировать раздел 1.0.0
+**Создать релиз** из тега `v1.4.0` — Releases → Draft a new release →
+выбрать тег → «Generate release notes» или скопировать раздел 1.4.0
 из `CHANGELOG.md`.
 
 ## Публикация в PyPI
@@ -64,12 +61,12 @@ python  cli  no-dependencies  site-audit
 2. https://pypi.org/manage/account/publishing/ → добавить издателя:
    * PyPI Project Name: `indexgap`
    * Owner: `borisowlexa2010-star`
-   * Repository name: `indexgap`
+   * Repository name: `Indexgap`
    * Workflow name: `publish.yml`
    * Environment name: `pypi`
 3. В репозитории: Settings → Environments → New environment → `pypi`.
 
-После этого каждый новый тег вида `v1.1.0` публикует релиз сам.
+После этого каждый новый тег вида `v1.5.0` публикует релиз сам.
 
 Если хочется опубликовать вручную прямо сейчас:
 
@@ -84,6 +81,8 @@ python3 -m twine upload dist/*
 * Откалибровать профили `events` и `ugc` на живом материале —
   афиши с датами и ленты обсуждений в проверенном портфеле не было,
   и об этом честно написано в шапке `indexgap/profiles.py`.
-* Английские сообщения. Сейчас весь вывод и скиллы на русском; для
-  англоязычной аудитории GitHub это главный барьер. Интерфейс менять
-  не придётся — только вынести строки.
+* Морфология в сопоставлении `plan` есть только для русского и английского.
+  Для сайта на польском или турецком совпадение ключа с заголовком считается
+  грубее, чем могло бы.
+* `README.ru.md` и русские `SKILL.md` остаются русскими намеренно: это не
+  перевод интерфейса, а вторая дверь для русскоязычных студентов курса.

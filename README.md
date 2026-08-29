@@ -66,6 +66,7 @@ indexgap check
 indexgap init                       # install into this project
 indexgap plan keywords.csv          # audit the keyword set before generating
 indexgap check                      # everything local: text, structure, machine-readability
+indexgap brief --write              # turn the findings into work orders beside the pages
 indexgap sitemap --out-dir ./public # sitemap with sharding and an honest lastmod
 indexgap notify --key <your-key>    # tell IndexNow what actually changed
 indexgap doctor --sitemap ./public/sitemap.xml --indexed gsc.csv
@@ -123,6 +124,45 @@ JSON-LD that matches the visible text, machine-readable dates and author.
 **At publish time** — sitemap sharding past 45,000 URLs and a `lastmod` that
 changes only when the text, title or description changed. Editing one menu item
 does not mark the whole site as modified. IndexNow sends only what changed.
+
+---
+
+## From findings to work orders
+
+A report answers "what is wrong with me". `indexgap brief` answers "what do I
+do" — it lays the same findings out as markdown files next to the pages they
+belong to, each with an imperative fix, the thresholds the fix has to meet, and
+the dataset row as the only permitted source of numbers.
+
+```bash
+indexgap brief --dataset keywords.csv        # dry run: says what it would write
+indexgap brief --dataset keywords.csv --write
+```
+
+On the live 2,970-page catalogue the check reports 6,074 findings and `brief`
+writes 966 work orders. The difference is three placement rules, and they are
+the whole point:
+
+* **A property of the template gets one brief, not 2,919.** `no-question-headings`
+  fired on 2,919 of 2,970 pages. That is one edit to one template, and 2,919
+  identical tasks would bury the 51 pages that actually differ. The same holds
+  per language: a finding on every page of the Chinese version is 10% of the
+  site but still one template fix.
+* **Near-duplicates are fixed as a group.** 588 duplicate findings are 72
+  groups. One page out of a group of 17 cannot be fixed alone — the brief goes
+  to the group: keep one, pull the rest apart by intent, and never link them to
+  each other.
+* **robots.txt, markup and hreflang clusters belong to the site**, not to a
+  page, and live in their own file.
+
+`--limit` (50 by default) writes the heaviest pages first; 892 briefs is not a
+task list, it is a second report. Nothing is created without `--write`.
+
+**The package writes no text, on purpose.** Its central check compares the
+numbers on a page against the dataset row that produced it. If the package
+supplied those numbers itself, the check would be checking its own output and
+would always be green. So `brief` states the task and stops; a person or an
+agent writes the words.
 
 ---
 
@@ -270,6 +310,10 @@ has no plans to; no engine has confirmed using it for ranking. Generating a
 file nobody reads is a ritual, not a feature.
 
 It also doesn't write or rewrite content, check rankings, or call paid services.
+`indexgap brief` formulates the task and stops there — on purpose. The central
+check compares the numbers on a page against the dataset row that produced it;
+if the package supplied those numbers itself, the check would be checking its
+own output and would always be green.
 Rejecting keywords and acting on contested findings is always confirmed by a human.
 
 And it does not replace Search Console — it leads you there. If the tool says
@@ -283,7 +327,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-281 scenarios. Each one is a reproduced defect found by two waves of adversarial
+301 scenarios. Each one is a reproduced defect found by two waves of adversarial
 review and one run against six live sites, plus the behaviour of profiles,
 portfolio and project installation. The rule: a finding without a test comes back.
 
