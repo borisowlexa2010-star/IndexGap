@@ -1,7 +1,7 @@
 # Как выложить это на GitHub
 
-Репозиторий уже собран: ветка `main`, два коммита, теги `v0.6.0` и `v0.7.0`.
-Осталось создать пустой публичный репозиторий и отправить туда историю.
+Репозиторий уже собран: ветка `main`, история, тег `v1.0.0`, CI.
+Осталось создать пустой публичный репозиторий и отправить туда всё.
 
 ## Вариант 1 — через gh (быстрее всего)
 
@@ -14,9 +14,9 @@ git push origin --tags
 
 ## Вариант 2 — вручную
 
-1. На https://github.com/new создать репозиторий `indexgap`,
-   **Public**, без README, без .gitignore, без лицензии
-   (всё это уже лежит здесь — иначе будет конфликт).
+1. На https://github.com/new создать репозиторий `indexgap`, **Public**,
+   без README, без .gitignore, без лицензии — всё это уже здесь,
+   иначе будет конфликт при первом push.
 2. Затем:
 
 ```bash
@@ -26,24 +26,64 @@ git push -u origin main
 git push origin --tags
 ```
 
-## После первого пуша
+## Сразу после первого push
 
-Темы для страницы репозитория (Settings → About → Topics):
+**Темы** — Settings → About → Topics:
 
 ```
-seo  programmatic-seo  sitemap  indexnow  aeo  geo  python  cli  no-dependencies
+seo  programmatic-seo  sitemap  indexnow  aeo  geo  search-console
+python  cli  no-dependencies  site-audit
 ```
 
-GitHub Actions заработают сами: `.github/workflows/tests.yml` гоняет
-196 тестов на Python 3.9, 3.11 и 3.13 и проверяет, что все восемь команд
-запускаются.
+**Описание** — там же, одной строкой:
 
-## Публикация в PyPI (по желанию)
+> Lint your programmatic SEO pipeline — from keywords to indexed pages.
+> Pure Python stdlib, no dependencies, no API keys.
 
-Имя `indexgap` на PyPI свободно.
+**Проверить, что CI позеленел.** `.github/workflows/tests.yml` гоняет
+217 тестов на Python 3.9, 3.11 и 3.13 и проверяет, что все восемь команд
+запускаются. Значок можно вынести в README:
+
+```markdown
+![tests](https://github.com/borisowlexa2010-star/indexgap/actions/workflows/tests.yml/badge.svg)
+```
+
+**Создать релиз** из тега `v1.0.0` — Releases → Draft a new release →
+выбрать тег → «Generate release notes» или скопировать раздел 1.0.0
+из `CHANGELOG.md`.
+
+## Публикация в PyPI
+
+Имя `indexgap` на PyPI свободно. Всё уже готово: `.github/workflows/publish.yml`
+собирает пакет по тегу `v*`, сверяет тег с версией в коде, прогоняет тесты
+и публикует. Токены хранить не нужно — используется Trusted Publishing.
+
+Настройка один раз:
+
+1. Завести аккаунт на https://pypi.org, включить двухфакторную аутентификацию.
+2. https://pypi.org/manage/account/publishing/ → добавить издателя:
+   * PyPI Project Name: `indexgap`
+   * Owner: `borisowlexa2010-star`
+   * Repository name: `indexgap`
+   * Workflow name: `publish.yml`
+   * Environment name: `pypi`
+3. В репозитории: Settings → Environments → New environment → `pypi`.
+
+После этого каждый новый тег вида `v1.1.0` публикует релиз сам.
+
+Если хочется опубликовать вручную прямо сейчас:
 
 ```bash
 python3 -m pip install --upgrade build twine
 python3 -m build
 python3 -m twine upload dist/*
 ```
+
+## Что стоит сделать позже
+
+* Откалибровать профили `events` и `ugc` на живом материале —
+  афиши с датами и ленты обсуждений в проверенном портфеле не было,
+  и об этом честно написано в шапке `indexgap/profiles.py`.
+* Английские сообщения. Сейчас весь вывод и скиллы на русском; для
+  англоязычной аудитории GitHub это главный барьер. Интерфейс менять
+  не придётся — только вынести строки.

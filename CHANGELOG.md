@@ -1,9 +1,15 @@
 # Changelog
 
-## 0.7.0 — 2026-08-29
+## 1.0.0 — 2026-08-29
 
-Any tool's export, not just a webmaster panel — and the report never pretends
-they mean the same thing.
+First stable release. The eight commands, the finding codes and the shape of
+`indexgap.json` are now a promise: they will not change without a major
+version. What is still open — calibration of the `events` and `ugc` profiles
+against live material, and messages in languages other than Russian — needs
+no interface change, which is why 1.0 is honest rather than early.
+
+This release also reads any tool's export, not just a webmaster panel — and
+the report never pretends they mean the same thing.
 
 * **New `sources` module.** Recognises exports from Ahrefs, Semrush, Serpstat,
   Moz, Screaming Frog, Sitebulb, JetOctopus, OnCrawl, Netpeak, GA4, Matomo,

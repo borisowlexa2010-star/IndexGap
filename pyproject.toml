@@ -4,19 +4,35 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "indexgap"
-version = "0.7.0"
+version = "1.0.0"
 description = "Lint your programmatic SEO pipeline — from keywords to indexed pages. No dependencies."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-keywords = ["seo", "programmatic-seo", "sitemap", "indexnow", "aeo", "geo"]
+keywords = ["seo", "programmatic-seo", "sitemap", "indexnow", "aeo", "geo",
+            "search-console", "site-audit", "lint"]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Internet :: WWW/HTTP :: Site Management",
+  "Topic :: Text Processing :: Markup :: HTML",
 ]
+
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/borisowlexa2010-star/indexgap"
+Changelog = "https://github.com/borisowlexa2010-star/indexgap/blob/main/CHANGELOG.md"
+Issues = "https://github.com/borisowlexa2010-star/indexgap/issues"
 
 [project.scripts]
 indexgap = "indexgap.cli:main"
