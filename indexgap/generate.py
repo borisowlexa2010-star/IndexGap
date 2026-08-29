@@ -143,6 +143,21 @@ def slugify(value: str, max_len: int = None) -> str:
 
 # ── чтение датасета ───────────────────────────────────────────────────────────
 
+# csv не умеет «без разделителя», а файлу с одной колонкой любой разделитель
+# только вредит. На эту роль берётся управляющий символ, которого в тексте нет.
+# NUL подошёл бы лучше всех, но CPython до 3.11 принимает его за «разделитель
+# не задан» и роняет чтение целиком.
+_SINGLE_COLUMN_SEPARATORS = "\x1f\x1e\x01\x02\x03\x04\x05\x06\x07"
+
+
+def _single_column_delimiter(text: str) -> str:
+    """Управляющий символ, которого нет в тексте, — на роль разделителя."""
+    for char in _SINGLE_COLUMN_SEPARATORS:
+        if char not in text:
+            return char
+    return _SINGLE_COLUMN_SEPARATORS[0]
+
+
 def read_dataset(path: str) -> dict:
     """
     Читает семантику: CSV или XLSX.
@@ -179,11 +194,12 @@ def read_dataset(path: str) -> dict:
 
     text, encoding = read_text(path)
     first_line = text.splitlines()[0] if text.strip() else ""
-    if not any(ch in first_line for ch in ",;\t|"):
+    single_column = not any(ch in first_line for ch in ",;\t|")
+    if single_column:
         # Один столбец: запятая внутри значения — часть ключа, а не разделитель.
         # Раньше «аренда, дома москва» превращалось в «аренда».
         class _Single(csv.excel):
-            delimiter = "\x00"
+            delimiter = _single_column_delimiter(text)
         dialect = _Single
     else:
         sample = text[:8192]
@@ -221,7 +237,8 @@ def read_dataset(path: str) -> dict:
         problems.append(
             tr("в {a0} строк(ах) колонок больше, чем в шапке — лишнее отброшено (строки {a1}{a2})", a0=len(ragged), a1=shown, a2=' и далее' if len(ragged) > 5 else ''))
     return {"rows": rows, "fields": fields, "encoding": encoding,
-            "delimiter": getattr(dialect, "delimiter", ","), "problems": problems}
+            "delimiter": "" if single_column else getattr(dialect, "delimiter", ","),
+            "problems": problems}
 
 
 # ── аудит семантики ───────────────────────────────────────────────────────────
