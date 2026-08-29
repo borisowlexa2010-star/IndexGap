@@ -35,6 +35,13 @@ None of this is visible page by page. Each one looks fine on its own.
 pip install indexgap
 ```
 
+Not on PyPI yet — until the first release, install from source:
+
+```bash
+git clone https://github.com/borisowlexa2010-star/Indexgap && cd Indexgap
+pip install -e .
+```
+
 Then, once per project:
 
 ```bash
