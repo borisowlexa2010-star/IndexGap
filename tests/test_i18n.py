@@ -33,7 +33,12 @@ SITE = "https://example.com"
 
 
 def marked_keys():
-    """Все строки, размеченные `tr(...)`, — прямо из синтаксического дерева."""
+    """
+    Все строки, размеченные `tr(...)` или `N_(...)`, — из дерева разбора.
+
+    `N_` — таблицы на уровне модуля: они переводятся при печати, но в словаре
+    обязаны быть, иначе выпадут молча.
+    """
     import ast
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent / "indexgap"
@@ -42,7 +47,7 @@ def marked_keys():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id == "tr" and node.args
+                    and node.func.id in ("tr", "N_") and node.args
                     and isinstance(node.args[0], ast.Constant)
                     and isinstance(node.args[0].value, str)):
                 keys.add(node.args[0].value)

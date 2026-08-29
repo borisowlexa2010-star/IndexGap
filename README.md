@@ -71,6 +71,7 @@ indexgap notify --key <your-key>    # tell IndexNow what actually changed
 indexgap doctor --sitemap ./public/sitemap.xml --indexed gsc.csv
 indexgap portfolio projects.json    # every site you own, in one run
 indexgap profiles                   # what the content-type presets change
+indexgap cite --domain example.com  # do AI answers cite you? (your own API keys)
 ```
 
 Output is English by default, Russian with `--lang ru` (or `INDEXGAP_LANG`, or
@@ -256,6 +257,14 @@ pages already ranking in the classic top 10.
 So: machine readability is a necessary condition and this tool's job. Getting
 cited is decided by work outside your files, and that is not a code problem.
 
+`indexgap cite` measures the thermometer, and says so: it asks Perplexity, the
+OpenAI Responses API, the Gemini API and Grok a set of real questions and counts
+how often your domain comes back in the sources. It reports a share of runs, not
+yes/no, because these answers are not deterministic. And it never says "ChatGPT
+cites you" — what it measured is the API, which OpenAI's own docs describe as
+behaving differently from the product. It is the only command that needs API
+keys, it is off by default, and it sends nothing without `--send`.
+
 No `llms.txt` generator either. Google has stated it does not support it and
 has no plans to; no engine has confirmed using it for ranking. Generating a
 file nobody reads is a ritual, not a feature.
@@ -274,7 +283,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-261 scenarios. Each one is a reproduced defect found by two waves of adversarial
+281 scenarios. Each one is a reproduced defect found by two waves of adversarial
 review and one run against six live sites, plus the behaviour of profiles,
 portfolio and project installation. The rule: a finding without a test comes back.
 

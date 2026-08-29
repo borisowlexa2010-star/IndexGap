@@ -30,7 +30,7 @@ import os
 import re
 
 from .checks import is_shell
-from .i18n import tr
+from .i18n import N_, tr
 
 CONFIG = {
     "answer_min": 40,           # символов в прямом ответе
@@ -56,15 +56,15 @@ QUESTION = re.compile(
 
 # Кто ходит за содержимым для ИИ-ответов и что теряется при блокировке.
 AI_AGENTS = {
-    "oai-searchbot": tr("ChatGPT не покажет страницу в ответах своего поиска"),
-    "gptbot": tr("OpenAI не будет использовать страницу для обучения (на показ в поиске это не влияет)"),
-    "chatgpt-user": tr("ChatGPT не сможет открыть страницу по прямой просьбе пользователя"),
-    "perplexitybot": tr("Perplexity не проиндексирует страницу"),
-    "claudebot": tr("Anthropic не будет использовать страницу"),
-    "claude-searchbot": tr("Claude не покажет страницу в ответах с поиском"),
-    "google-extended": tr("Gemini не будет использовать страницу для обучения (на AI Overviews не влияет)"),
-    "applebot-extended": tr("Apple Intelligence не будет использовать страницу"),
-    "bingbot": tr("Bing не проиндексирует страницу — а вместе с ним Copilot"),
+    "oai-searchbot": N_("ChatGPT не покажет страницу в ответах своего поиска"),
+    "gptbot": N_("OpenAI не будет использовать страницу для обучения (на показ в поиске это не влияет)"),
+    "chatgpt-user": N_("ChatGPT не сможет открыть страницу по прямой просьбе пользователя"),
+    "perplexitybot": N_("Perplexity не проиндексирует страницу"),
+    "claudebot": N_("Anthropic не будет использовать страницу"),
+    "claude-searchbot": N_("Claude не покажет страницу в ответах с поиском"),
+    "google-extended": N_("Gemini не будет использовать страницу для обучения (на AI Overviews не влияет)"),
+    "applebot-extended": N_("Apple Intelligence не будет использовать страницу"),
+    "bingbot": N_("Bing не проиндексирует страницу — а вместе с ним Copilot"),
 }
 
 
@@ -156,7 +156,7 @@ def check_robots(robots: dict) -> list:
         if entry and _blocks_everything(entry):
             level = "critical" if tr("не покажет") in why or tr("не проиндексирует") in why else "info"
             issues.append((level, "robots.txt", "ai-crawler-blocked",
-                           tr("{a0} закрыт: {a1}", a0=agent, a1=why)))
+                           tr("{a0} закрыт: {a1}", a0=agent, a1=tr(why))))
     if not robots.get("sitemaps"):
         issues.append(("info", "robots.txt", "robots-no-sitemap",
                        tr("в robots.txt не указан Sitemap — строка `Sitemap: https://…/sitemap.xml` стоит копейки")))

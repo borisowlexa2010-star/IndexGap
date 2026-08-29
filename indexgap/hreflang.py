@@ -35,7 +35,7 @@ from collections import defaultdict
 from html.parser import HTMLParser
 
 from .core import url_key
-from .i18n import tr
+from .i18n import N_, tr
 
 # ISO 639-1. Список нужен, чтобы отличить язык от страны: без него `en-uk`
 # и `zh-cn` выглядят одинаково правдоподобно, а верен только второй.
@@ -59,15 +59,15 @@ LANGUAGES = {
 
 # Коды, которые люди пишут как страну, а они значат совсем другое.
 LOOKS_LIKE_A_COUNTRY = {
-    "uk": ("en-GB", tr("«uk» — это украинский язык, а не Великобритания")),
-    "gb": ("en-GB", tr("«gb» — это страна, а не язык: перед ней нужен язык")),
-    "us": ("en-US", tr("«us» — это страна, а не язык: перед ней нужен язык")),
-    "eu": ("", tr("«eu» — не язык и не страна по ISO 3166-1")),
-    "cn": ("zh-CN", tr("«cn» — это страна, а не язык: перед ней нужен язык")),
-    "jp": ("ja", tr("«jp» — это страна, код языка — «ja»")),
-    "br": ("pt-BR", tr("«br» — это бретонский язык, а не Бразилия")),
-    "in": ("hi", tr("«in» — устаревший код индонезийского, а не Индия")),
-    "ua": ("uk", tr("«ua» — это страна, код украинского языка — «uk»")),
+    "uk": ("en-GB", N_("«uk» — это украинский язык, а не Великобритания")),
+    "gb": ("en-GB", N_("«gb» — это страна, а не язык: перед ней нужен язык")),
+    "us": ("en-US", N_("«us» — это страна, а не язык: перед ней нужен язык")),
+    "eu": ("", N_("«eu» — не язык и не страна по ISO 3166-1")),
+    "cn": ("zh-CN", N_("«cn» — это страна, а не язык: перед ней нужен язык")),
+    "jp": ("ja", N_("«jp» — это страна, код языка — «ja»")),
+    "br": ("pt-BR", N_("«br» — это бретонский язык, а не Бразилия")),
+    "in": ("hi", N_("«in» — устаревший код индонезийского, а не Индия")),
+    "ua": ("uk", N_("«ua» — это страна, код украинского языка — «uk»")),
 }
 
 _TAG_RE = re.compile(r"^([A-Za-z]{2,3})(?:-([A-Za-z]{4}))?(?:-([A-Za-z]{2}|\d{3}))?$")
@@ -131,7 +131,8 @@ def check_tag(code: str) -> str:
     language = match.group(1).lower()
     if language in LOOKS_LIKE_A_COUNTRY and language not in ("uk", "br", "in"):
         instead, why = LOOKS_LIKE_A_COUNTRY[language]
-        return why + (tr(" — вероятно, имелось в виду `{a0}`", a0=instead) if instead else "")
+        return tr(why) + (tr(" — вероятно, имелось в виду `{a0}`", a0=instead)
+                          if instead else "")
     if language not in LANGUAGES:
         return tr("«{a0}» не является кодом языка по ISO 639-1", a0=language)
     return ""

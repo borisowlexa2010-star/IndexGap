@@ -220,7 +220,7 @@ def read_sources(specs: list, site: str = "") -> dict:
             if not confident:
                 unlabeled.add(name)
                 notes.append(
-                    tr("{a0}: не удалось уверенно определить источник, файл засчитан как «{a1}» ({a2}). Если это не так, укажи явно: --indexed google={a3} или --indexed ahrefs={a4}", a0=os.path.basename(path), a1=name, a2=sources.KIND_TITLE[kind], a3=path, a4=path))
+                    tr("{a0}: не удалось уверенно определить источник, файл засчитан как «{a1}» ({a2}). Если это не так, укажи явно: --indexed google={a3} или --indexed ahrefs={a4}", a0=os.path.basename(path), a1=name, a2=tr(sources.KIND_TITLE[kind]), a3=path, a4=path))
         result = read_indexed(path, site)
         notes += result.get("notes", [])
         urls = set(result["urls"])
@@ -301,7 +301,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         for name in sorted(engines_keys):
             hit = engines_keys[name] & known
             kind = sources.kind_of(name)
-            suffix = "" if kind == sources.INDEX else f" ({sources.KIND_TITLE[kind]})"
+            suffix = ("" if kind == sources.INDEX
+                      else f" ({tr(sources.KIND_TITLE[kind])})")
             steps.append({"name": tr("  из них в {a0}{a1}", a0=name, a1=suffix), "count": len(hit),
                           "lost": len((known & in_index) - hit),
                           "why": tr("есть в других источниках, но не в {a0}", a0=name),

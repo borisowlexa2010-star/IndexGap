@@ -19,7 +19,7 @@ from collections import Counter, OrderedDict, defaultdict
 from datetime import datetime
 
 from .checks import CODE_WEIGHT, LEVEL_ORDER
-from .i18n import tr
+from .i18n import N_, tr
 
 CSS = """
 :root{--bg:#F6F8F7;--card:#fff;--fg:#141D1C;--fg2:#55635F;--fg3:#7D8B87;
@@ -82,76 +82,89 @@ summary .what{flex:1 1 260px;min-width:0}
 border-radius:4px;padding:12px 16px;margin-bottom:10px;font-size:14px}
 """
 
-LEVEL_LABEL = {"critical": ("bad", tr("критично")), "warning": ("warn", tr("внимание")),
-               "info": ("ok", tr("мелочь"))}
+LEVEL_LABEL = {"critical": ("bad", N_("критично")), "warning": ("warn", N_("внимание")),
+               "info": ("ok", N_("мелочь"))}
 
 # Что означает код и что с ним делать. Раньше половина кодов, которые выдаёт
 # пакет, не была описана нигде — человек видел находку без инструкции.
+def _help(code, default=""):
+    """
+    Описание кода — переводится в момент отрисовки, а не при импорте.
+
+    Раньше словарь строился с `tr()` на уровне модуля, то есть до того, как
+    разобран `--lang`. `indexgap profiles --lang ru` печатал русский заголовок
+    и английские названия профилей: наполовину переведённый отчёт выглядит
+    сломанным, и это хуже, чем честно один язык.
+    """
+    found = CODE_HELP.get(code)
+    return tr(found) if found else default
+
+
 CODE_HELP = {
-    "unsupported-number": tr("Число в тексте, которого нет в данных. Проверь по строке датасета и либо исправь, либо убери утверждение."),
-    "check-by-eye": tr("Числа со словами, которых нет в данных. Часть таких — обычная речь («3 шага», «5 звёзд»), часть — выдумка агента. Список для просмотра глазами, а не приговор."),
-    "robots-unreadable": tr("robots.txt не прочитался — проверь путь в --robots."),
-    "stale-event": tr("Дата на странице прошла, а страница открыта для индексации. Поисковик показывает людям то, чего уже нет: закрой noindex, поставь редирект на актуальное или перепиши в отчёт о прошедшем."),
-    "stale-closed": tr("Дата прошла, и страница уже закрыта от индексации — так и надо. Строка справочная."),
-    "still-draft": tr("В фронтматтере `status: draft`. Страница попадёт в сборку недописанной — допиши или исключи из публикации."),
-    "brief-left": tr("В файле остался блок брифа или TODO — он уедет в текст страницы."),
-    "noindex": tr("Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots."),
-    "nosnippet": tr("Запрещён сниппет. Страница может быть в индексе, но не появится ни в расширенной выдаче, ни в ответах ИИ-поиска."),
-    "canonical-elsewhere": tr("Canonical ведёт на другую страницу — эта отдаёт ей вес и сама из индекса выпадает."),
-    "orphan": tr("На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела."),
-    "unreachable": tr("От главной до страницы нельзя дойти по ссылкам."),
-    "near-duplicate": tr("Почти совпадает с другой страницей. Поисковик оставит одну. Перепиши под другой интент или оставь одну с canonical."),
-    "similar": tr("Похожа на другую страницу, но ниже порога дубля. Повод посмотреть."),
-    "low-uniqueness": tr("Шаблон вытеснил содержание: уникального текста меньше четверти."),
-    "template-skeleton": tr("Одинаковый скелет заголовков на многих страницах — для поисковика это признак штамповки."),
-    "same-opening": tr("Одинаковое начало текста на многих страницах."),
-    "thin": tr("Текста меньше порога. Порог правится в indexgap.json — для карточки товара 250 слов абсурдны, для гайда нормальны."),
-    "no-title": tr("Нет title."),
-    "title-short": tr("Title короче рекомендованного."),
-    "title-long": tr("Title обрежется в выдаче."),
-    "no-description": tr("Нет meta description — поисковик соберёт сниппет сам."),
-    "description-length": tr("Длина description вне рекомендованного диапазона."),
-    "no-h1": tr("Нет H1 — поисковику нечем определить тему страницы."),
-    "many-h1": tr("H1 больше одного."),
-    "no-headings": tr("На странице нет заголовков — структуры нет."),
-    "duplicate-title": tr("Одинаковый title у нескольких страниц — склейка в выдаче."),
-    "duplicate-description": tr("Одинаковый description у нескольких страниц."),
-    "deep": tr("Слишком много кликов от главной."),
-    "vague-anchor": tr("Анкоры вида «здесь» и «подробнее» не передают смысл."),
-    "hreflang-no-self": tr("В кластере hreflang нет ссылки на саму страницу. "
+    "unsupported-number": N_("Число в тексте, которого нет в данных. Проверь по строке датасета и либо исправь, либо убери утверждение."),
+    "check-by-eye": N_("Числа со словами, которых нет в данных. Часть таких — обычная речь («3 шага», «5 звёзд»), часть — выдумка агента. Список для просмотра глазами, а не приговор."),
+    "robots-unreadable": N_("robots.txt не прочитался — проверь путь в --robots."),
+    "stale-event": N_("Дата на странице прошла, а страница открыта для индексации. Поисковик показывает людям то, чего уже нет: закрой noindex, поставь редирект на актуальное или перепиши в отчёт о прошедшем."),
+    "stale-closed": N_("Дата прошла, и страница уже закрыта от индексации — так и надо. Строка справочная."),
+    "still-draft": N_("В фронтматтере `status: draft`. Страница попадёт в сборку недописанной — допиши или исключи из публикации."),
+    "brief-left": N_("В файле остался блок брифа или TODO — он уедет в текст страницы."),
+    "noindex": N_("Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots."),
+    "nosnippet": N_("Запрещён сниппет. Страница может быть в индексе, но не появится ни в расширенной выдаче, ни в ответах ИИ-поиска."),
+    "canonical-elsewhere": N_("Canonical ведёт на другую страницу — эта отдаёт ей вес и сама из индекса выпадает."),
+    "orphan": N_("На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела."),
+    "unreachable": N_("От главной до страницы нельзя дойти по ссылкам."),
+    "near-duplicate": N_("Почти совпадает с другой страницей. Поисковик оставит одну. Перепиши под другой интент или оставь одну с canonical."),
+    "similar": N_("Похожа на другую страницу, но ниже порога дубля. Повод посмотреть."),
+    "low-uniqueness": N_("Шаблон вытеснил содержание: уникального текста меньше четверти."),
+    "template-skeleton": N_("Одинаковый скелет заголовков на многих страницах — для поисковика это признак штамповки."),
+    "same-opening": N_("Одинаковое начало текста на многих страницах."),
+    "thin": N_("Текста меньше порога. Порог правится в indexgap.json — для карточки товара 250 слов абсурдны, для гайда нормальны."),
+    "no-title": N_("Нет title."),
+    "title-short": N_("Title короче рекомендованного."),
+    "title-long": N_("Title обрежется в выдаче."),
+    "no-description": N_("Нет meta description — поисковик соберёт сниппет сам."),
+    "description-length": N_("Длина description вне рекомендованного диапазона."),
+    "no-h1": N_("Нет H1 — поисковику нечем определить тему страницы."),
+    "many-h1": N_("H1 больше одного."),
+    "no-headings": N_("На странице нет заголовков — структуры нет."),
+    "duplicate-title": N_("Одинаковый title у нескольких страниц — склейка в выдаче."),
+    "duplicate-description": N_("Одинаковый description у нескольких страниц."),
+    "deep": N_("Слишком много кликов от главной."),
+    "vague-anchor": N_("Анкоры вида «здесь» и «подробнее» не передают смысл."),
+    "hreflang-no-self": N_("В кластере hreflang нет ссылки на саму страницу. "
                            "Без self-ссылки кластер невалиден целиком."),
-    "hreflang-no-return": tr("Односторонняя связь hreflang: обратной ссылки нет. "
+    "hreflang-no-return": N_("Односторонняя связь hreflang: обратной ссылки нет. "
                              "Google отбрасывает такую связь, а не учитывает частично."),
-    "hreflang-unknown-target": tr("Альтернатива указывает на страницу, которой нет "
+    "hreflang-unknown-target": N_("Альтернатива указывает на страницу, которой нет "
                                   "среди разобранных — взаимность не проверить."),
-    "hreflang-target-blocked": tr("Альтернатива закрыта от индексации или отдаёт "
+    "hreflang-target-blocked": N_("Альтернатива закрыта от индексации или отдаёт "
                                   "canonical другой странице."),
-    "hreflang-canonical-conflict": tr("Canonical ведёт на другую языковую версию — "
+    "hreflang-canonical-conflict": N_("Canonical ведёт на другую языковую версию — "
                                       "это отменяет hreflang."),
-    "hreflang-bad-code": tr("Код языка в hreflang неверен — частая подмена языка страной."),
-    "hreflang-lang-mismatch": tr("Код в self-ссылке не совпадает с lang страницы."),
-    "hreflang-missing": tr("Сайт мультиязычный, а у страницы нет ни одной альтернативы."),
-    "hreflang-static-cluster": tr("Шаблон печатает один и тот же кластер hreflang "
+    "hreflang-bad-code": N_("Код языка в hreflang неверен — частая подмена языка страной."),
+    "hreflang-lang-mismatch": N_("Код в self-ссылке не совпадает с lang страницы."),
+    "hreflang-missing": N_("Сайт мультиязычный, а у страницы нет ни одной альтернативы."),
+    "hreflang-static-cluster": N_("Шаблон печатает один и тот же кластер hreflang "
                                   "на всех страницах — связей между версиями нет."),
-    "source-note": tr("Замечание к самому файлу: кодировка, фронтматтер, разметка."),
-    "js-shell": tr("В исходном HTML почти нет текста. Краулеры ИИ-поиска не исполняют JavaScript и увидят пустую страницу."),
-    "answer-preamble": tr("Первый абзац — разгон, а не ответ. Именно первый абзац цитируют ИИ-поиск и блок быстрых ответов."),
-    "answer-short": tr("Первый абзац слишком короткий для самостоятельного ответа."),
-    "answer-long": tr("Первый абзац длинноват для цитирования."),
-    "no-answer": tr("Не нашлось ни одного абзаца."),
-    "no-question-headings": tr("Ни один подзаголовок не сформулирован как вопрос."),
-    "long-paragraph": tr("Очень длинные абзацы плохо извлекаются."),
-    "no-structure": tr("Нет ни списков, ни таблиц."),
-    "img-no-alt": tr("Изображения без alt."),
-    "jsonld-broken": tr("Блок JSON-LD не парсится — для поисковика его нет."),
-    "jsonld-faq-invisible": tr("В разметке FAQ есть вопросы, которых нет на странице. Это риск ручных санкций."),
-    "jsonld-no-type": tr("В блоке JSON-LD нет @type."),
-    "no-date": tr("Нет машиночитаемой даты."),
-    "no-author": tr("Не указан автор или организация."),
-    "robots-blocks-all": tr("robots.txt закрывает сайт целиком."),
-    "ai-crawler-blocked": tr("В robots.txt закрыт краулер ИИ-поисковика."),
-    "robots-no-sitemap": tr("В robots.txt нет строки Sitemap."),
-    "no-robots": tr("robots.txt не проверялся."),
+    "source-note": N_("Замечание к самому файлу: кодировка, фронтматтер, разметка."),
+    "js-shell": N_("В исходном HTML почти нет текста. Краулеры ИИ-поиска не исполняют JavaScript и увидят пустую страницу."),
+    "answer-preamble": N_("Первый абзац — разгон, а не ответ. Именно первый абзац цитируют ИИ-поиск и блок быстрых ответов."),
+    "answer-short": N_("Первый абзац слишком короткий для самостоятельного ответа."),
+    "answer-long": N_("Первый абзац длинноват для цитирования."),
+    "no-answer": N_("Не нашлось ни одного абзаца."),
+    "no-question-headings": N_("Ни один подзаголовок не сформулирован как вопрос."),
+    "long-paragraph": N_("Очень длинные абзацы плохо извлекаются."),
+    "no-structure": N_("Нет ни списков, ни таблиц."),
+    "img-no-alt": N_("Изображения без alt."),
+    "jsonld-broken": N_("Блок JSON-LD не парсится — для поисковика его нет."),
+    "jsonld-faq-invisible": N_("В разметке FAQ есть вопросы, которых нет на странице. Это риск ручных санкций."),
+    "jsonld-no-type": N_("В блоке JSON-LD нет @type."),
+    "no-date": N_("Нет машиночитаемой даты."),
+    "no-author": N_("Не указан автор или организация."),
+    "robots-blocks-all": N_("robots.txt закрывает сайт целиком."),
+    "ai-crawler-blocked": N_("В robots.txt закрыт краулер ИИ-поисковика."),
+    "robots-no-sitemap": N_("В robots.txt нет строки Sitemap."),
+    "no-robots": N_("robots.txt не проверялся."),
 }
 
 
@@ -185,7 +198,7 @@ def _first_things(issues: list, graph: dict, dupes: list) -> str:
                      if len(item) >= 3 and item[0] == "critical")
     lines = []
     for code, count in counts.most_common(3):
-        lines.append(tr("<li><strong>{a0}</strong> — {a1} стр.: {a2}</li>", a0=_esc(code), a1=count, a2=_esc(CODE_HELP.get(code, ''))))
+        lines.append(tr("<li><strong>{a0}</strong> — {a1} стр.: {a2}</li>", a0=_esc(code), a1=count, a2=_esc(_help(code, ''))))
     if not lines:
         return (tr("<div class=\"first\"><strong>Критичных находок нет.</strong> Дальше смотри в Search Console и Вебмастере: локальные проверки своё сказали.</div>"))
     return (tr("<div class=\"first\"><strong>Начни с этого</strong><ol>") + "".join(lines) + '</ol></div>')
@@ -206,13 +219,14 @@ def _groups_html(issues: list, per_group: int = 25) -> str:
     for level, code in order:
         rows = sorted(grouped[(level, code)])
         cls, label = LEVEL_LABEL.get(level, ("", level))
+        label = tr(label)
         shown = rows[:per_group]
         more = (tr("<p class=\"note\">Показано {a0} из {a1}. Полный список — в JSON рядом с отчётом.</p>", a0=len(shown), a1=len(rows))
                 if len(rows) > per_group else "")
         items = "".join(
             f'<li><span class="mono">{_esc(url)}</span> — {_esc(msg)}</li>'
             for url, msg in shown)
-        help_text = CODE_HELP.get(code, "")
+        help_text = _help(code, "")
         blocks.append(
             f'<details class="grp"{" open" if level == "critical" else ""}>'
             f'<summary><span class="pill {cls}">{_esc(label)}</span>'
@@ -315,7 +329,7 @@ def _portfolio_cards(results: list) -> str:
                        for k, v in rows)
         cards.append(
             f'<div class="pcard"><div class="nm">{_esc(r["name"])}</div>'
-            f'<div class="pr">{_esc(r.get("profile_title") or r.get("profile", ""))}</div>'
+            f'<div class="pr">{_esc(tr(r.get("profile_title") or "") or r.get("profile", ""))}</div>'
             f'{body}</div>')
     return '<div class="pgrid">' + "".join(cards) + "</div>"
 
@@ -327,6 +341,7 @@ def _pattern_rows(patterns: list, results: list, scope: str = "page") -> str:
         if p.get("scope", "page") != scope:
             continue
         cls, label = LEVEL_LABEL.get(p["level"], ("", p["level"]))
+        label = tr(label)
         cells = []
         for name in names:
             detail = p["detail"].get(name)
@@ -341,7 +356,7 @@ def _pattern_rows(patterns: list, results: list, scope: str = "page") -> str:
         rows.append(
             f'<tr><td><span class="pill {cls}">{_esc(label)}</span></td>'
             f'<td class="mono">{_esc(p["code"])}</td>'
-            f'<td>{_esc(CODE_HELP.get(p["code"], ""))}{hint}</td>'
+            f'<td>{_esc(_help(p["code"]))}{hint}</td>'
             + "".join(cells) + "</tr>")
     head = "".join(f'<th class="n">{_esc(n)}</th>' for n in names)
     return (tr("<div class=\"scroll\"><table><thead><tr><th></th><th>код</th><th>что это</th>") + head + '</tr></thead><tbody>'
@@ -382,8 +397,8 @@ def build_portfolio(results: list, patterns: list, uniques: list = None,
     seen_profiles = {}
     for r in ok:
         if r.get("profile") and r["profile"] not in seen_profiles:
-            seen_profiles[r["profile"]] = (r.get("profile_title", ""),
-                                           r.get("profile_notes") or [])
+            seen_profiles[r["profile"]] = (tr(r.get("profile_title", "")),
+                                           [tr(n) for n in (r.get("profile_notes") or [])])
     if seen_profiles:
         rows = "".join(
             f'<tr><td class="mono">{_esc(key)}</td><td>{_esc(title)}</td>'

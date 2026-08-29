@@ -41,7 +41,7 @@ import re
 import zipfile
 
 from .core import SourceError, read_text
-from .i18n import tr
+from .i18n import N_, tr
 
 # ── что источник доказывает ───────────────────────────────────────────────────
 
@@ -52,19 +52,19 @@ THIRDPARTY = "thirdparty"  # чужой индекс
 LIST = "list"              # просто список адресов
 
 KIND_TITLE = {
-    INDEX: tr("панель вебмастера"),
-    ANALYTICS: tr("аналитика"),
-    CRAWL: tr("краулер"),
-    THIRDPARTY: tr("сторонний индекс"),
-    LIST: tr("список адресов"),
+    INDEX: N_("панель вебмастера"),
+    ANALYTICS: N_("аналитика"),
+    CRAWL: N_("краулер"),
+    THIRDPARTY: N_("сторонний индекс"),
+    LIST: N_("список адресов"),
 }
 
 KIND_PROVES = {
-    INDEX: tr("поисковик знает про страницу — прямой ответ"),
-    ANALYTICS: tr("на страницу был визит, значит она в индексе; молчание не значит обратного"),
-    CRAWL: tr("краулер дошёл до страницы — это обход, а не индексация"),
-    THIRDPARTY: tr("страница есть в индексе стороннего сервиса, а не поисковика"),
-    LIST: tr("просто перечень адресов — что он значит, знаешь только ты"),
+    INDEX: N_("поисковик знает про страницу — прямой ответ"),
+    ANALYTICS: N_("на страницу был визит, значит она в индексе; молчание не значит обратного"),
+    CRAWL: N_("краулер дошёл до страницы — это обход, а не индексация"),
+    THIRDPARTY: N_("страница есть в индексе стороннего сервиса, а не поисковика"),
+    LIST: N_("просто перечень адресов — что он значит, знаешь только ты"),
 }
 
 
@@ -86,7 +86,7 @@ TOOLS = {
                       "header": ("avg. click position", "avg click position",
                                  "clicks", "impressions")},
 
-    "yandex":        {"kind": INDEX, "title": tr("Яндекс.Вебмастер"),
+    "yandex":        {"kind": INDEX, "title": N_("Яндекс.Вебмастер"),
                       "file": ("yandex", "яндекс", "вебмастер"),
                       "header": ("адрес страницы", "показы", "переходы",
                                  "статус", "последнее посещение")},
@@ -127,7 +127,7 @@ TOOLS = {
                       "file": ("oncrawl",), "header": ("urlpath", "fetched")},
     "netpeak":       {"kind": CRAWL, "title": "Netpeak Spider",
                       "file": ("netpeak",), "header": ("код ответа", "глубина")},
-    "sitemap":       {"kind": CRAWL, "title": tr("карта сайта"),
+    "sitemap":       {"kind": CRAWL, "title": N_("карта сайта"),
                       "file": ("sitemap",), "header": ()},
 
     # сторонние индексы
@@ -374,7 +374,7 @@ def kind_of(name: str) -> str:
 
 def title_of(name: str) -> str:
     meta = TOOLS.get((name or "").lower())
-    return meta["title"] if meta else name
+    return tr(meta["title"]) if meta else name
 
 
 def parse_spec(spec: str) -> tuple:
@@ -399,7 +399,7 @@ def describe(names: list) -> list:
         if kind in seen:
             continue
         seen.add(kind)
-        lines.append(f"{KIND_TITLE[kind]}: {KIND_PROVES[kind]}")
+        lines.append(f"{tr(KIND_TITLE[kind])}: {tr(KIND_PROVES[kind])}")
     return lines
 
 
