@@ -1,7 +1,8 @@
 # indexgap
 
 [![tests](https://img.shields.io/github/actions/workflow/status/borisowlexa2010-star/IndexGap/tests.yml?branch=main&label=tests)](https://github.com/borisowlexa2010-star/IndexGap/actions/workflows/tests.yml)
-[![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.13-blue)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/pyproject.toml)
+[![pypi](https://img.shields.io/pypi/v/indexgap)](https://pypi.org/project/indexgap/)
+[![python](https://img.shields.io/pypi/pyversions/indexgap)](https://pypi.org/project/indexgap/)
 [![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](https://github.com/borisowlexa2010-star/IndexGap/blob/main/LICENSE)
 
@@ -39,9 +40,12 @@
 ## Установка
 
 ```bash
-pipx install indexgap   # после первого релиза на PyPI
+pipx install indexgap
+```
 
-# пока его нет — из исходников:
+Из исходников — если нужна ветка `main`:
+
+```bash
 git clone https://github.com/borisowlexa2010-star/IndexGap && cd IndexGap
 pip install -e .
 ```
