@@ -97,7 +97,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>The finding reads:</p>
 <pre><code>info  stale-closed  дата … прошла, страница уже закрыта от индексации — это правильно</code></pre>
 
-<h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
+<h2>How to fix it</h2><div class="fix"><p>Decide what the page has become: an archive or a promise it can no longer keep. Mark an archive with its end date in the text itself, and take the promise out of the index.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>

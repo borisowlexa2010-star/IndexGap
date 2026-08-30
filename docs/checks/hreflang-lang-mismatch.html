@@ -97,7 +97,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>The finding reads:</p>
 <pre><code>warning  hreflang-lang-mismatch  self-ссылка объявлена как «…», а страница</code></pre>
 
-<h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
+<h2>How to fix it</h2><div class="fix"><p>Bring the declared language in line with the language the text is written in. While they disagree, the engine shows the page to the wrong readers — and counts that as a correct result.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>

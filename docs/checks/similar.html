@@ -97,7 +97,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>The finding reads:</p>
 <pre><code>info  similar  похожа на {a0:.0%} на ……</code></pre>
 
-<h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
+<h2>How to fix it</h2><div class="fix"><p>Check whether these pages grew out of two keywords with one intent. If they did, merge them; if not, give each of them what the other one has not got.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Fixed as a <b>group</b>. A single page out of a duplicate cluster cannot be fixed alone, so <code>indexgap brief</code> writes one work order per cluster rather than one per page.</p><p>Suppressed on JavaScript shells. A page with no text in its source HTML would trip this check for a reason that is already reported as <code>js-shell</code>, and repeating it four times is not four times as informative.</p>
