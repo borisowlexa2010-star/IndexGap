@@ -226,4 +226,35 @@ MESSAGES = {
     "Наряды перезаписываются при каждом прогоне: это отчёт, а не исходник. Свои правки держи в страницах, а не в них.":
         "The briefs are overwritten on every run: they are a report, not a source "
         "file. Keep your own edits in the pages, not in them.",
+
+    # ── находки, у которых наряд раньше выходил пустым ────────────────────────
+    "Реши, что делать с группой целиком: оставить одну страницу и увести остальные canonical'ом на неё — или развести их по разным интентам. Одну страницу из группы починить нельзя.":
+        "Decide what to do with the whole group: keep one page and "
+        "canonical the rest to it, or pull them apart by intent. A single "
+        "page out of the group cannot be fixed alone.",
+    "Проверь, не выросли ли эти страницы из двух ключей с одним интентом. Если да — объединяй; если нет, добавь каждой то, чего нет у соседней.":
+        "Check whether these pages grew out of two keywords with one "
+        "intent. If they did, merge them; if not, give each of them what "
+        "the other one has not got.",
+    "Реши, чем стала страница: архивом или невыполнимым обещанием. Архив пометь датой окончания прямо в тексте, обещание убери из индекса.":
+        "Decide what the page has become: an archive or a promise it can no "
+        "longer keep. Mark an archive with its end date in the text itself, "
+        "and take the promise out of the index.",
+    "Убери из кластера адреса, которых нет среди страниц сайта, или исправь их. Сейчас кластер ссылается в пустоту, и поисковик вправе не считать его вовсе.":
+        "Remove the addresses that are not among the site's pages from the "
+        "cluster, or correct them. Right now the cluster points at nothing, "
+        "and a search engine is entitled to disregard it entirely.",
+    "Приведи объявленный язык в соответствие с языком текста. Пока они расходятся, поисковик показывает страницу не тем читателям — и считает это правильным результатом.":
+        "Bring the declared language in line with the language the text is "
+        "written in. While they disagree, the engine shows the page to the "
+        "wrong readers — and counts that as a correct result.",
+    "Открой страницу-альтернативу для индексации или убери её из кластера: закрытая цель ослабляет весь кластер.":
+        "Open the alternate page for indexing or drop it from the cluster: "
+        "a blocked target weakens the whole cluster.",
+    "Добавь `@type` в блок JSON-LD. Без него разметка разбирается, но не значит ничего.":
+        "Add `@type` to the JSON-LD block. Without it the markup parses and "
+        "means nothing.",
+    "Начни страницу абзацем, который отвечает на её запрос. Сейчас на ней нет ничего, что можно процитировать как ответ.":
+        "Open the page with a paragraph that answers its own query. As it "
+        "stands there is nothing on it that can be quoted as an answer.",
 }

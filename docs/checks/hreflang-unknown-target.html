@@ -97,7 +97,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>The finding reads:</p>
 <pre><code>info  hreflang-unknown-target  альтернатива … не найдена среди разобранных</code></pre>
 
-<h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
+<h2>How to fix it</h2><div class="fix"><p>Remove the addresses that are not among the site's pages from the cluster, or correct them. Right now the cluster points at nothing, and a search engine is entitled to disregard it entirely.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Reported <b>per page</b> even when it is common. Appearing on many pages is the nature of this finding rather than evidence of one template defect, so collapsing it would hide real work.</p>

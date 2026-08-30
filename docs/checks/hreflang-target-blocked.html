@@ -97,7 +97,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>The finding reads:</p>
 <pre><code>warning  hreflang-target-blocked  альтернатива … закрыта от индексации или</code></pre>
 
-<h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
+<h2>How to fix it</h2><div class="fix"><p>Open the alternate page for indexing or drop it from the cluster: a blocked target weakens the whole cluster.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>
