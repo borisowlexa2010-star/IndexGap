@@ -1,0 +1,21 @@
+{
+  "name": "indexgap",
+  "description": "Quality control for programmatic SEO pipelines. Gives an agent deterministic ground truth about a generated site: which numbers on a page are absent from the dataset row that produced it, which findings are one template defect rather than a thousand, which pages are near-duplicates of each other, and what search engines actually indexed. Runs the indexgap CLI — Python standard library only, no dependencies, no API keys except for the optional AI-citation command.",
+  "version": "1.5.0",
+  "author": {
+    "name": "Alexey Borisov"
+  },
+  "homepage": "https://borisowlexa2010-star.github.io/IndexGap/",
+  "repository": "https://github.com/borisowlexa2010-star/IndexGap",
+  "license": "MIT",
+  "keywords": [
+    "seo",
+    "programmatic-seo",
+    "technical-seo",
+    "content-quality",
+    "hreflang",
+    "sitemap",
+    "site-audit",
+    "quality-assurance"
+  ]
+}
