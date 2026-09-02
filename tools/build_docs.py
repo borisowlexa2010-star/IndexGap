@@ -61,23 +61,23 @@ WHY = {
    "A claim with a source attached can be verified by a reader and survives an "
    "editor who was not there when the page was generated. A claim without one "
    "has to be taken on trust, and generated pages have not earned it."
-   "On a hand-written page a missing source is a stylistic choice. On a generated one it is structural: the text was assembled from a row of data that had a provenance, and the page dropped it. Carrying the source through the template costs one line and turns an unverifiable claim into a checkable one — which also happens to be what an editor needs before approving three thousand pages nobody can read individually.",
+   " On a hand-written page a missing source is a stylistic choice. On a generated one it is structural: the text was assembled from a row of data that had a provenance, and the page dropped it. Carrying the source through the template costs one line and turns an unverifiable claim into a checkable one — which also happens to be what an editor needs before approving three thousand pages nobody can read individually.",
  "still-draft":
    "A draft that reached the sitemap is worse than a missing page: search "
    "engines index the unfinished version, and the finished one later competes "
    "with its own placeholder."
-   "The mark is doing its job — it is the pipeline around it that ignored it. indexgap treats the draft flag as authoritative in both directions: a page carrying it is kept out of the sitemap and out of IndexNow, and is reported here so that the flag does not quietly hold a finished page back either.",
+   " The mark is doing its job — it is the pipeline around it that ignored it. indexgap treats the draft flag as authoritative in both directions: a page carrying it is kept out of the sitemap and out of IndexNow, and is reported here so that the flag does not quietly hold a finished page back either.",
  "brief-left":
    "A work order or TODO left in the published file is visible to every reader "
    "and to every crawler. It is also the clearest possible signal that the page "
    "was generated and never read."
-   "The check exists because the failure is invisible to the person who caused it: a work order reads as ordinary text to whoever generated it and as unfinished work to everyone else. It fires on the markers indexgap itself writes, so a pipeline that runs brief and then publishes without clearing the briefs is caught by its own tooling rather than by a reader.",
+   " The check exists because the failure is invisible to the person who caused it: a work order reads as ordinary text to whoever generated it and as unfinished work to everyone else. It fires on the markers indexgap itself writes, so a pipeline that runs brief and then publishes without clearing the briefs is caught by its own tooling rather than by a reader.",
 
  "noindex":
    "A page closed off from indexing earns nothing, no matter how good it is. "
    "When it happens across a template it is usually a staging flag that "
    "survived the move to production."
-   "There is a second, worse version of this: the tag lands on a template and closes off every page that template produced, so the site loses a whole section without anything appearing broken. That is why indexgap reports it as critical and collapses it when it fires site-wide — a hundred identical findings would hide the single line that caused them.",
+   " There is a second, worse version of this: the tag lands on a template and closes off every page that template produced, so the site loses a whole section without anything appearing broken. That is why indexgap reports it as critical and collapses it when it fires site-wide — a hundred identical findings would hide the single line that caused them.",
  "nosnippet":
    "Without the right to a snippet, a page can rank and still lose every click "
    "to a competitor whose result shows text. It also removes the page from AI "
@@ -131,7 +131,7 @@ WHY = {
    "A block that runs long is hard to quote, and quoting is how AI search "
    "surfaces a source. Shorter paragraphs also survive the narrow column of a "
    "phone screen, which is where most of the traffic reads them."
-   "The threshold is not a style rule, it is about extraction. A retrieval system takes a passage whole or cuts it, and when it cuts, the sentence that carried the answer can end up split from the sentence that qualified it. Paragraphs sized to be quotable are the cheapest insurance against being quoted wrongly.",
+   " The threshold is not a style rule, it is about extraction. A retrieval system takes a passage whole or cuts it, and when it cuts, the sentence that carried the answer can end up split from the sentence that qualified it. Paragraphs sized to be quotable are the cheapest insurance against being quoted wrongly.",
 
  "no-title":
    "The title is the strongest on-page signal there is, and the line a person "
@@ -257,21 +257,21 @@ WHY = {
  "robots-blocks-all":
    "Disallow: / for every agent closes the entire site to every search engine. "
    "It is almost always a staging file that was deployed to production."
-   "This is the single most expensive finding in the package, and the easiest to miss: the site keeps building, deploying and passing every other check while earning nothing at all. It is reported once, at site level, because there is exactly one file to fix and reporting it per page would bury it under everything else.",
+   " This is the single most expensive finding in the package, and the easiest to miss: the site keeps building, deploying and passing every other check while earning nothing at all. It is reported once, at site level, because there is exactly one file to fix and reporting it per page would bury it under everything else.",
  "robots-no-sitemap":
    "The Sitemap line in robots.txt is the one place every crawler looks without "
    "being asked. Leaving it out means relying on each engine being told "
    "separately."
-   "Submitting a sitemap through each search engine's own panel works, and stops working the moment a new engine matters or an account changes hands. The line in robots.txt is the version that keeps working without anyone remembering it, and it is the only discovery route the crawlers behind AI answers reliably follow.",
+   " Submitting a sitemap through each search engine's own panel works, and stops working the moment a new engine matters or an account changes hands. The line in robots.txt is the version that keeps working without anyone remembering it, and it is the only discovery route the crawlers behind AI answers reliably follow.",
  "robots-unreadable":
    "A robots.txt that cannot be read is not a permissive robots.txt — crawler "
    "behaviour in that situation is not something you get to choose."
-   "An unreadable robots.txt is treated differently by different crawlers: some assume everything is allowed, others back off entirely. The problem is not which of those you get — it is that you do not get to choose, and the behaviour can differ between engines on the same day.",
+   " An unreadable robots.txt is treated differently by different crawlers: some assume everything is allowed, others back off entirely. The problem is not which of those you get — it is that you do not get to choose, and the behaviour can differ between engines on the same day.",
  "no-robots":
    "No robots.txt is not an error, but it is an absence of control: crawl rate, "
    "sitemap discovery and AI-crawler policy all default to whatever each engine "
    "prefers."
-   "Nothing breaks without robots.txt, which is exactly why it stays missing. What is lost is the ability to say anything at all: crawl rate, the sitemap location, and whether the crawlers behind AI answers are welcome are all decided for you, engine by engine, with no record of the decision anywhere in your repository.",
+   " Nothing breaks without robots.txt, which is exactly why it stays missing. What is lost is the ability to say anything at all: crawl rate, the sitemap location, and whether the crawlers behind AI answers are welcome are all decided for you, engine by engine, with no record of the decision anywhere in your repository.",
 
  "stale-event":
    "A dated event that has passed and is still open for indexing sends people "
@@ -280,7 +280,7 @@ WHY = {
  "stale-closed":
    "The page describes something that has ended. Lower stakes than a stale "
    "event, and still a page whose usefulness expired."
-   "Expired pages are worth keeping when they carry history, and worth removing when they only carry a promise that is no longer true. indexgap does not decide which — it reports the date it found and leaves the judgement to you, because the same expired page can be an archive on one site and a broken promise on another.",
+   " Expired pages are worth keeping when they carry history, and worth removing when they only carry a promise that is no longer true. indexgap does not decide which — it reports the date it found and leaves the judgement to you, because the same expired page can be an archive on one site and a broken promise on another.",
 }
 
 FAMILIES = [
