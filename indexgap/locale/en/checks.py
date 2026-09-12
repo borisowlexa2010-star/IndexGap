@@ -3,6 +3,10 @@
 
 MESSAGES = {
     # ── checks ────────────────────────────────────────────────────────────────
+    "Из сравнения дублей исключено {a0} страниц: noindex, canonical на другую страницу или черновик. Технические проверки этих страниц сохранены.":
+        "Excluded {a0} pages from duplicate comparisons: noindex, a canonical "
+        "pointing elsewhere, or draft status. Technical checks on those pages "
+        "remain enabled.",
     " и ещё {a0}": " and {a0} more",
     "H1 на странице {a0}, нужен один": "{a0} H1 headings on the page, one is needed",
     "`{a0}` — на {a1} страницах из {a2} ({a3:.0%}). Это свойство шаблона, а не список страниц: чинится один раз в шаблоне и исчезает везде.":

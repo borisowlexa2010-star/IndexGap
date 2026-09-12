@@ -29,6 +29,7 @@ from collections import Counter, defaultdict, deque
 
 from . import hreflang
 from .core import url_key
+from .publish import indexable
 from .settings import display_width, text_volume
 from .i18n import tr
 
@@ -98,6 +99,17 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
     cfg = {**CONFIG, **(cfg or {})}
     notes = []
     k = cfg["shingle_size"]
+
+    # Как и sitemap, сравниваем страницы, которые претендуют на индекс.
+    # У noindex, черновика и canonical-алиаса нет отдельной поисковой выдачи;
+    # технические предупреждения об этих состояниях остаются в run_all.
+    eligible = [p for p in pages if indexable(p)]
+    excluded = len(pages) - len(eligible)
+    if excluded:
+        notes.append(tr("Из сравнения дублей исключено {a0} страниц: noindex, "
+                        "canonical на другую страницу или черновик. "
+                        "Технические проверки этих страниц сохранены.", a0=excluded))
+    pages = eligible
 
     words = words or {p.url: p.words for p in pages}
     shingles = {}
@@ -389,6 +401,10 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
     titles = defaultdict(list)
     descriptions = defaultdict(list)
     for p in pages:
+        # Отдельные noindex/canonical-находки не отменяют намеренную
+        # консолидацию URL и не делают её дублем индексируемой страницы.
+        if not indexable(p):
+            continue
         if p.title:
             titles[p.title.strip().lower()].append(p.url)
         if p.description:
