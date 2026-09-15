@@ -38,6 +38,28 @@ from indexgap import __version__                  # noqa: E402
 SITE = "https://borisowlexa2010-star.github.io/IndexGap"
 AUTHOR = "Alexey Borisov"
 PUBLISHED = "2026-08-29"
+
+
+def _modified() -> str:
+    """Дата последнего коммита: замороженная константа врёт уже назавтра.
+
+    Инструмент, который сам проверяет `no-date`, не имеет права публиковать
+    страницы с датой обновления, отставшей от содержимого.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(["git", "log", "-1", "--format=%cs"],
+                             cwd=str(ROOT), capture_output=True, text=True,
+                             timeout=10)
+        stamp = (out.stdout or "").strip()
+        if len(stamp) == 10 and stamp[4] == "-":
+            return stamp
+    except Exception:
+        pass
+    return PUBLISHED
+
+
+MODIFIED = _modified()
 REPO = "https://github.com/borisowlexa2010-star/IndexGap"
 OUT = ROOT / "docs"
 
@@ -479,7 +501,7 @@ def page(path: str, title: str, description: str, body: str,
  "@context":"https://schema.org","@type":"TechArticle",
  "headline":{json.dumps(title)},"description":{json.dumps(description)},
  "url":{json.dumps(url)},"inLanguage":"en",
- "datePublished":"{PUBLISHED}","dateModified":"{PUBLISHED}",
+ "datePublished":"{PUBLISHED}","dateModified":"{MODIFIED}",
  "author":{{"@type":"Person","name":"{AUTHOR}"}},
  "publisher":{{"@type":"Organization","name":"indexgap"}},
  "isPartOf":{{"@type":"WebSite","name":"indexgap","url":{json.dumps(SITE)}}}
@@ -497,7 +519,7 @@ def page(path: str, title: str, description: str, body: str,
 {crumbs}
 {body}
 <footer>
-  <p>By {AUTHOR}. Published <time datetime="{PUBLISHED}">29 August 2026</time>,
+  <p>By {AUTHOR}. Updated <time datetime="{MODIFIED}">{MODIFIED}</time>,
   for indexgap {esc(__version__)}.</p>
   <p>indexgap {esc(__version__)} — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
