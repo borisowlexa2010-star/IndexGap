@@ -75,6 +75,40 @@ class TestFormats(Fixture):
         self.assertEqual(doctor.read_indexed(path)["urls"],
                          [SITE + "/a/", SITE + "/b/"])
 
+    def test_the_zip_search_console_actually_hands_you_is_read(self):
+        """Кнопка Export в GSC отдаёт zip с CSV внутри, а не xlsx.
+
+        Оба формата начинаются на `PK`, и раньше архив уходил в чтение
+        книги, где листов нет, — человек получал «в книге нет листов» и
+        никакого способа догадаться, что делать.
+
+        Имена внутри архива GSC переводит: в русской панели это
+        `Страницы.csv`. Поэтому нужный лист опознаётся по содержимому.
+        """
+        import zipfile
+        path = self.path("Search-Console-export.zip")
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Запросы.csv",
+                             "Запрос,Клики\nаренда берлин,120\n")
+            archive.writestr("Страницы.csv",
+                             "Топ страниц,Клики,Показы\n"
+                             "https://example.com/berlin,120,3400\n"
+                             "https://example.com/munich,64,1900\n")
+        rows, encoding = sources.read_table(path)
+        flat = [str(c) for row in rows for c in row]
+        self.assertIn("https://example.com/berlin", flat)
+        self.assertIn("https://example.com/munich", flat)
+        self.assertNotIn("аренда берлин", flat)
+
+    def test_a_zip_with_nothing_readable_says_so_plainly(self):
+        import zipfile
+        path = self.path("empty.zip")
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("readme.txt", "nothing here")
+        with self.assertRaises(sources.SourceError) as caught:
+            sources.read_table(path)
+        self.assertNotIn("листов", str(caught.exception))
+
     def test_a_broken_archive_is_explained_not_crashed(self):
         path = self.path("gsc.csv")
         with open(path, "wb") as fh:
