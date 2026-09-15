@@ -655,6 +655,37 @@ to, with the thresholds the result has to satisfy.</p>
     page(f"checks/{code}.html", f"{humanise(code)} — indexgap check", desc, body)
 
 
+def _help(command: str) -> str:
+    """Текст `--help` — одинаковый на любой машине.
+
+    argparse печатает по-разному в зависимости от версии Python и ширины
+    терминала: до 3.10 раздел называется «optional arguments», после — просто
+    «options», а перенос строк берётся из размера окна. Страницы, собранные на
+    разных машинах, расходились бы каждый раз, и проверка в CI ловила бы не
+    изменение кода, а чужой терминал.
+    """
+    import shutil
+    was = os.environ.get("COLUMNS")
+    os.environ["COLUMNS"] = "80"
+    shutil.get_terminal_size.cache_clear() if hasattr(
+        shutil.get_terminal_size, "cache_clear") else None
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            cli.main([command, "--help"])
+    except SystemExit:
+        pass
+    finally:
+        if was is None:
+            os.environ.pop("COLUMNS", None)
+        else:
+            os.environ["COLUMNS"] = was
+
+    text = buf.getvalue().strip()
+    # 3.9 говорит «optional arguments», 3.10+ — «options». Оставляем новое.
+    return text.replace("\noptional arguments:", "\noptions:")
+
+
 def build() -> None:
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -712,15 +743,7 @@ the same set of checks the installed version runs — not a description of them.
          body)
 
     # ── страницы команд ──────────────────────────────────────────────────
-    helps = {}
-    for name, _, _ in COMMANDS:
-        buf = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                cli.main([name, "--help"])
-        except SystemExit:
-            pass
-        helps[name] = buf.getvalue().strip()
+    helps = {name: _help(name) for name, _, _ in COMMANDS}
 
     for i, (name, summary, detail) in enumerate(COMMANDS):
         nav = []
