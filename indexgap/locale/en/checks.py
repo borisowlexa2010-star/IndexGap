@@ -91,6 +91,15 @@ MESSAGES = {
     "Найдено краулером (это обход, а не индекс)":
         "Found by a crawler (that is a crawl, not an index)",
     "Файл не найден: {a0}": "File not found: {a0}",
+    "{a0}: архив не читается — файл повреждён или скачался не полностью.":
+        "{a0}: the archive cannot be read — the file is damaged or the "
+        "download did not finish.",
+    "{a0}: внутри архива нет таблицы с адресами страниц. Если это выгрузка "
+    "из Search Console, распакуй архив и передай из него файл со страницами "
+    "(`Pages.csv`, в русской панели «Страницы.csv»).":
+        "{a0}: no table inside the archive holds page addresses. If this is a "
+        "Search Console export, unpack it and pass the file listing pages "
+        "(`Pages.csv`; localised panels translate the name).",
     "Хотя бы в одном индексе": "In at least one index",
     "Яндекс.Вебмастер": "Yandex.Webmaster",
     "аналитика": "analytics",

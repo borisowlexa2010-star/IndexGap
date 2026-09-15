@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.1 — 2026-09-15
+
+The export Google Search Console actually hands you now works.
+
+* **The Export button in Search Console gives you a zip, not a CSV**, and that
+  zip holds `Pages.csv`, `Queries.csv` and the rest. Both zip and xlsx begin
+  with the same two bytes, so the archive was routed into the workbook reader
+  and came back as "the workbook has no sheets" — an error with no path from it
+  to a fix, on the single most common data source there is. A zip without an
+  `xl/` directory is now read as an archive of tables.
+* **The sheet is chosen by content, not by name.** Search Console translates
+  the file names inside the archive — the Russian panel ships `Страницы.csv` —
+  so the sheet with the most address-shaped cells wins, and the queries sheet
+  loses because it holds no addresses at all.
+* **An archive with nothing readable in it says so**, and says what to do
+  instead, rather than talking about sheets that were never the point.
+
 ## 1.5.0 — 2026-08-29
 
 The first release meant to be installed rather than cloned, and the bug that

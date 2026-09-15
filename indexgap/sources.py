@@ -301,7 +301,19 @@ def read_table(path: str) -> tuple:
     with open(path, "rb") as fh:
         head = fh.read(4)
     if head[:2] == b"PK":
-        return _read_xlsx(path), "xlsx"
+        # xlsx и zip с CSV внутри начинаются одинаково. Различает их не
+        # расширение, а наличие книги внутри.
+        try:
+            with zipfile.ZipFile(path) as archive:
+                # Минимальный xlsx бывает и без xl/workbook.xml, поэтому
+                # признак книги — сам каталог xl/, а не отдельный файл.
+                is_workbook = any(n.startswith("xl/")
+                                  for n in archive.namelist())
+        except zipfile.BadZipFile:
+            is_workbook = True          # пусть объяснит чтение книги
+        if is_workbook:
+            return _read_xlsx(path), "xlsx"
+        return _read_zip_tables(path), "zip"
 
     text, encoding = read_text(path)
     stripped = text.lstrip()
@@ -316,15 +328,82 @@ def read_table(path: str) -> tuple:
         if rows:
             return rows, encoding
 
+    return _rows_from_text(text), encoding
+
+
+def _rows_from_text(text: str) -> list:
+    """Текст таблицы → строки. Отдельно, потому что нужен и внутри архива."""
     first = text.splitlines()[0] if text.strip() else ""
     if not any(ch in first for ch in ",;\t|"):
-        return _read_lines(text), encoding
+        return _read_lines(text)
 
     try:
         dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t|")
     except csv.Error:
         dialect = csv.excel
-    return list(csv.reader(io.StringIO(text, newline=""), dialect)), encoding
+    return list(csv.reader(io.StringIO(text, newline=""), dialect))
+
+
+def _url_score(rows: list) -> int:
+    """Сколько в таблице ячеек, похожих на адрес. Лист без адресов нам не нужен."""
+    score = 0
+    for row in rows[1:200]:
+        for cell in row:
+            value = str(cell or "").strip()
+            if value.startswith(("http://", "https://")) or value.startswith("/"):
+                score += 1
+                break
+    return score
+
+
+def _read_zip_tables(path: str) -> list:
+    """
+    Архив с таблицами внутри — не книга xlsx.
+
+    Кнопка Export в Google Search Console отдаёт именно такой zip: внутри
+    `Pages.csv`, `Queries.csv`, `Countries.csv` и остальные. Оба формата
+    начинаются на `PK`, и раньше архив уходил в чтение книги — человек
+    получал «в книге нет листов» и никакой подсказки.
+
+    Имена внутри архива GSC переводит на язык панели (`Страницы.csv`),
+    поэтому нужный лист выбирается по содержимому: тот, где больше всего
+    похожих на адреса ячеек. Лист запросов адресов не содержит и проигрывает.
+    """
+    best, best_score = None, 0
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = [n for n in archive.namelist()
+                       if not n.endswith("/") and "__MACOSX" not in n]
+            for name in members:
+                if not name.lower().endswith((".csv", ".tsv", ".txt")):
+                    continue
+                try:
+                    raw = archive.read(name)
+                except Exception:
+                    continue
+                for codec in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+                    try:
+                        text = raw.decode(codec)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    continue
+                rows = _rows_from_text(text)
+                score = _url_score(rows)
+                if score > best_score:
+                    best, best_score = rows, score
+    except zipfile.BadZipFile:
+        raise SourceError(tr("{a0}: архив не читается — файл повреждён "
+                             "или скачался не полностью.", a0=path))
+
+    if best is None:
+        raise SourceError(tr(
+            "{a0}: внутри архива нет таблицы с адресами страниц. Если это "
+            "выгрузка из Search Console, распакуй архив и передай из него "
+            "файл со страницами (`Pages.csv`, в русской панели "
+            "«Страницы.csv»).", a0=path))
+    return best
 
 
 # ── чей это файл ──────────────────────────────────────────────────────────────
