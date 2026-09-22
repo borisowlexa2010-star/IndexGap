@@ -196,6 +196,58 @@ def read_indexed(csv_path: str, site: str = "") -> dict:
     return {"urls": out, "encoding": encoding, "notes": notes}
 
 
+def read_citations(csv_path: str, site: str = "") -> dict:
+    """
+    Выгрузка Bing Webmaster Tools → AI Performance → Pages: {адрес: цитирований}.
+
+    Формат снят с живого кабинета: `"Page","Citations"`, каждое поле в кавычках,
+    конец строки `\r\n`. Число нужно целиком, а не только адрес: «процитирована
+    1 866 раз» и «один раз» — разные страницы.
+
+    У той же панели есть вторая выгрузка — по запросам (`Grounding Query`). Адресов
+    в ней нет. Прочитанная молча, она дала бы «ничего не цитируется», поэтому её
+    отвергаем с подсказкой, какой файл нужен.
+    """
+    rows, _ = _read_rows(csv_path)
+    if not rows:
+        raise SourceError(tr("{a0}: файл пустой.", a0=csv_path))
+    header = [str(h or "").strip().lower() for h in rows[0]]
+    if "grounding query" in header and not any(
+            h in ("page", "url", "address") for h in header):
+        raise SourceError(tr(
+            "{a0}: это выгрузка запросов (Grounding Queries) — адресов страниц в "
+            "ней нет. В Bing Webmaster Tools → AI Performance переключись на "
+            "вкладку Pages и выгрузи её.", a0=csv_path))
+
+    url_col = sources.guess_column(rows[0], URL_COLUMN_HINTS)
+    count_col = next((i for i, h in enumerate(header) if h == "citations"), -1)
+    if url_col < 0 or count_col < 0:
+        raise SourceError(tr(
+            "{a0}: нужны столбцы с адресом и с числом цитирований. Заголовки файла: {a1}",
+            a0=csv_path, a1=", ".join(str(c) for c in rows[0][:8])))
+
+    base = (site or "").rstrip("/")
+    out = {}
+    for row in rows[1:]:
+        if max(url_col, count_col) >= len(row):
+            continue
+        url = str(row[url_col]).strip().strip('"')
+        if url.startswith("/") and base:
+            url = base + url
+        if not url.startswith(("http://", "https://")):
+            continue
+        raw = str(row[count_col]).strip().replace(",", "").replace(" ", "")
+        try:
+            count = int(float(raw))
+        except ValueError:
+            continue
+        out[url] = out.get(url, 0) + count
+    if not out:
+        raise SourceError(tr("{a0}: ни одной строки с адресом и числом цитирований.",
+                             a0=csv_path))
+    return out
+
+
 def read_sources(specs: list, site: str = "") -> dict:
     """
     Читает несколько выгрузок сразу и помнит, чем каждая является.
@@ -207,7 +259,7 @@ def read_sources(specs: list, site: str = "") -> dict:
     Возвращает `by_engine` (только панели вебмастера — то, что вправе называться
     индексом) и `by_source` (всё подряд, включая краулеры и сторонние сервисы).
     """
-    out, extra, notes, unlabeled, kinds = {}, {}, [], set(), {}
+    out, extra, notes, unlabeled, kinds, cited = {}, {}, [], set(), {}, {}
     for spec in specs or ():
         name, path = sources.parse_spec(spec)
         header = read_indexed_header(path)
@@ -221,6 +273,13 @@ def read_sources(specs: list, site: str = "") -> dict:
                 unlabeled.add(name)
                 notes.append(
                     tr("{a0}: не удалось уверенно определить источник, файл засчитан как «{a1}» ({a2}). Если это не так, укажи явно: --indexed google={a3} или --indexed ahrefs={a4}", a0=os.path.basename(path), a1=name, a2=tr(sources.KIND_TITLE[kind]), a3=path, a4=path))
+        if kind == sources.CITATION:
+            # Не индекс, а шаг после него. Слитая в индекс выборка из 93 страниц
+            # объявила бы непроиндексированным всё остальное.
+            kinds[name] = kind
+            counts = read_citations(path, site)
+            cited[name] = {**cited.get(name, {}), **counts}
+            continue
         result = read_indexed(path, site)
         notes += result.get("notes", [])
         urls = set(result["urls"])
@@ -236,12 +295,13 @@ def read_sources(specs: list, site: str = "") -> dict:
         notes.append(
             tr("панели вебмастера среди выгрузок нет. Воронка построена на том, что есть, но подпись шага это учитывает: ")
             + "; ".join(sources.describe(list(extra))) + ".")
-    return {"by_engine": out, "by_source": extra, "kinds": kinds,
+    return {"by_engine": out, "by_source": extra, "kinds": kinds, "cited": cited,
             "notes": notes, "unlabeled": sorted(unlabeled)}
 
 
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
-           by_engine: dict = None, by_source: dict = None) -> dict:
+           by_engine: dict = None, by_source: dict = None,
+           cited: dict = None) -> dict:
     """
     Строит воронку и, главное, объясняет каждую потерю.
     Возвращает как числа, так и конкретные списки URL — чинить надо адресно.
@@ -308,6 +368,40 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
                           "why": tr("есть в других источниках, но не в {a0}", a0=name),
                           "engine": name, "kind": kind})
 
+    # Цитирование — последний шаг, а не вклад в индекс. База — то, что точно в
+    # индексе, если индекс известен; иначе всё пригодное.
+    cited_keys = {name: {url_key(u): n for u, n in counts.items()}
+                  for name, counts in (cited or {}).items() if counts}
+    cited_closed, cited_unknown, cited_top, cited_off_map = [], [], [], []
+    if cited_keys:
+        # База — индексируемые страницы, а не «в sitemap»: цитирование
+        # доказывает, что ИИ страницу нашёл, и sitemap тут ни при чём. Иначе
+        # процитированная страница, которой нет в sitemap, тихо выпадала.
+        base = (publishable & in_index) if in_index is not None else publishable
+        every = {}
+        for counts in cited_keys.values():
+            for k, n in counts.items():
+                every[k] = every.get(k, 0) + n
+        for name in sorted(cited_keys):
+            hit = set(cited_keys[name]) & base
+            # Без «потеряно»: отсутствие цитирований — не потеря, данные выборка.
+            steps.append({
+                "name": tr("Цитируется: {a0}", a0=name),
+                "count": len(hit), "lost": None,
+                "engine": name, "kind": sources.CITATION})
+        # ИИ цитирует страницу, которую сайт закрыл от индекса: страница
+        # продолжает работать как источник, хотя владелец её убрал.
+        cited_closed = show(set(every) & blocked)
+        cited_unknown = sorted(k for k in every if k not in generated)
+        if in_sitemap is not None:
+            # Заглушка-редирект в sitemap не входит и не должна: её цитируют,
+            # потому что люди ссылаются на домен, а не потому, что её забыли.
+            from .checks import redirect_target
+            stubs = {url_key(p.url) for p in pages if redirect_target(p)}
+            cited_off_map = show((set(every) & publishable) - in_sitemap - stubs)
+        cited_top = sorted(((display.get(k, k), n) for k, n in every.items()),
+                           key=lambda kv: -kv[1])
+
     foreign = []
     # Краулер и сторонний сервис поднимают цифру шага, не поднимая индексацию.
     # Без этой оговорки добавление выгрузки Screaming Frog выглядело бы как
@@ -339,6 +433,10 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "indexed_unknown": indexed_unknown,
         "has_sitemap": in_sitemap is not None,
         "has_index": in_index is not None,
+        "cited_closed": cited_closed,
+        "cited_unknown": cited_unknown,
+        "cited_top": cited_top,
+        "cited_not_in_sitemap": cited_off_map,
     }
 
 

@@ -191,11 +191,12 @@ MESSAGES = {
     "воронка: сгенерировано → sitemap → индексы поисковиков":
         "the funnel: generated → sitemap → search engine indexes",
     "все локальные проверки и отчёт": "every local check, plus the report",
-    "выгрузка индексации; несколько раз для разных поисковиков":
-        "an indexation export; repeat it for different engines",
-    "выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4 и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит":
+    "выгрузка индексации или цитирований Copilot из Bing AI Performance; несколько раз для разных источников":
+        "an indexation export or Copilot citations from Bing AI Performance; repeat it for different sources",
+    "выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4, цитирования Copilot из Bing AI Performance и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит":
         "an export listing pages: a webmaster panel, Ahrefs, Semrush, Screaming "
-        "Frog, GA4 and others. CSV, XLSX, JSON or a plain list of addresses. Repeat "
+        "Frog, GA4, Copilot citations from Bing AI Performance and others. CSV, "
+        "XLSX, JSON or a plain list of addresses. Repeat "
         "it as needed: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. The "
         "source is detected on its own; a label is only needed when the filename "
         "says nothing",
@@ -279,4 +280,25 @@ MESSAGES = {
     "шаблон пути": "path template",
     "язык: {a0}": "language: {a0}",
     "не определён": "not detected",
+
+    # ── цитирование в ИИ-ответах (Bing AI Performance) ─────────────────
+    "\nЦитируется в ИИ-ответах, хотя закрыто от индекса ({a0}):":
+        "\nCited in AI answers, though closed from the index ({a0}):",
+    "\nЦитируется, но такой страницы среди файлов сайта нет ({a0}):":
+        "\nCited, but no such page among the site's files ({a0}):",
+    "\nЧаще всего цитируется:":
+        "\nMost cited:",
+    "         → страница убрана из поиска, но продолжает быть источником ответов. Если закрыта сознательно — проверь, устраивает ли это тебя; ассистент обновит выборку не сразу.":
+        "→ the page was removed from search but still serves as a source for "
+        "answers. If it was closed on purpose, check that this is acceptable; "
+        "the assistant will not refresh its sample straight away.",
+    "         → удалена, переименована или не попала в сборку. Ответы ИИ ведут людей на неё до сих пор.":
+        "→ deleted, renamed or left out of the build. AI answers still send "
+        "people to it.",
+    "Цитирование — {a0}: {a1} страниц(ы), {a2} цитирований":
+        "Citations — {a0}: {a1} page(s), {a2} citations",
+    "\nЦитируется, но в sitemap нет ({a0}):":
+        "\nCited, but not in the sitemap ({a0}):",
+    "         → ИИ нашёл и использует страницу, которую ты в sitemap не отдаёшь. Если убрал сознательно — ничего делать не нужно.":
+        "         → the AI found and uses a page you do not list in the sitemap. If you left it out on purpose, nothing to do.",
 }

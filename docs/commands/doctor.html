@@ -88,7 +88,7 @@ font-size:.85rem;color:var(--ink3)}
 <h1>indexgap doctor</h1>
 <div class="meta"><span class="tag acc">command</span></div>
 <p class="lede">The crawl-to-index funnel.</p>
-<p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost.</p>
+<p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost. Given a Bing Webmaster Tools AI Performance export, it adds the step after the index: which pages Microsoft Copilot actually cites, which of them you have closed from search, and which you left out of the sitemap.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap doctor [-h] [--site SITE] [--home HOME] [--config CONFIG]
                        [--profile PROFILE] [--sitemap SITEMAP]
@@ -112,7 +112,8 @@ options:
                         profiles`
   --sitemap SITEMAP     path or URL of sitemap.xml
   --indexed [engine=]file.csv
-                        an indexation export; repeat it for different engines
+                        an indexation export or Copilot citations from Bing AI
+                        Performance; repeat it for different sources
   --gsc GSC             the same as --indexed google=... (kept for
                         compatibility)
   --out OUT
@@ -124,8 +125,8 @@ options:
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-09-22">2026-09-22</time>,
-  for indexgap 1.6.0.</p>
-  <p>indexgap 1.6.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.7.0.</p>
+  <p>indexgap 1.7.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

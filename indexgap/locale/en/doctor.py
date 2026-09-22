@@ -165,4 +165,17 @@ MESSAGES = {
         "the first paragraph opens with a run-up, “{a0}…” — AI search quotes the "
         "answer, not the introduction",
     "файла {a0} нет": "there is no file {a0}",
+
+    # ── цитирование в ИИ-ответах (Bing AI Performance) ─────────────────
+    "{a0}: ни одной строки с адресом и числом цитирований.":
+        "{a0}: not a single row with an address and a citation count.",
+    "{a0}: нужны столбцы с адресом и с числом цитирований. Заголовки файла: {a1}":
+        "{a0}: an address column and a citation-count column are needed. File "
+        "headers: {a1}",
+    "{a0}: это выгрузка запросов (Grounding Queries) — адресов страниц в ней нет. В Bing Webmaster Tools → AI Performance переключись на вкладку Pages и выгрузи её.":
+        "{a0}: this is the queries export (Grounding Queries) — it holds no "
+        "page addresses. In Bing Webmaster Tools → AI Performance, switch to "
+        "the Pages tab and export that.",
+    "Цитируется: {a0}":
+        "Cited: {a0}",
 }

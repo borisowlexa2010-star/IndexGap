@@ -191,4 +191,12 @@ MESSAGES = {
         "parked translations: {a0} page(s) folded into a single finding, {a1} "
         "repeats removed — each page carried up to seven findings with one "
         "cause.",
+
+    # ── цитирование в ИИ-ответах (Bing AI Performance) ─────────────────
+    "ИИ-ассистент сослался на страницу в ответе, значит она у него в индексе. Данные — выборка: отсутствие цитирований об индексации не говорит ничего":
+        "an AI assistant used the page as a source in an answer, so the page is "
+        "in its index. The data is a sample: no citations says nothing about "
+        "indexing",
+    "цитирование в ИИ-ответах":
+        "citations in AI answers",
 }

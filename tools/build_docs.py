@@ -424,7 +424,10 @@ COMMANDS = [
   "values, so the disagreement can be an informed one."),
  ("doctor", "The crawl-to-index funnel",
   "Follows the pages from what was generated, through the sitemap, to what each "
-  "search engine has actually indexed — and reports where they were lost."),
+  "search engine has actually indexed — and reports where they were lost. Given "
+  "a Bing Webmaster Tools AI Performance export, it adds the step after the "
+  "index: which pages Microsoft Copilot actually cites, which of them you have "
+  "closed from search, and which you left out of the sitemap."),
  ("cite", "Measure whether AI search cites you",
   "Asks Perplexity, the OpenAI Responses API, Gemini and Grok a set of real "
   "user questions and counts how often your domain comes back among the "

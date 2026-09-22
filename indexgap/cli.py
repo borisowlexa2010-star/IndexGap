@@ -195,9 +195,10 @@ def _collect_indexed(args) -> tuple:
     if getattr(args, "gsc", None):
         specs.append(f"google={args.gsc}")
     if not specs:
-        return {}, {}
+        return {}, {}, {}
     result = doctor.read_sources(specs, site=getattr(args, "site", "") or "")
     by_engine, by_source = result["by_engine"], result["by_source"]
+    cited = result.get("cited") or {}
     for note in result["notes"]:
         print(f"  ! {note}")
     if by_engine:
@@ -208,11 +209,14 @@ def _collect_indexed(args) -> tuple:
             f"{n} ({tr(sources.KIND_TITLE[sources.kind_of(n)])}): {len(u)}"
             for n, u in sorted(by_source.items()))
         print(tr("Прочие источники — {a0}", a0=summary))
-    for line in sources.describe(list(by_engine) + list(by_source)):
+    for name, counts in sorted(cited.items()):
+        print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} цитирований",
+                 a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
+    for line in sources.describe(list(by_engine) + list(by_source) + list(cited)):
         print(tr("  что это доказывает → {a0}", a0=line))
     for note in engines.describe_coverage(list(by_engine)):
         print(tr("  не покрыто → {a0}", a0=note))
-    return by_engine, by_source
+    return by_engine, by_source, cited
 
 
 def _describe_project(project: dict, rows: list) -> None:
@@ -316,7 +320,7 @@ def cmd_check(args):
 
     funnel_result = causes = cross = None
     sitemap_urls = None
-    by_engine, by_source = _collect_indexed(args)
+    by_engine, by_source, cited = _collect_indexed(args)
     if args.sitemap:
         sm = doctor.read_sitemap(args.sitemap)
         if sm["error"]:
@@ -324,9 +328,10 @@ def cmd_check(args):
             print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
         else:
             sitemap_urls = sm["urls"]
-    if sitemap_urls is not None or by_engine or by_source:
+    if sitemap_urls is not None or by_engine or by_source or cited:
         funnel_result = doctor.funnel(pages, sitemap_urls, None,
-                                      by_engine=by_engine, by_source=by_source)
+                                      by_engine=by_engine, by_source=by_source,
+                                      cited=cited)
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
 
@@ -558,13 +563,14 @@ def cmd_doctor(args):
             raise SourceError(
                 tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['error']))
         sitemap_urls = sm["urls"]
-    by_engine, by_source = _collect_indexed(args)
-    if sitemap_urls is None and not by_engine:
+    by_engine, by_source, cited = _collect_indexed(args)
+    if sitemap_urls is None and not by_engine and not by_source and not cited:
         raise SourceError(
             tr("Нужен хотя бы --sitemap или --indexed, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv"))
 
     funnel_result = doctor.funnel(pages, sitemap_urls, None,
-                                  by_engine=by_engine, by_source=by_source)
+                                  by_engine=by_engine, by_source=by_source,
+                                  cited=cited)
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
 
@@ -582,6 +588,8 @@ def cmd_doctor(args):
 
     for note in funnel_result.get("foreign") or ():
         print(f"\n  ! {note}")
+
+    _print_citations(funnel_result)
 
     if causes:
         print(tr("\nПочему страницы не в индексе:"))
@@ -602,6 +610,43 @@ def cmd_doctor(args):
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     print(tr("Проверки текста здесь не запускались — это делает `indexgap check`."))
     return 0
+
+
+def _print_citations(funnel_result: dict, limit: int = 10) -> None:
+    """Что ИИ-ассистент берёт в ответы — и что берёт, хотя не должен бы."""
+    top = funnel_result.get("cited_top") or []
+    if not top:
+        return
+    counts = dict(top)
+    closed = funnel_result.get("cited_closed") or []
+    unknown = funnel_result.get("cited_unknown") or []
+    if closed:
+        # Важнее всего остального: страница закрыта от индекса, а ИИ продолжает
+        # отдавать её как источник. Если закрыто по политике — это не про трафик.
+        print(tr("\nЦитируется в ИИ-ответах, хотя закрыто от индекса ({a0}):",
+                 a0=len(closed)))
+        for url in sorted(closed, key=lambda u: -counts.get(u, 0))[:limit]:
+            print(f"  {counts.get(url, 0):>6}  {url}")
+        print(tr("         → страница убрана из поиска, но продолжает быть "
+                 "источником ответов. Если закрыта сознательно — проверь, "
+                 "устраивает ли это тебя; ассистент обновит выборку не сразу."))
+    if unknown:
+        print(tr("\nЦитируется, но такой страницы среди файлов сайта нет ({a0}):",
+                 a0=len(unknown)))
+        for key in unknown[:limit]:
+            print(f"         {key}")
+        print(tr("         → удалена, переименована или не попала в сборку. "
+                 "Ответы ИИ ведут людей на неё до сих пор."))
+    off_map = funnel_result.get("cited_not_in_sitemap") or []
+    if off_map:
+        print(tr("\nЦитируется, но в sitemap нет ({a0}):", a0=len(off_map)))
+        for url in sorted(off_map, key=lambda u: -counts.get(u, 0))[:limit]:
+            print(f"  {counts.get(url, 0):>6}  {url}")
+        print(tr("         → ИИ нашёл и использует страницу, которую ты в sitemap "
+                 "не отдаёшь. Если убрал сознательно — ничего делать не нужно."))
+    print(tr("\nЧаще всего цитируется:"))
+    for url, n in top[:limit]:
+        print(f"  {n:>6}  {url}")
 
 
 def cmd_plan(args):
@@ -967,7 +1012,7 @@ def build_parser():
     common(p)
     p.add_argument("--sitemap", help=tr("путь или URL sitemap.xml для сверки"))
     p.add_argument("--indexed", action="append", metavar=tr("[источник=]файл"),
-                   help=tr("выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4 и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит"))
+                   help=tr("выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4, цитирования Copilot из Bing AI Performance и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
     p.add_argument("--out", default="indexgap-check.html")
     p.add_argument("--dataset", help=tr("семантика (CSV или XLSX) — включает сверку фактов с данными строк"))
@@ -1054,7 +1099,7 @@ def build_parser():
     common(p)
     p.add_argument("--sitemap", help=tr("путь или URL sitemap.xml"))
     p.add_argument("--indexed", action="append", metavar=tr("[движок=]файл.csv"),
-                   help=tr("выгрузка индексации; несколько раз для разных поисковиков"))
+                   help=tr("выгрузка индексации или цитирований Copilot из Bing AI Performance; несколько раз для разных источников"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
     p.add_argument("--out", default="indexgap-doctor.html")
     p.set_defaults(func=cmd_doctor)
