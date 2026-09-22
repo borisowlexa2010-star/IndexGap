@@ -216,6 +216,17 @@ runs over panels only.
 quality or speed question that technical fixes rarely solve. Without the split
 the two look identical and people fix the wrong thing.
 
+**AI citations are a step of their own.** Bing Webmaster Tools → AI Performance
+exports the pages Microsoft Copilot cited and how often. Pass it like any other
+export (`--indexed ai-performance-pages.csv`; the `Citations` column is enough
+for the tool to recognise it) and the funnel gains a last step — *cited* — after
+the index. It is deliberately not merged into the index step: the export is a
+sample, 93 pages on a site with over a thousand indexed, and merged in it would
+declare everything else unindexed. What it adds that nothing else can: pages
+the AI still cites although you closed them from search, and cited pages you
+left out of the sitemap. The queries export from the same screen holds no page
+addresses; the tool says so and tells you which tab to export instead.
+
 One honest caveat the tool states out loud: the Search Console "Pages" export
 is an *impressions* report, not an index report. A page that is indexed but has
 no impressions won't appear in it, so on a young site the funnel overstates
@@ -316,6 +327,12 @@ yes/no, because these answers are not deterministic. And it never says "ChatGPT
 cites you" — what it measured is the API, which OpenAI's own docs describe as
 behaving differently from the product. It is the only command that needs API
 keys, it is off by default, and it sends nothing without `--send`.
+
+Where an engine publishes what it actually cited, the thermometer is not needed.
+Bing Webmaster Tools does, for Copilot, and `indexgap doctor` reads that export
+directly — observed citations per page, no keys, no sampling of your own. It
+still says what the number is not: a count of citations, not a ranking, and
+silence in it proves nothing about indexing.
 
 No `llms.txt` generator either. Google has stated it does not support it and
 has no plans to; no engine has confirmed using it for ranking. Generating a

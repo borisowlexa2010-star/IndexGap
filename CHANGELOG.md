@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.7.0 — 2026-09-22
+
+AI citations, observed rather than measured: Bing Webmaster Tools publishes
+which pages Microsoft Copilot cited, and `doctor` now reads it.
+
+* **New evidence kind: citations in AI answers.** Bing Webmaster Tools → AI
+  Performance → Pages exports `"Page","Citations"`. Pass it like any other
+  export — `--indexed ai-performance-pages.csv` — and the funnel gains a last
+  step after the index: which pages Copilot actually cites. The format was taken
+  from a live account, not guessed: every field quoted, `\r\n` line endings.
+* **It is not merged into the index step, on purpose.** The export is a sample:
+  on the live visa catalogue, 93 cited pages against more than a thousand
+  indexed. Merged into the index, it would have declared everything else
+  unindexed — the most expensive kind of confident wrong answer. Citation is its
+  own step, it reports no "lost", and the report says that silence in it proves
+  nothing about indexing.
+* **What it shows that nothing else does.** Pages the AI still cites although
+  you closed them from search — for pages closed under a payment provider's
+  policy, that is not a traffic question. Cited pages that are missing from the
+  sitemap. Cited pages that are no longer on the site at all. And the most-cited
+  pages, with counts. On the live catalogue: 93 pages, 12,482 citations, and a
+  Chinese guide cited 809 times.
+* **Recognised by its signature column.** `Citations` appears in no other
+  tool's export, so the source is identified with confidence and ahead of the
+  file name — `bing-*.csv` became ambiguous the day Bing started offering two
+  exports. The queries export from the same screen (`Grounding Query`) holds no
+  page addresses; read silently it would have said "nothing is cited", so it is
+  refused with the name of the tab to export instead.
+* `doctor` no longer refuses to run with nothing but a non-panel export: a
+  citations file alone is enough to build a funnel.
+
+344 tests on 3.9, 3.12 and 3.14.
+
 ## 1.6.0 — 2026-09-22
 
 The first run against a live Next.js site reported 12,556 critical findings.

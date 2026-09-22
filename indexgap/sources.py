@@ -49,6 +49,7 @@ INDEX = "index"            # панель вебмастера
 ANALYTICS = "analytics"    # аналитика посещений
 CRAWL = "crawl"            # обход краулером
 THIRDPARTY = "thirdparty"  # чужой индекс
+CITATION = "citation"      # ИИ-ассистент сослался на страницу в ответе
 LIST = "list"              # просто список адресов
 
 KIND_TITLE = {
@@ -56,6 +57,7 @@ KIND_TITLE = {
     ANALYTICS: N_("аналитика"),
     CRAWL: N_("краулер"),
     THIRDPARTY: N_("сторонний индекс"),
+    CITATION: N_("цитирование в ИИ-ответах"),
     LIST: N_("список адресов"),
 }
 
@@ -64,6 +66,9 @@ KIND_PROVES = {
     ANALYTICS: N_("на страницу был визит, значит она в индексе; молчание не значит обратного"),
     CRAWL: N_("краулер дошёл до страницы — это обход, а не индексация"),
     THIRDPARTY: N_("страница есть в индексе стороннего сервиса, а не поисковика"),
+    CITATION: N_("ИИ-ассистент сослался на страницу в ответе, значит она у него "
+                 "в индексе. Данные — выборка: отсутствие цитирований об индексации "
+                 "не говорит ничего"),
     LIST: N_("просто перечень адресов — что он значит, знаешь только ты"),
 }
 
@@ -76,6 +81,14 @@ KIND_PROVES = {
 # нельзя, а тихо выдуманная метка сливает две выгрузки в одну.
 
 TOOLS = {
+    # цитирование в ИИ-ответах. Столбец-подпись `citations` не встречается
+    # больше ни у одного инструмента: по нему источник узнаётся уверенно.
+    "copilot":       {"kind": CITATION, "title": "Bing AI Performance (Copilot)",
+                      "file": ("aiperformance", "ai-performance", "ai_performance",
+                               "copilot"),
+                      "header": ("citations", "citation share", "grounding query"),
+                      "signature": ("citations",)},
+
     # панели вебмастера
     "google":        {"kind": INDEX, "title": "Google Search Console",
                       "file": ("gsc", "search-console", "searchconsole", "google"),
@@ -418,12 +431,19 @@ def identify(path: str, header: list) -> tuple:
     выдуманная метка сливает две выгрузки в одну и убивает сравнение,
     ради которого отчёт и строится.
     """
+    lowered = {str(h or "").strip().lower() for h in (header or [])}
+    # Столбец-подпись: есть только у одного инструмента, поэтому решает
+    # уверенно и раньше имени файла. `bing-pages.csv` стал неоднозначен —
+    # у Bing два экспорта, а столбца `citations` у панели индекса нет.
+    for tool, meta in TOOLS.items():
+        if any(sig in lowered for sig in meta.get("signature", ())):
+            return tool, meta["kind"], True
+
     name = os.path.basename(path).lower()
     for tool, meta in TOOLS.items():
         if any(hint in name for hint in meta["file"]):
             return tool, meta["kind"], True
 
-    lowered = {str(h or "").strip().lower() for h in (header or [])}
     scores = {}
     for tool, meta in TOOLS.items():
         # Универсальные слова не голосуют: «url» и «page» есть в любой выгрузке,
