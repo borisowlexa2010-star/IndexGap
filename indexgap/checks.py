@@ -55,6 +55,9 @@ CONFIG = {
     # Иероглифика: тот же смысл занимает примерно вдвое меньше знаков,
     # поэтому пороги длины для неё свои.
     "cjk_length_factor": 0.5,
+    # Столько запаркованных переводов нужно, чтобы считать это правилом
+    # шаблона. Меньше — каждая страница сообщается сама, как раньше.
+    "parked_rule_min": 5,
 }
 
 _MASK = (1 << 61) - 1
@@ -253,6 +256,32 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
     return {"shares": shares, "skipped": ""}
 
 
+# Корень сайта на Next.js — часто не страница, а заглушка: RSC-поток с командой
+# NEXT_REDIRECT на /en. Классический вариант того же — meta refresh.
+_NEXT_REDIRECT = re.compile(r"NEXT_REDIRECT;(?:replace|push);([^;\"\\\s]+);30[1278]")
+_META_REFRESH = (
+    re.compile(r"<meta[^>]+http-equiv=[\"']?refresh[\"']?[^>]*content=[\"']"
+               r"[^\"']*?url\s*=\s*['\"]?([^\"'\s>]+)", re.I),
+    re.compile(r"<meta[^>]+content=[\"'][^\"']*?url\s*=\s*['\"]?([^\"'\s>]+)"
+               r"[^>]*http-equiv=[\"']?refresh", re.I),
+)
+
+
+def redirect_target(page) -> str:
+    """Куда страница перебрасывает, если это заглушка-редирект; иначе пусто."""
+    from urllib.parse import urljoin
+    raw = getattr(page, "raw", "") or ""
+    found = _NEXT_REDIRECT.search(raw)
+    if not found:
+        for pattern in _META_REFRESH:
+            found = pattern.search(raw)
+            if found:
+                break
+    if not found:
+        return ""
+    return urljoin(page.url, found.group(1).strip())
+
+
 def link_graph(pages: list, home_url: str = None) -> dict:
     """
     Строит граф внутренних ссылок и считает то, что влияет на индексацию:
@@ -281,6 +310,18 @@ def link_graph(pages: list, home_url: str = None) -> dict:
             inbound[t].add(p.url)
 
     home = by_key.get(url_key(home_url)) if home_url else None
+    # Главная-заглушка: ссылок из неё нет, и без этого шага недостижимым
+    # объявлялся весь сайт. На каталоге виз — около трёх тысяч страниц.
+    redirected_from = None
+    if home:
+        by_url = {p.url: p for p in pages}
+        for _ in range(3):                    # цепочка, но не бесконечная
+            target = redirect_target(by_url[home])
+            nxt = by_key.get(url_key(target)) if target else None
+            if not nxt or nxt == home:
+                break
+            redirected_from = redirected_from or home
+            home = nxt
     # Раньше флаг зависел от того, передали ли адрес: CLI передавал None,
     # когда главной среди страниц нет, и предупреждение не печаталось никогда.
     urls = sorted(by_key.values())
@@ -303,9 +344,14 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         "outbound": {u: sorted(t) for u, t in outbound.items()},
         "depth": depth,
         "unresolved": sorted(unresolved),
-        "orphans": sorted(u for u in urls if not inbound.get(u) and u != home),
+        "home_redirected_from": redirected_from,
+        # Сама заглушка — не страница: на неё не должны вести ссылки, и из неё
+        # никуда не нужно доходить.
+        "orphans": sorted(u for u in urls if not inbound.get(u) and u != home
+                          and u != redirected_from),
         "dead_ends": sorted(u for u in urls if not outbound.get(u)),
-        "unreachable": sorted(u for u in urls if u not in depth) if home else [],
+        "unreachable": sorted(u for u in urls if u not in depth
+                              and u != redirected_from) if home else [],
     }
 
 
@@ -474,7 +520,7 @@ LEVEL_ORDER = {"critical": 0, "warning": 1, "info": 2}
 # потом косметика. Раньше сортировка шла по алфавиту кода, и главная находка
 # пакета оказывалась в самом низу списка.
 CODE_WEIGHT = {
-    "stale-event": 0, "unsupported-number": 1, "still-draft": 2, "brief-left": 3,
+    "stale-event": 0, "translations-parked": 1, "unsupported-number": 1, "still-draft": 2, "brief-left": 3,
     "noindex": 3, "nosnippet": 4, "canonical-elsewhere": 5,
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
     "hreflang-no-self": 5, "hreflang-no-return": 6,
@@ -489,6 +535,7 @@ CODE_WEIGHT = {
 
 # Находки, которые и должны встречаться массово: это их природа, а не шаблон.
 NOT_TEMPLATE_WIDE = {"near-duplicate", "similar", "js-shell", "unsupported-number",
+                     "translations-parked",
                      "stale-event", "still-draft", "brief-left",
                      "hreflang-no-return", "hreflang-unknown-target"}
 
@@ -583,6 +630,97 @@ def _clusters(edges: list) -> list:
     return sorted((sorted(g) for g in groups.values()), key=len, reverse=True)
 
 
+# Первый сегмент пути — код языка: `ar`, `zh`, `pt-br`, `zh-hans`.
+_LOCALE = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,4})?$", re.I)
+_URL_IN_TEXT = re.compile(r"https?://[^\s,»\"'<>)]+")
+
+# Что следует из того, что страница закрыта и отдаёт canonical оригиналу.
+# Каждое по отдельности — правда, но все вместе — один факт, сказанный семь раз.
+PARKED_ECHOES = {
+    "noindex", "canonical-elsewhere", "orphan", "unreachable", "deep",
+    "hreflang-no-self", "hreflang-canonical-conflict", "hreflang-no-return",
+    "hreflang-target-blocked",
+}
+
+
+def _locale_split(url: str) -> tuple:
+    """(хост, язык, остаток пути) — язык пуст, если первого сегмента-кода нет."""
+    host, _, path = url_key(url).lstrip("/").partition("/")
+    first, _, rest = path.partition("/")
+    if _LOCALE.match(first or ""):
+        return host, first.lower(), rest.strip("/")
+    return host, "", path.strip("/")
+
+
+def parked_translations(pages: list, cfg: dict = None) -> dict:
+    """
+    Переводы, закрытые от индекса в пользу оригинала: `noindex` и canonical на
+    ту же страницу в другом языке. {url: (язык страницы, язык оригинала)}.
+
+    На каталоге виз так было закрыто 1 408 страниц в девяти языках, и каждая
+    давала семь находок — девять десятых отчёта. Правило — одно.
+    Пусто, если таких страниц меньше порога: одиночки сообщаются как раньше.
+    """
+    cfg = {**CONFIG, **(cfg or {})}
+    parked = {}
+    for p in pages:
+        if "noindex" not in (p.robots or "").lower() or not p.canonical:
+            continue
+        if url_key(p.canonical) == url_key(p.url):
+            continue
+        host, lang, rest = _locale_split(p.url)
+        to_host, to_lang, to_rest = _locale_split(p.canonical)
+        if lang and to_lang and lang != to_lang and host == to_host and rest == to_rest:
+            parked[p.url] = (lang, to_lang)
+    return parked if len(parked) >= cfg["parked_rule_min"] else {}
+
+
+def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
+    """Заменяет каскад от запаркованных переводов одной находкой."""
+    parked = parked_translations(pages, cfg)
+    if not parked:
+        return issues
+    keys = {url_key(u) for u in parked}
+
+    def echo(issue):
+        level, url, code, message = issue
+        if code not in PARKED_ECHOES:
+            return False
+        if url in parked:
+            return True
+        # Открытая страница, которая в hreflang называет запаркованный перевод:
+        # это то же правило, увиденное с другой стороны.
+        if code in ("hreflang-target-blocked", "hreflang-no-return"):
+            return any(url_key(m) in keys for m in _URL_IN_TEXT.findall(message or ""))
+        return False
+
+    kept = [i for i in issues if not echo(i)]
+    removed = len(issues) - len(kept)
+
+    by_lang = Counter(lang for lang, _ in parked.values())
+    source = Counter(to for _, to in parked.values()).most_common(1)[0][0]
+    languages = ", ".join(f"{lang} {n}" for lang, n in sorted(by_lang.items()))
+    with_hreflang = sum(1 for p in pages if p.url in parked
+                        and "hreflang" in (p.raw or "").lower())
+
+    message = tr(
+        "{a0} страниц(ы) на {a1} язык(ах) закрыты noindex и отдают canonical той же "
+        "странице на «{a2}». Это одно правило шаблона, а не {a0} проблем. "
+        "По языкам: {a3}.",
+        a0=len(parked), a1=len(by_lang), a2=source, a3=languages)
+    if with_hreflang:
+        message += " " + tr(
+            "{a0} из них всё ещё объявляют hreflang: он называет их равноправными "
+            "версиями, а canonical — дублями, и поисковик выберет сам.",
+            a0=with_hreflang)
+    kept.append(("critical", "hreflang", "translations-parked", message))
+    notes.append(tr(
+        "запаркованные переводы: {a0} страниц(ы) сведены в одну находку, "
+        "снято {a1} повторов — у каждой страницы было до семи находок "
+        "с одной причиной.", a0=len(parked), a1=removed))
+    return kept
+
+
 def run_all(pages: list, home_url: str = None, cfg: dict = None,
             language: str = "") -> dict:
     """Единая точка входа: всё, что считается локально, без сети."""
@@ -613,6 +751,12 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     mismatch = root_mismatch(pages, graph)
     if mismatch:
         notes.append(mismatch)
+    if graph.get("home_redirected_from"):
+        notes.append(tr(
+            "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "
+            "недостижимость считаются от {a1}: из самой заглушки ссылок нет, "
+            "и без этого весь сайт выглядел бы недостижимым.",
+            a0=graph["home_redirected_from"], a1=graph["home"]))
     if graph["home_missing"]:
         notes.append(
             tr("главной страницы нет среди разобранных файлов, поэтому глубина клика и недостижимость не считались. Проверь --site и корень каталога."))
@@ -621,16 +765,20 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         if share < cfg["unique_share_min"] and url not in shells:
             issues.append(("critical", url, "low-uniqueness",
                            tr("только {a0:.0%} текста уникально — остальное шаблон", a0=share)))
+    # Ссылки нужны странице, чтобы её нашли и проиндексировали. Закрытой от
+    # индекса они ни к чему: «сирота» и «недостижима» на ней — следствие
+    # решения её закрыть, а не отдельная беда. Сама находка noindex остаётся.
+    closed = {p.url for p in pages if "noindex" in (p.robots or "").lower()}
     for url in graph["orphans"]:
-        if url not in shells:
+        if url not in shells and url not in closed:
             issues.append(("critical", url, "orphan",
                            tr("ни одна внутренняя ссылка не ведёт на страницу")))
     for url in graph["unreachable"]:
-        if url not in graph["orphans"] and url not in shells:
+        if url not in graph["orphans"] and url not in shells and url not in closed:
             issues.append(("critical", url, "unreachable",
                            tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
-        if url in shells:
+        if url in shells or url in closed:
             continue
         if d > cfg["max_click_depth"]:
             issues.append(("warning", url, "deep",
@@ -681,6 +829,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # сотни находок там, где находка ровно одна: пустой HTML.
     pairs = [(a, b, j) for a, b, j in dupes["pairs"]
              if a.url not in shells and b.url not in shells]
+
+    issues = _collapse_parked(issues, notes, pages, cfg)
 
     return {
         "pages": pages,

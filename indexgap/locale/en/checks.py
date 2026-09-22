@@ -173,4 +173,22 @@ MESSAGES = {
     "Шаблонность почти не показательна: общая обвязка ленты одинакова по определению.":
         "Boilerplate tells you almost nothing here: a feed's shared chrome is "
         "identical by definition.",
+
+    # ── главная-заглушка и запаркованные переводы ─────────────────────
+    "главная {a0} — заглушка-редирект на {a1}. Глубина клика и недостижимость считаются от {a1}: из самой заглушки ссылок нет, и без этого весь сайт выглядел бы недостижимым.":
+        "the home page {a0} is a redirect stub pointing to {a1}. Click depth "
+        "and reachability are measured from {a1}: the stub itself has no links, "
+        "and without this the whole site would look unreachable.",
+    "{a0} страниц(ы) на {a1} язык(ах) закрыты noindex и отдают canonical той же странице на «{a2}». Это одно правило шаблона, а не {a0} проблем. По языкам: {a3}.":
+        "{a0} page(s) in {a1} language(s) are closed with noindex and point "
+        "their canonical at the same page in “{a2}”. That is one template rule, "
+        "not {a0} problems. By language: {a3}.",
+    "{a0} из них всё ещё объявляют hreflang: он называет их равноправными версиями, а canonical — дублями, и поисковик выберет сам.":
+        "{a0} of them still declare hreflang: it calls them equal versions "
+        "while the canonical calls them duplicates, and the search engine will "
+        "pick for itself.",
+    "запаркованные переводы: {a0} страниц(ы) сведены в одну находку, снято {a1} повторов — у каждой страницы было до семи находок с одной причиной.":
+        "parked translations: {a0} page(s) folded into a single finding, {a1} "
+        "repeats removed — each page carried up to seven findings with one "
+        "cause.",
 }

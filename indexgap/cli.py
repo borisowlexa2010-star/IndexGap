@@ -372,14 +372,27 @@ def cmd_check(args):
 
 
 def _print_first_things(issues):
-    """Три числа, с которых начинают. Скилл обещает их — теперь они есть."""
+    """
+    Три пункта, с которых начинают. Скилл обещает их — теперь они есть.
+
+    Раньше порядок решало только количество. Находка уровня сайта — одна
+    правка с самым большим радиусом, но по числу она всегда единица: robots.txt,
+    закрывший сайт от всех поисковиков, уступал пятидесяти тонким страницам и
+    в список не попадал вовсе. Поэтому находки уровня сайта идут первыми, а
+    вместо числа у них написано «сайт».
+    """
     from collections import Counter
+    from .repair import SITE_LEVEL
     counts = Counter(code for level, _, code, _ in issues if level == "critical")
     if not counts:
         return
+    site = sorted((c for c in counts if c in SITE_LEVEL),
+                  key=lambda c: checks.CODE_WEIGHT.get(c, 99))
+    rest = [c for c, _ in counts.most_common() if c not in SITE_LEVEL]
     print(tr("Чинить в этом порядке:"))
-    for code, count in counts.most_common(3):
-        print(f"  {count:>5}  {code} — {report._help(code)[:80]}")
+    for code in (site + rest)[:3]:
+        label = tr("сайт") if code in SITE_LEVEL else str(counts[code])
+        print(f"  {label:>5}  {code} — {report._help(code)[:80]}")
 
 
 def _guess_robots(args):

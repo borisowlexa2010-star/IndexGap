@@ -220,4 +220,9 @@ MESSAGES = {
     "похожих пар": "similar pairs",
     "сирот": "orphans",
     "страниц": "pages",
+
+    # ── главная-заглушка и запаркованные переводы ─────────────────────
+    "Переводы закрыты от индекса и отдают canonical оригиналу — правилом шаблона, а не постранично.":
+        "Translations are closed from the index and hand their canonical to the "
+        "original — by a template rule, not page by page.",
 }

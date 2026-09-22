@@ -202,6 +202,21 @@ WHY = {
    "The anchor is one of the few places where you get to say what a page is "
    "about from outside the page.",
 
+ "translations-parked":
+   "A common way to ship translations before they are ready: close them with "
+   "noindex and point their canonical at the original. It is a reasonable "
+   "holding pattern and a dangerous resting place — the pages stay out of "
+   "search in every market they were built for, and nothing on the site looks "
+   "broken. On a live ten-language catalogue this one rule covered 1,408 pages "
+   "in nine languages, two and a half months after it was introduced as "
+   "temporary for two of them."
+   " Reported page by page it produced 9,722 findings across seven checks — "
+   "nine tenths of the report — and the one thing worth knowing drowned in its "
+   "own consequences. So it is reported once, with a count per language, and "
+   "the question it actually raises: which of these translations are ready to "
+   "open? The pages that are not ready should also stop declaring hreflang, "
+   "because a cluster that calls them equal versions while their canonical "
+   "calls them duplicates leaves the choice to the search engine.",
  "hreflang-missing":
    "The site has versions in several languages and this page does not say so. "
    "Search engines then treat the versions as competitors rather than "
@@ -337,7 +352,7 @@ FAMILIES = [
   "hreflang is mutual, self-inclusive and per-page — three properties a "
   "template gets wrong in three different ways. These checks validate the "
   "cluster as a whole rather than the tag in isolation.",
-  ["hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
+  ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
    "hreflang-unknown-target", "hreflang-lang-mismatch", "hreflang-canonical-conflict",
    "hreflang-target-blocked", "hreflang-static-cluster"]),
 

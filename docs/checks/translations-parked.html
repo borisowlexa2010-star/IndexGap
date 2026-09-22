@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>check by eye — indexgap check</title>
-<meta name="description" content="check by eye: what indexgap reports, why it matters and how to fix it. Reported as info.">
-<link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/check-by-eye.html">
+<title>translations parked — indexgap check</title>
+<meta name="description" content="translations parked: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html">
 <meta property="og:type" content="article">
-<meta property="og:title" content="check by eye — indexgap check">
-<meta property="og:description" content="check by eye: what indexgap reports, why it matters and how to fix it. Reported as info.">
-<meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/check-by-eye.html">
+<meta property="og:title" content="translations parked — indexgap check">
+<meta property="og:description" content="translations parked: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html">
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"check by eye \u2014 indexgap check","description":"check by eye: what indexgap reports, why it matters and how to fix it. Reported as info.",
- "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/check-by-eye.html","inLanguage":"en",
+ "headline":"translations parked \u2014 indexgap check","description":"translations parked: what indexgap reports, why it matters and how to fix it. Reported as info.",
+ "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-09-15",
  "author":{"@type":"Person","name":"Alexey Borisov"},
  "publisher":{"@type":"Organization","name":"indexgap"},
@@ -85,22 +85,22 @@ font-size:.85rem;color:var(--ink3)}
 </nav>
 
 
-<h1>check by eye</h1>
+<h1>translations parked</h1>
 <div class="meta">
   <span class="tag info">info</span>
-  <span class="tag">check-by-eye</span>
-  <span class="tag acc">Invented facts</span>
+  <span class="tag">translations-parked</span>
+  <span class="tag acc">hreflang and language versions</span>
 </div>
-<p class="lede">Some numbers in a page are ordinary language — “one of the first”, “two weeks or so” — and some are invented facts wearing the same clothes. The package refuses to guess between them and hands you the short list instead of silently picking.</p>
+<p class="lede">A common way to ship translations before they are ready: close them with noindex and point their canonical at the original. It is a reasonable holding pattern and a dangerous resting place — the pages stay out of search in every market they were built for, and nothing on the site looks broken. On a live ten-language catalogue this one rule covered 1,408 pages in nine languages, two and a half months after it was introduced as temporary for two of them. Reported page by page it produced 9,722 findings across seven checks — nine tenths of the report — and the one thing worth knowing drowned in its own consequences. So it is reported once, with a count per language, and the question it actually raises: which of these translations are ready to open? The pages that are not ready should also stop declaring hreflang, because a cluster that calls them equal versions while their canonical calls them duplicates leaves the choice to the search engine.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>info  check-by-eye  числа, которых нет в данных — просмотри глазами:</code></pre>
+<pre><code>info  translations-parked  —</code></pre>
 
-<h2>How to fix it</h2><div class="fix"><p>Read these numbers with your own eyes. Some are ordinary turns of phrase, some are invented. Keep only what you can confirm.</p></div>
+<h2>How to fix it</h2><div class="fix"><p>Decide per language. If a translation is ready, open it: its own canonical and index. If it is not, keep it closed, but remove hreflang from it and from the pages that point at it: right now the signals contradict each other and the search engine picks for itself.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>
+<p>This is a <b>site-level</b> finding: it belongs to the site, not to any one page, and is reported once however many pages are audited.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -111,9 +111,9 @@ indexgap check</code></pre>
 every finding on this page into a work order placed next to the page it belongs
 to, with the thresholds the result has to satisfy.</p>
 
-<h2>Related checks in invented facts</h2>
-<ul class="plain"><li><a href="unsupported-number.html">unsupported-number</a><span>unsupported number</span></li><li><a href="source-note.html">source-note</a><span>source note</span></li><li><a href="still-draft.html">still-draft</a><span>still draft</span></li><li><a href="brief-left.html">brief-left</a><span>brief left</span></li></ul>
-<p><a href="index.html">All checks</a> · <a href="index.html#invented-facts">Invented facts</a></p>
+<h2>Related checks in hreflang and language versions</h2>
+<ul class="plain"><li><a href="hreflang-missing.html">hreflang-missing</a><span>hreflang missing</span></li><li><a href="hreflang-no-self.html">hreflang-no-self</a><span>hreflang no self</span></li><li><a href="hreflang-no-return.html">hreflang-no-return</a><span>hreflang no return</span></li><li><a href="hreflang-bad-code.html">hreflang-bad-code</a><span>hreflang bad code</span></li><li><a href="hreflang-unknown-target.html">hreflang-unknown-target</a><span>hreflang unknown target</span></li><li><a href="hreflang-lang-mismatch.html">hreflang-lang-mismatch</a><span>hreflang lang mismatch</span></li><li><a href="hreflang-canonical-conflict.html">hreflang-canonical-conflict</a><span>hreflang canonical conflict</span></li><li><a href="hreflang-target-blocked.html">hreflang-target-blocked</a><span>hreflang target blocked</span></li><li><a href="hreflang-static-cluster.html">hreflang-static-cluster</a><span>hreflang static cluster</span></li></ul>
+<p><a href="index.html">All checks</a> · <a href="index.html#hreflang">hreflang and language versions</a></p>
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-09-15">2026-09-15</time>,
