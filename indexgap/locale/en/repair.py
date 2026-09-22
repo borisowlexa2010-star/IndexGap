@@ -257,4 +257,11 @@ MESSAGES = {
     "Начни страницу абзацем, который отвечает на её запрос. Сейчас на ней нет ничего, что можно процитировать как ответ.":
         "Open the page with a paragraph that answers its own query. As it "
         "stands there is nothing on it that can be quoted as an answer.",
+
+    # ── главная-заглушка и запаркованные переводы ─────────────────────
+    "Реши по каждому языку. Перевод готов — открой его: свой canonical и index. Не готов — держи закрытым, но убери hreflang и с него, и со ссылающихся на него страниц: сейчас сигналы спорят, и поисковик выбирает сам.":
+        "Decide per language. If a translation is ready, open it: its own "
+        "canonical and index. If it is not, keep it closed, but remove hreflang "
+        "from it and from the pages that point at it: right now the signals "
+        "contradict each other and the search engine picks for itself.",
 }

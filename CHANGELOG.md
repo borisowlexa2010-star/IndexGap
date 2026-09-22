@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.6.0 — 2026-09-22
+
+The first run against a live Next.js site reported 12,556 critical findings.
+About 600 were real. This release is what it took to say so.
+
+* **A redirect stub is no longer taken for the home page.** Next.js serves the
+  site root as a stub whose only content is `NEXT_REDIRECT;replace;/en;307;`.
+  Taken for the home page, it had no links out, so about three thousand pages
+  were declared unreachable. `NEXT_REDIRECT` and `meta refresh` are now
+  followed to the real home, the report says so, and the stub itself is not
+  counted as an orphan.
+* **New site-level check `translations-parked`.** The site had closed 1,408
+  translations with `noindex` and pointed their canonical at the English
+  original — a holding pattern its own history introduced as temporary for two
+  languages, two and a half months earlier. Page by page, that one rule
+  produced 9,722 findings across seven checks: nine tenths of the report, with
+  the one thing worth knowing buried in its own consequences. It is now one
+  finding with a count per language, and it says whether the parked pages still
+  declare hreflang, which is the part that actually contradicts the canonical.
+  Five or more such pages make a rule; fewer are reported one by one as before.
+* **Reachability is not judged on pages closed from the index.** Links exist so
+  that a page is found and indexed; a `noindex` page has declined that. It no
+  longer collects `orphan`, `unreachable` and `deep` on top of `noindex`, which
+  stays.
+* **Site-level findings lead "Fix in this order".** The list ranked by count
+  only, so a site-level finding — always a count of one — never made it. That
+  included `robots-blocks-all`, the most expensive finding in the package: a
+  robots.txt closing the site to every engine lost its place to fifty thin
+  pages. Site-level findings now come first, labelled `site` instead of `1`.
+
+On the live site: critical 12,556 → 750, warnings 1,260 → 216, orphans
+1,393 → 0. What is left is real: 55 near-duplicate groups, 40 indexable pages
+with no link path to them, and 116 closed English pages worth a second look.
+333 tests on 3.9, 3.12 and 3.14.
+
 ## 1.5.1 — 2026-09-15
 
 The export Google Search Console actually hands you now works.

@@ -177,6 +177,7 @@ MESSAGES = {
     "Строк в датасете: {a0}": "Rows in the dataset: {a0}",
     "Файл ключа: {a0}": "Key file: {a0}",
     "Чинить в этом порядке:": "Fix in this order:",
+    "сайт": "site",
     "Что понято про проект:": "What was worked out about the project:",
     "Это пробный прогон: {a0} URL готовы к отправке. Чтобы отправить — добавь --send.":
         "This was a dry run: {a0} URLs are ready to submit. To actually send them, "

@@ -116,6 +116,11 @@ FIX = {
                            "self-ссылки кластер невалиден целиком."),
     "hreflang-no-return": N_("Сделай связь взаимной: односторонняя отбрасывается "
                              "целиком, а не учитывается частично."),
+    "translations-parked": N_("Реши по каждому языку. Перевод готов — открой его: "
+                              "свой canonical и index. Не готов — держи закрытым, "
+                              "но убери hreflang и с него, и со ссылающихся на "
+                              "него страниц: сейчас сигналы спорят, и поисковик "
+                              "выбирает сам."),
     "hreflang-static-cluster": N_("Шаблон печатает кластер главной на каждой "
                                   "странице. Кластер должен собираться "
                                   "из переводов ЭТОЙ страницы."),
@@ -164,7 +169,8 @@ FIX = {
 # Находки, которые чинятся один раз в шаблоне, а не постранично.
 GROUPED = {"near-duplicate", "similar"}
 SITE_LEVEL = {"robots-blocks-all", "ai-crawler-blocked", "robots-no-sitemap",
-              "robots-unreadable", "no-robots", "hreflang-static-cluster"}
+              "robots-unreadable", "no-robots", "hreflang-static-cluster",
+              "translations-parked"}
 
 HEADER = "<!-- indexgap-brief -->"
 
