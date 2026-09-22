@@ -41,20 +41,22 @@ PUBLISHED = "2026-08-29"
 
 
 def _modified() -> str:
-    """Дата последнего коммита: замороженная константа врёт уже назавтра.
+    """Дата выпуска текущей версии — из CHANGELOG.
 
-    Инструмент, который сам проверяет `no-date`, не имеет права публиковать
-    страницы с датой обновления, отставшей от содержимого.
+    Замороженная константа врёт со следующего дня, а дата последнего коммита
+    врёт иначе: документация сама входит в коммит, дату которого ей надо знать,
+    и всегда отстаёт на один. CI пересобирает после коммита и видит другую
+    дату на каждой странице. Запись в CHANGELOG пишется до коммита, не зависит
+    от истории git и по смыслу ровно то, что нужно: страницы описывают версию,
+    вышедшую в этот день.
     """
-    import subprocess
     try:
-        out = subprocess.run(["git", "log", "-1", "--format=%cs"],
-                             cwd=str(ROOT), capture_output=True, text=True,
-                             timeout=10)
-        stamp = (out.stdout or "").strip()
-        if len(stamp) == 10 and stamp[4] == "-":
-            return stamp
-    except Exception:
+        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        found = re.search(r"^## " + re.escape(__version__) + r" — (\d{4}-\d{2}-\d{2})",
+                          text, re.M)
+        if found:
+            return found.group(1)
+    except OSError:
         pass
     return PUBLISHED
 
