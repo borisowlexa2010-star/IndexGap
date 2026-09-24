@@ -227,6 +227,14 @@ the AI still cites although you closed them from search, and cited pages you
 left out of the sitemap. The queries export from the same screen holds no page
 addresses; the tool says so and tells you which tab to export instead.
 
+**Every sitemap, and everything the engine knows that you did not generate.**
+`--sitemap` can be repeated, and when robots.txt declares sitemap files you did
+not pass, the tool names them — on a live site one `sitemap.xml` held 13 URLs
+and the three declared files together held 94. Addresses the engine reports but
+the site does not contain are listed by meaning: other hosts (staging, admin,
+internal tools — the ones to close), pages that no longer exist (redirect them),
+and files.
+
 One honest caveat the tool states out loud: the Search Console "Pages" export
 is an *impressions* report, not an index report. A page that is indexed but has
 no impressions won't appear in it, so on a young site the funnel overstates

@@ -86,7 +86,8 @@ def fetch_participants(cache_path_dir: str = None, timeout: int = 15,
         return {"participants": dict(FALLBACK_PARTICIPANTS), "source": tr("встроенный список")}
 
     try:
-        with urllib.request.urlopen(REGISTRY_URL, timeout=timeout) as resp:
+        from .core import request
+        with urllib.request.urlopen(request(REGISTRY_URL), timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         if isinstance(data, dict) and data:
             try:

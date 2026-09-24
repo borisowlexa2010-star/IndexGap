@@ -322,12 +322,14 @@ def cmd_check(args):
     sitemap_urls = None
     by_engine, by_source, cited = _collect_indexed(args)
     if args.sitemap:
-        sm = doctor.read_sitemap(args.sitemap)
-        if sm["error"]:
-            print(tr("  ! sitemap не прочитан: {a0}", a0=sm['error']))
-            print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
-        else:
+        sm = doctor.read_sitemaps(args.sitemap)
+        for error in sm["errors"]:
+            print(tr("  ! sitemap не прочитан: {a0}", a0=error))
+        if sm["urls"]:
             sitemap_urls = sm["urls"]
+        else:
+            print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
+        _warn_undeclared(args.robots or _guess_robots(args), args.sitemap)
     if sitemap_urls is not None or by_engine or by_source or cited:
         funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                       by_engine=by_engine, by_source=by_source,
@@ -558,11 +560,14 @@ def cmd_doctor(args):
 
     sitemap_urls = None
     if args.sitemap:
-        sm = doctor.read_sitemap(args.sitemap)
-        if sm["error"]:
+        sm = doctor.read_sitemaps(args.sitemap)
+        if not sm["urls"] and sm["errors"]:
             raise SourceError(
-                tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['error']))
+                tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['errors'][0]))
+        for error in sm["errors"]:
+            print(tr("  ! sitemap не прочитан: {a0}", a0=error))
         sitemap_urls = sm["urls"]
+        _warn_undeclared(_guess_robots(args), args.sitemap)
     by_engine, by_source, cited = _collect_indexed(args)
     if sitemap_urls is None and not by_engine and not by_source and not cited:
         raise SourceError(
@@ -590,6 +595,8 @@ def cmd_doctor(args):
         print(f"\n  ! {note}")
 
     _print_citations(funnel_result)
+    foreign = doctor.foreign_urls(funnel_result, args.site)
+    _print_foreign(foreign)
 
     if causes:
         print(tr("\nПочему страницы не в индексе:"))
@@ -606,10 +613,46 @@ def cmd_doctor(args):
     json_path = os.path.splitext(args.out)[0] + ".json"
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
-                            "notes": notes})
+                            "foreign": foreign, "notes": notes})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     print(tr("Проверки текста здесь не запускались — это делает `indexgap check`."))
     return 0
+
+
+def _warn_undeclared(robots_path: str, given) -> None:
+    """robots.txt объявляет sitemap-файлы, которых сверке не передали."""
+    missing = doctor.undeclared_sitemaps(robots_path, given)
+    if not missing:
+        return
+    print(tr("  ! robots.txt объявляет ещё {a0} sitemap-файл(а), которых нет в "
+             "сверке, — шаг «в sitemap» будет занижен. Добавь:", a0=len(missing)))
+    for url in missing:
+        print(f"      --sitemap {url}")
+
+
+def _print_foreign(foreign: dict, limit: int = 10) -> None:
+    """Что поисковик знает, а среди страниц сайта нет — по смыслу, а не списком."""
+    other, missing, files = (foreign.get("other_hosts") or [],
+                             foreign.get("missing") or [], foreign.get("files") or [])
+    if other:
+        # Самое важное: чужой хост в индексе — это чаще всего стенд, админка
+        # или служебный сервис, которые не должны попадать в поиск вовсе.
+        print(tr("\nПоисковик знает адреса на других хостах ({a0}):", a0=len(other)))
+        for host, n in foreign.get("by_host", {}).items():
+            print(f"  {n:>5}  {host}")
+        print(tr("         → стенды, админки и служебные сервисы в поиске не нужны: "
+                 "отдай на этих хостах X-Robots-Tag: noindex или закрой их входом. "
+                 "Проверь каждый — выгрузка показывает прошлое, не текущее."))
+    if missing:
+        print(tr("\nПоисковик знает страницы, которых нет среди файлов сайта ({a0}):",
+                 a0=len(missing)))
+        for key in missing[:limit]:
+            print(f"         {key}")
+        print(tr("         → удалены или переименованы. Если у страницы был трафик — "
+                 "перенаправь её 301 на ближайшую живую; если нет — 410 достаточно."))
+    if files:
+        print(tr("\nВ веб-выдаче есть файлы, а не страницы ({a0}) — обычно это "
+                 "не беда, но стоит знать.", a0=len(files)))
 
 
 def _print_citations(funnel_result: dict, limit: int = 10) -> None:
@@ -1010,7 +1053,8 @@ def build_parser():
 
     p = sub.add_parser("check", help=tr("все локальные проверки и отчёт"))
     common(p)
-    p.add_argument("--sitemap", help=tr("путь или URL sitemap.xml для сверки"))
+    p.add_argument("--sitemap", action="append",
+                   help=tr("путь или URL sitemap.xml для сверки"))
     p.add_argument("--indexed", action="append", metavar=tr("[источник=]файл"),
                    help=tr("выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4, цитирования Copilot из Bing AI Performance и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
@@ -1097,7 +1141,7 @@ def build_parser():
 
     p = sub.add_parser("doctor", help=tr("воронка: сгенерировано → sitemap → индексы поисковиков"))
     common(p)
-    p.add_argument("--sitemap", help=tr("путь или URL sitemap.xml"))
+    p.add_argument("--sitemap", action="append", help=tr("путь или URL sitemap.xml"))
     p.add_argument("--indexed", action="append", metavar=tr("[движок=]файл.csv"),
                    help=tr("выгрузка индексации или цитирований Copilot из Bing AI Performance; несколько раз для разных источников"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
