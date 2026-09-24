@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.8.0 — 2026-09-24
+
+Three things a live Search Console export of rumors.app showed the tool
+getting wrong or keeping to itself.
+
+* **The engine's addresses that are not on the site are finally shown.** The
+  funnel counted them and printed them nowhere — not in the console, not in the
+  HTML. On rumors.app there were nine, and among them a staging host and an
+  internal GitLab: the most important thing in the export never reached the
+  person reading it. They are now listed by meaning — other hosts, grouped (the
+  ones to close with `X-Robots-Tag: noindex` or a login), pages that no longer
+  exist (redirect those with traffic), and files.
+* **Every network request introduces itself.** Without a header urllib sends
+  `Python-urllib/3.x`, which many firewalls refuse by default: the rumors.app
+  sitemap answered the tool 403 and answered curl 200, and the report blamed the
+  site. Sitemaps, IndexNow, the engine registry and the AI APIs now send
+  `indexgap/<version> (+repository URL)`. The tool does not pretend to be a
+  browser — a site is entitled to know who is asking, and to say no.
+* **More than one sitemap.** `--sitemap` can be repeated, and when robots.txt
+  declares sitemap files that were not passed, the tool names them with the
+  exact flags to add. One `sitemap.xml` held 13 URLs; the three files robots.txt
+  declared held 94, and the "in sitemap" step had been low by a factor of seven
+  without a word about it. A broken file no longer hides the others.
+
+357 tests on 3.9, 3.12 and 3.14.
+
 ## 1.7.0 — 2026-09-22
 
 AI citations, observed rather than measured: Bing Webmaster Tools publishes

@@ -33,6 +33,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 import urllib.error
 import urllib.request
 from xml.etree import ElementTree
@@ -66,7 +67,8 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
     _seen.add(source)
     try:
         if source.startswith(("http://", "https://")):
-            with urllib.request.urlopen(source, timeout=30) as resp:
+            from .core import request
+            with urllib.request.urlopen(request(source), timeout=30) as resp:
                 data = resp.read()
         else:
             if not os.path.exists(source):
@@ -119,6 +121,85 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
 
 
 URL_COLUMN_HINTS = sources.URL_COLUMN_HINTS
+
+
+def read_sitemaps(sources) -> dict:
+    """
+    Несколько sitemap-файлов сразу: объединённый список адресов и ошибки по каждому.
+
+    robots.txt на живом сайте объявлял три файла, а принимался один: один давал
+    13 адресов, все три — 94, и шаг «в sitemap» занижался всемеро. Сломанный
+    файл не прячет остальные — его ошибка называется отдельно.
+    """
+    if isinstance(sources, str):
+        sources = [sources]
+    urls, seen, errors = [], set(), []
+    for source in sources or ():
+        result = read_sitemap(source)
+        if result.get("error"):
+            errors.append(f"{source}: {result['error']}")
+        for url in result.get("urls") or ():
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return {"urls": urls, "errors": errors}
+
+
+def undeclared_sitemaps(robots_path: str, given) -> list:
+    """
+    Sitemap-файлы, которые robots.txt объявляет, а сверке не передали.
+
+    Переданный файл узнаётся и по полному адресу, и по имени: скачанная копия
+    `sitemap-landings.xml` — тот же файл, что объявлен по адресу.
+    """
+    if not robots_path:
+        return []
+    from .aeo import read_robots
+    declared = (read_robots(robots_path) or {}).get("sitemaps") or []
+    if isinstance(given, str):
+        given = [given]
+    def name(value):
+        return os.path.basename(str(value).split("?")[0].rstrip("/")).lower()
+    full = {str(g).rstrip("/") for g in given or ()}
+    names = {name(g) for g in given or ()}
+    return [s for s in declared
+            if s.rstrip("/") not in full and name(s) not in names]
+
+
+# Файлы, а не страницы: картинка в веб-выдаче — не потерянная страница.
+_FILE = re.compile(r"\.(?:webp|png|jpe?g|gif|svg|avif|ico|pdf|zip|mp4|webm|mp3|"
+                   r"css|js|json|xml|txt|woff2?)$", re.I)
+
+
+def foreign_urls(funnel_result: dict, site: str = "") -> dict:
+    """
+    То, что поисковик знает, а среди страниц сайта нет, — по смыслу.
+
+    Раньше это только считалось. На rumors.app среди таких адресов были
+    тестовый стенд и внутренний GitLab — самое важное в выгрузке, и оно не
+    доходило до человека. Чужие хосты, файлы и пропавшие страницы требуют
+    разного: закрыть, ничего не делать, перенаправить.
+    """
+    def host(key):
+        return key.lstrip("/").split("/", 1)[0].lower()
+
+    def bare(value):
+        return value[4:] if value.startswith("www.") else value
+
+    home = bare(host(url_key(site))) if site else ""
+    other, files, missing, by_host = [], [], [], {}
+    for key in funnel_result.get("indexed_unknown") or ():
+        where = bare(host(key))
+        path = key.lstrip("/").partition("/")[2]
+        if home and where != home:
+            other.append(key)
+            by_host[where] = by_host.get(where, 0) + 1
+        elif _FILE.search(path.split("?")[0]):
+            files.append(key)
+        else:
+            missing.append(key)
+    return {"other_hosts": sorted(other), "files": sorted(files),
+            "missing": sorted(missing), "by_host": dict(sorted(by_host.items()))}
 
 
 def _read_rows(csv_path: str) -> tuple:

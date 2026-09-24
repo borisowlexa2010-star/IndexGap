@@ -301,4 +301,18 @@ MESSAGES = {
         "\nCited, but not in the sitemap ({a0}):",
     "         → ИИ нашёл и использует страницу, которую ты в sitemap не отдаёшь. Если убрал сознательно — ничего делать не нужно.":
         "         → the AI found and uses a page you do not list in the sitemap. If you left it out on purpose, nothing to do.",
+
+    # ── несколько sitemap и адреса вне сайта ─────────────────────────────
+    "\nВ веб-выдаче есть файлы, а не страницы ({a0}) — обычно это не беда, но стоит знать.":
+        "\nWeb results include files rather than pages ({a0}) — usually harmless, but worth knowing.",
+    "\nПоисковик знает адреса на других хостах ({a0}):":
+        "\nThe search engine knows addresses on other hosts ({a0}):",
+    "\nПоисковик знает страницы, которых нет среди файлов сайта ({a0}):":
+        "\nThe search engine knows pages that are not among the site's files ({a0}):",
+    "         → стенды, админки и служебные сервисы в поиске не нужны: отдай на этих хостах X-Robots-Tag: noindex или закрой их входом. Проверь каждый — выгрузка показывает прошлое, не текущее.":
+        "         → staging, admin and internal services have no business in search: send X-Robots-Tag: noindex on those hosts or put them behind a login. Check each one — the export shows the past, not the present.",
+    "         → удалены или переименованы. Если у страницы был трафик — перенаправь её 301 на ближайшую живую; если нет — 410 достаточно.":
+        "         → deleted or renamed. If a page had traffic, 301 it to the nearest live page; if not, 410 is enough.",
+    "  ! robots.txt объявляет ещё {a0} sitemap-файл(а), которых нет в сверке, — шаг «в sitemap» будет занижен. Добавь:":
+        "  ! robots.txt declares {a0} more sitemap file(s) that are not part of the check — the “in sitemap” step will come out low. Add:",
 }

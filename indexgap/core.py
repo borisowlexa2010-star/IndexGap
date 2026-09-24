@@ -32,6 +32,20 @@ from urllib.parse import (urljoin, urlparse, urldefrag, urlsplit, urlunsplit,
                           quote, unquote)
 
 from .i18n import tr
+from . import __version__
+
+# Без заголовка urllib шлёт `Python-urllib/3.x`, и многие WAF режут такой агент
+# по умолчанию: sitemap rumors.app отдавал пакету 403, а curl — 200. Под
+# браузер пакет не маскируется — сайт вправе знать, кто пришёл, и отказать.
+USER_AGENT = f"indexgap/{__version__} (+https://github.com/borisowlexa2010-star/IndexGap)"
+
+
+def request(url: str, **kwargs):
+    """urllib.request.Request, который представляется именем пакета."""
+    import urllib.request
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers.setdefault("User-Agent", USER_AGENT)
+    return urllib.request.Request(url, headers=headers, **kwargs)
 
 # Содержимое этих тегов не является текстом страницы и не содержит ссылок,
 # по которым ходит краулер. `template` и `noscript` тоже: ссылка внутри

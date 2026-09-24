@@ -1,7 +1,7 @@
 {
   "name": "indexgap",
   "description": "Quality control for programmatic SEO pipelines. Gives an agent deterministic ground truth about a generated site: which numbers on a page are absent from the dataset row that produced it, which findings are one template defect rather than a thousand, which pages are near-duplicates of each other, and what search engines actually indexed. Runs the indexgap CLI — Python standard library only, no dependencies, no API keys except for the optional AI-citation command.",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "author": {
     "name": "Alexey Borisov"
   },

@@ -111,7 +111,9 @@ def _key(name: str, env: dict = None) -> str:
 
 def _post(url: str, payload: dict, headers: dict) -> dict:
     body = json.dumps(payload).encode("utf-8")
+    from .core import USER_AGENT
     request = urllib.request.Request(url, data=body, method="POST")
+    request.add_header("User-Agent", USER_AGENT)
     request.add_header("Content-Type", "application/json")
     for key, value in headers.items():
         request.add_header(key, value)

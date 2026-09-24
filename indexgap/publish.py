@@ -30,7 +30,7 @@ from datetime import date
 from urllib.parse import urlparse
 from xml.sax.saxutils import escape
 
-from .core import SourceError, url_key
+from .core import USER_AGENT, SourceError, url_key
 from .i18n import tr
 
 MAX_URLS_PER_FILE = 45000          # запас к лимиту 50 000
@@ -275,7 +275,8 @@ def submit_indexnow(urls: list, base_url: str, key: str,
         req = urllib.request.Request(
             INDEXNOW_ENDPOINT,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json; charset=utf-8"},
+            headers={"Content-Type": "application/json; charset=utf-8",
+                     "User-Agent": USER_AGENT},
             method="POST",
         )
         try:

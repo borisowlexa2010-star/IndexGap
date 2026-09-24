@@ -168,9 +168,6 @@ class TestParkedTranslations(Fixture):
                         on_ms)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 # ── порядок починки ───────────────────────────────────────────────────────────
 
@@ -207,3 +204,7 @@ class TestFixOrder(unittest.TestCase):
         issues = [("critical", f"{SITE}/p{i}/", "thin", "x") for i in range(5)]
         issues += [("critical", f"{SITE}/q{i}/", "no-title", "x") for i in range(9)]
         self.assertIn("no-title", self.first_lines(issues)[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
