@@ -90,9 +90,13 @@ TOOLS = {
                       "signature": ("citations",)},
 
     # панели вебмастера
+    # Имя архива Google даёт сам: `<домен>-Performance-on-Search-<дата>.zip`,
+    # на любом языке панели. Шапка в русской панели — «Популярные страницы»
+    # (без «самые»); в «Kлики» первая буква латинская — опечатка самого Google.
     "google":        {"kind": INDEX, "title": "Google Search Console",
-                      "file": ("gsc", "search-console", "searchconsole", "google"),
-                      "header": ("top pages", "самые популярные страницы",
+                      "file": ("gsc", "search-console", "searchconsole", "google",
+                               "performance-on-search"),
+                      "header": ("top pages", "популярные страницы",
                                  "clicks", "impressions", "ctr", "position")},
     "bing":          {"kind": INDEX, "title": "Bing Webmaster Tools",
                       "file": ("bing", "bwt", "wmt", "webmaster"),
