@@ -100,6 +100,36 @@ class TestFormats(Fixture):
         self.assertIn("https://example.com/munich", flat)
         self.assertNotIn("аренда берлин", flat)
 
+    def test_the_real_search_console_export_is_recognised_as_google(self):
+        """Копия настоящего экспорта rumors.app, а не выдумка.
+
+        Google называет архив `<домен>-Performance-on-Search-<дата>.zip`, лист
+        страниц в русской панели — `Страницы.csv` с шапкой «Популярные страницы»
+        (без «самые»), а в «Kлики» первая буква — латинская K. Раньше такой
+        экспорт считался просто списком адресов, и воронка писала «панели
+        вебмастера нет» про файл из самой панели.
+        """
+        import zipfile
+        from indexgap import doctor
+        path = self.path("rumors.app-Performance-on-Search-2026-09-24.zip")
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Диаграмма.csv", "Дата,Kлики,Показы,CTR,Позиция\n"
+                                              "2026-06-22,4,70,5.71%,12.7\n")
+            archive.writestr("Запросы.csv", "Популярные запросы,Kлики,Показы,CTR,Позиция\n"
+                                            "pantun gombal bikin salting,42,4261,0.99%,8\n")
+            archive.writestr("Страницы.csv", "Популярные страницы,Kлики,Показы,CTR,Позиция\n"
+                                             "https://rumors.app/,146,6168,2.37%,9.35\n")
+            archive.writestr("Фильтры.csv", "Фильтр,Значение\nТип поиска,Веб\n")
+        name, kind, confident = sources.identify(path, doctor.read_indexed_header(path))
+        self.assertEqual((name, kind, confident), ("google", sources.INDEX, True))
+
+    def test_the_russian_pages_header_alone_points_to_google(self):
+        from indexgap import doctor
+        path = self.write("export.csv", "Популярные страницы,Kлики,Показы,CTR,Позиция\n"
+                                        "https://example.com/,1,2,50%,3\n")
+        name, kind, _ = sources.identify(path, doctor.read_indexed_header(path))
+        self.assertEqual((name, kind), ("google", sources.INDEX))
+
     def test_a_zip_with_nothing_readable_says_so_plainly(self):
         import zipfile
         path = self.path("empty.zip")

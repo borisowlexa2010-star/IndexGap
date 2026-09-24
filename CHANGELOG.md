@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.8.1 — 2026-09-24
+
+The real Search Console export, downloaded by hand from a live account, was not
+recognised as Search Console.
+
+* **Google names its own archive** `<domain>-Performance-on-Search-<date>.zip`,
+  in every interface language. That name is now enough to identify it. Before,
+  the export was counted as a plain list of addresses, and the funnel said
+  "there is no webmaster panel among the exports" about a file taken from the
+  panel itself.
+* **The Russian pages header is «Популярные страницы»**, without the «самые»
+  the tool was looking for. Older exports that do say «самые» still match.
+  In «Kлики» the first letter is a Latin K — Google's own typo; nothing depends
+  on it, but it is recorded in the test that mirrors the real archive.
+
+The zip support added in 1.5.1 had been tested on an archive built by hand. It
+read the real one correctly; only the label was wrong.
+
+359 tests on 3.9, 3.12 and 3.14.
+
 ## 1.8.0 — 2026-09-24
 
 Three things a live Search Console export of rumors.app showed the tool
