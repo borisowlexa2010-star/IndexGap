@@ -51,10 +51,15 @@ MESSAGES = {
     "self-ссылка объявлена как «{a0}», а страница объявляет lang=«{a1}»":
         "the self-reference is declared as “{a0}” while the page declares "
         "lang=“{a1}”",
-    "на сайте есть версии на разных языках, а у этой страницы нет ни одной альтернативы — поисковик не узнает, что версии связаны":
-        "the site has versions in several languages, and this page declares no "
-        "alternate at all — the engine will not learn that the versions belong "
-        "together",
+    "та же страница есть на другом языке ({a0}), а эта не объявляет ни одной альтернативы — поисковик не узнает, что версии связаны":
+        "the same page exists in another language ({a0}), and this one declares "
+        "no alternate at all — the engine will not learn that the versions "
+        "belong together",
+    "{a0} открыт(ых) страниц без hreflang и без пары на другом языке по тому же пути. Ошибкой не считается: hreflang нужен только переводам. Если переводы есть, но под другим адресом, — свяжи их вручную.":
+        "{a0} open page(s) have no hreflang and no counterpart in another "
+        "language at the same path. That is not counted as an error: hreflang is "
+        "only for translations. If translations exist under a different address, "
+        "link them by hand.",
     "ни одна страница не объявляет `x-default`. Он не обязателен, но именно он говорит, что показать тому, чей язык не совпал ни с одним объявленным.":
         "no page declares `x-default`. It is not required, but it is what tells "
         "the engine which version to show someone whose language matches none of "
