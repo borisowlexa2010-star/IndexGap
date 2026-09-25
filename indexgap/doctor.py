@@ -113,7 +113,11 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
                 errors.append(result["error"])
         return {"urls": urls, "error": "; ".join(errors[:5])}
 
-    urls = [el.text.strip() for el in root.iter()
+    # Только <url>/<loc>: у <image:loc> и <video:loc> то же имя, и 831
+    # картинка каталога виз засчитывалась страницами sitemap.
+    urls = [el.text.strip() for url in root
+            if url.tag.rsplit("}", 1)[-1] == "url"
+            for el in url
             if el.text and el.tag.rsplit("}", 1)[-1] == "loc"]
     if not urls:
         return {"urls": [], "error": tr("{a0}: в файле нет ни одного <loc>", a0=source)}
