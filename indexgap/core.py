@@ -811,8 +811,38 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                 continue
             by_key[page.key] = page
             pages.append(page)
+    pages, raw_md = _drop_raw_markdown(pages)
+    if raw_md:
+        problems.append(tr(
+            "{a0} файл(ов) .md рядом с HTML без front matter — это файлы, а не "
+            "страницы (сайт отдаёт их как есть), не проверялись: {a1}",
+            a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
     pages.sort(key=lambda p: p.url)
     return pages, problems
+
+
+def _drop_raw_markdown(pages: list) -> tuple:
+    """
+    `.md` рядом со сборкой HTML без front matter — файл, а не исходник:
+    `auth.md`, `llms.md`, markdown-двойники страниц для агентов. Jekyll и Hugo
+    без front matter такой файл страницей не делают, и живой сайт отдаёт его
+    как text/markdown. Где HTML нет, markdown — исходник, и он читается.
+    """
+    if not any(p.path.lower().endswith((".html", ".htm")) for p in pages):
+        return pages, []
+    kept, dropped = [], []
+    for page in pages:
+        if page.path.lower().endswith((".md", ".markdown")):
+            try:
+                with open(page.path, "rb") as fh:
+                    head = fh.read(8).lstrip(b"\xef\xbb\xbf")
+            except OSError:
+                head = b""
+            if not head.startswith((b"---", b"+++")):
+                dropped.append(page.path)
+                continue
+        kept.append(page)
+    return kept, dropped
 
 
 # ── манифест ──────────────────────────────────────────────────────────────────

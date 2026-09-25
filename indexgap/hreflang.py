@@ -292,12 +292,34 @@ def check(pages: list, cfg: dict = None) -> dict:
                            tr("self-ссылка объявлена как «{a0}», а страница "
                               "объявляет lang=«{a1}»", a0=own[0], a2=None, a1=page.lang)))
 
-    if empty and len(empty) != len(pages):
-        for page in empty:
-            issues.append(("warning", page.url, "hreflang-missing",
-                           tr("на сайте есть версии на разных языках, а у этой "
-                              "страницы нет ни одной альтернативы — поисковик "
-                              "не узнает, что версии связаны")))
+    # hreflang связывает переводы одной страницы. Требовать его у страницы,
+    # у которой перевода нет, — шум: на rumors.app так попали `/about`,
+    # политики и `/hi/lines/shayari/bengali`. Пара узнаётся по тому же пути
+    # под другим языковым префиксом; переводы с другим слагом так не видны,
+    # и о них говорится одной заметкой, а не находкой на каждой странице.
+    from .checks import _locale_split
+    by_rest = defaultdict(list)
+    for page in pages:
+        if indexable(page):
+            host, lang, rest = _locale_split(page.url)
+            by_rest[(host, rest)].append((lang, page))
+    lonely = 0
+    for page in empty:
+        host, lang, rest = _locale_split(page.url)
+        others = [p.url for l, p in by_rest[(host, rest)] if l != lang]
+        if not others:
+            lonely += 1
+            continue
+        issues.append(("warning", page.url, "hreflang-missing",
+                       tr("та же страница есть на другом языке ({a0}), а эта "
+                          "не объявляет ни одной альтернативы — поисковик "
+                          "не узнает, что версии связаны",
+                          a0=", ".join(sorted(others)[:3]))))
+    if lonely:
+        notes.append(tr("{a0} открыт(ых) страниц без hreflang и без пары на "
+                        "другом языке по тому же пути. Ошибкой не считается: "
+                        "hreflang нужен только переводам. Если переводы есть, "
+                        "но под другим адресом, — свяжи их вручную.", a0=lonely))
 
     if targets and not x_default:
         notes.append(tr("ни одна страница не объявляет `x-default`. Он не "

@@ -186,6 +186,39 @@ class TestHreflang(Fixture):
         codes = [i[2] for i in hreflang.check(self.pages(files))["issues"]]
         self.assertIn("hreflang-missing", codes)
 
+    def cluster_and(self, extra):
+        files = {}
+        for code in ("en", "de"):
+            files[f"{code}/index.html"] = page_html(
+                code, f"Title for {code}", "текст " * 300,
+                alternates=[("en", f"{SITE}/en/"), ("de", f"{SITE}/de/")])
+        files.update(extra)
+        return hreflang.check(self.pages(files))
+
+    def test_a_page_with_no_counterpart_is_not_asked_for_hreflang(self):
+        """
+        hreflang связывает переводы одной страницы. На rumors.app `/about`,
+        политики и `/hi/lines/shayari/bengali` существуют на одном языке —
+        пары у них нет, и связывать нечего. 1.9.0 требовал hreflang у каждой.
+        """
+        result = self.cluster_and({
+            "about/index.html": page_html("en", "About", "текст " * 300),
+            "hi/lines/shayari/index.html": page_html("hi", "Shayari", "текст " * 300),
+        })
+        self.assertEqual([i for i in result["issues"] if i[2] == "hreflang-missing"], [])
+        self.assertTrue(any("2" in n and "hreflang" in n for n in result["notes"]),
+                        result["notes"])
+
+    def test_the_warning_names_the_other_version(self):
+        result = self.cluster_and({
+            "en/lines/holidays/index.html": page_html("en", "Holidays", "текст " * 300),
+            "hi/lines/holidays/index.html": page_html("hi", "Holidays hi", "текст " * 300),
+        })
+        missing = {i[1]: i[3] for i in result["issues"] if i[2] == "hreflang-missing"}
+        self.assertEqual(sorted(missing), [f"{SITE}/en/lines/holidays/",
+                                           f"{SITE}/hi/lines/holidays/"])
+        self.assertIn("/hi/lines/holidays", missing[f"{SITE}/en/lines/holidays/"])
+
     def test_a_monolingual_site_is_left_alone(self):
         """Иначе это была бы находка на каждой странице каждого обычного сайта."""
         pages = self.pages({f"p{i}/index.html": page_html(

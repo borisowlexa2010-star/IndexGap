@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.4 — 2026-09-25
+
+Two findings from rumors.app that described pages that are not there.
+
+* **hreflang is asked for only where there is a translation.** A page without
+  alternates is reported when the same path exists under another language
+  prefix, and the warning names that version (`/en/lines/holidays` →
+  `/hi/lines/holidays`). A page with no counterpart — `/about`, the policies,
+  `/hi/lines/shayari/bengali` — has nothing to link, and is counted in one note
+  instead: 68 warnings on rumors.app became 15. Translations published under a
+  different slug cannot be matched by path; the note says to link those by
+  hand.
+* **A `.md` file beside built HTML is a file, not a page.** rumors.app ships
+  `auth.md`, agent sign-in instructions served as `text/markdown`. It was read
+  as a page `/auth/` and reported as an orphan with no title, thin and missing
+  from the sitemap — while the live `/auth` answers 404. When the tree holds
+  HTML, a `.md` without front matter is skipped and named once; Jekyll and
+  Hugo do not turn such a file into a page either. Markdown sources without
+  HTML beside them are read as before.
+
+384 tests on 3.9, 3.12 and 3.14.
+
 ## 1.9.3 — 2026-09-25
 
 * **Images in a sitemap are not pages.** The reader took every element named

@@ -8,6 +8,9 @@ MESSAGES = {
         "    Try: --site https://{a1}",
     "{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен":
         "{a0} and {a1} produce the same URL {a2} — kept {a3}, skipped the other",
+    "{a0} файл(ов) .md рядом с HTML без front matter — это файлы, а не страницы (сайт отдаёт их как есть), не проверялись: {a1}":
+        "{a0} .md file(s) beside the HTML have no front matter — they are files, "
+        "not pages (the site serves them as they are), and were not checked: {a1}",
     "{a0}: не удалось определить кодировку. Пересохрани файл в UTF-8.":
         "{a0}: could not determine the encoding. Re-save the file as UTF-8.",
     "{a0}: файл не читается ({a1}).":

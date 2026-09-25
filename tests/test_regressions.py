@@ -155,6 +155,27 @@ class TestReading(Fixture):
         pages, _ = self.load()
         self.assertEqual(len(pages), 1)
 
+    def test_a_markdown_file_beside_built_html_is_a_file_not_a_page(self):
+        """
+        В сборке rumors.app рядом с HTML лежит `auth.md` — описание входа для
+        агентов, живой сайт отдаёт его как text/markdown. Пакет брал его за
+        страницу `/auth/`: сирота, нет title, тонкая, нет в sitemap — а по
+        адресу `/auth` живой сайт отвечает 404.
+        """
+        self.write("index.html", "<html><head><title>Главная</title></head><body><p>Текст</p></body></html>")
+        self.write("auth.md", "# Auth.md\n\nAgent authentication.")
+        self.write("_posts/first.md", "---\ntitle: Пост\n---\n\nТекст")
+        pages, problems = self.load()
+        self.assertEqual(sorted(p.url for p in pages),
+                         [f"{SITE}/", f"{SITE}/_posts/first/"])
+        self.assertTrue(any("auth.md" in p for p in problems), problems)
+
+    def test_markdown_alone_is_still_a_source(self):
+        self.write("index.md", "# Раз\n\nТекст")
+        self.write("b.md", "# Два\n\nТекст")
+        pages, _ = self.load()
+        self.assertEqual(len(pages), 2)
+
 
 # ── core: разбор HTML ─────────────────────────────────────────────────────────
 
