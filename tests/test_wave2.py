@@ -335,6 +335,31 @@ class TestFalseAlarms(Fixture):
         self.assertTrue(page.paragraphs[0].startswith("Смена экскаватора"))
         self.assertEqual(aeo.check_answer(page), [])
 
+    def test_crumbs_byline_and_contents_inside_main_are_not_the_answer(self):
+        """
+        На eventiq.io крошки, подпись автора и оглавление стоят внутри <main>,
+        до текста. Первым абзацем становилось «Home / Attendee Retention», и
+        «первый абзац короче 40 символов» получили 35 страниц из 39 — все,
+        где ответ на самом деле стоит первым.
+        """
+        self.write("a.html",
+                   '<html><body><main class="article">'
+                   '<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a>'
+                   '<span>/</span><span>Attendee Retention</span></nav>'
+                   '<p class="article-byline">By <a href="/">Anastasiia Malkina</a> · September 18, 2026</p>'
+                   '<article><h1>Attendee Retention</h1>'
+                   '<nav class="article-toc" aria-label="On this page"><p class="toc-title">On this page</p>'
+                   '<ul><li><a href="#a">What share of attendees come back?</a></li></ul></nav>'
+                   "<p>Attendee retention is the share of one edition's attendees who attend "
+                   "the next one, counted by person rather than by ticket.</p>"
+                   '</article></main></body></html>')
+        page = self.load()[0][0]
+        self.assertTrue(page.paragraphs[0].startswith("Attendee retention is"),
+                        page.paragraphs[:3])
+        self.assertEqual(aeo.check_answer(page), [])
+        # Текст страницы при этом не меняется: крошки и оглавление в нём остаются.
+        self.assertIn("On this page", page.text)
+
     def test_crawl_delay_does_not_merge_robots_groups(self):
         path = self.write("robots.txt",
                           "User-agent: *\nCrawl-delay: 10\n\n"

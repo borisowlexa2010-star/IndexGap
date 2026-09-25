@@ -361,6 +361,10 @@ class _Extractor(HTMLParser):
         self._in_ld = False
         self._ld_buf = ""
         self._glue = False         # следующий кусок текста примыкает к предыдущему
+        # Глубины открытых служебных блоков внутри текста: <nav>, крошки,
+        # подпись автора, оглавление. Текст их остаётся в странице, но абзацем
+        # не становится.
+        self._aside_stack = []
 
     # -- служебное ------------------------------------------------------------
 
@@ -374,7 +378,7 @@ class _Extractor(HTMLParser):
         # Абзацы собираются только внутри основного блока: иначе первым абзацем
         # страницы оказывался пункт меню, и проверка прямого ответа выносила
         # вердикт по хлебным крошкам.
-        if self._in_main or not self._saw_main:
+        if (self._in_main or not self._saw_main) and not self._aside_stack:
             self._para_buf.append((text, self._in_main))
         self._glue = True
 
@@ -411,6 +415,9 @@ class _Extractor(HTMLParser):
                                      or a.get("role", "").lower() == "main"):
             self._main_stack.append((tag, self._depth))
             self._saw_main = True
+        if tag not in VOID_TAGS and _is_aside(tag, a):
+            self._flush_paragraph()
+            self._aside_stack.append(self._depth)
 
         # Счётчики структуры считаются по основному блоку: список в меню
         # не делает страницу структурированной.
@@ -470,6 +477,8 @@ class _Extractor(HTMLParser):
             self._depth = max(0, self._depth - 1)
             if self._main_stack and self._main_stack[-1][1] > self._depth:
                 self._main_stack.pop()
+            while self._aside_stack and self._aside_stack[-1] > self._depth:
+                self._aside_stack.pop()
 
     def handle_endtag(self, tag):
         if tag == "script" and self._in_ld:
@@ -488,6 +497,10 @@ class _Extractor(HTMLParser):
         self._depth = max(0, self._depth - 1)
         while self._main_stack and self._main_stack[-1][1] > self._depth:
             self._main_stack.pop()
+        if self._aside_stack and self._aside_stack[-1] > self._depth:
+            self._flush_paragraph()
+            while self._aside_stack and self._aside_stack[-1] > self._depth:
+                self._aside_stack.pop()
         if tag not in INLINE_TAGS:
             self._glue = False
         if tag == "title":
@@ -563,6 +576,20 @@ class _Extractor(HTMLParser):
             if inside:
                 return inside
         return [text for text, _ in self._paragraphs]
+
+
+# Служебные блоки внутри основного текста. На eventiq.io крошки, подпись и
+# оглавление стоят в <main> до ответа, и первым абзацем 35 страниц из 39
+# становилось «Home / Attendee Retention».
+_ASIDE_CLASS = re.compile(
+    r"(?:^|[\s_-])(?:breadcrumbs?|byline|toc|table-of-contents|post-meta|article-meta)(?:$|[\s_-])",
+    re.I)
+
+
+def _is_aside(tag: str, attrs: dict) -> bool:
+    if tag == "nav" or attrs.get("role", "").lower() == "navigation":
+        return True
+    return bool(_ASIDE_CLASS.search(attrs.get("class", "")))
 
 
 def _clean(text: str) -> str:

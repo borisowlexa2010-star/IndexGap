@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.5 — 2026-09-25
+
+* **Breadcrumbs, bylines and a table of contents are not the answer.**
+  eventiq.io places all three inside `<main>`, ahead of the text, and
+  "Home / Attendee Retention" became the first paragraph: 35 of 39 pages were
+  told their answer was under 40 characters. With navigation, `breadcrumb`,
+  `byline` and `toc` blocks skipped, 3 remain — and what was hidden underneath
+  shows: on 30 pages the real first paragraph runs 320–600 characters. The
+  page text itself is unchanged; only the choice of the first paragraph moved.
+  visatosingapore.com: 629 → 448.
+* **"hreflang missing" no longer claims a translation.** A page at the same
+  path under another language is a candidate, not proof: on rumors.app
+  `/en/lines/holidays` is about Halloween and `/hi/lines/holidays` about
+  Propose Day. The warning now says to link them if they are translations and
+  to leave them if each market has its own text.
+
+385 tests on 3.9, 3.12 and 3.14.
+
 ## 1.9.4 — 2026-09-25
 
 Two findings from rumors.app that described pages that are not there.
