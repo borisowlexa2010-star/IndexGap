@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import sys
+import ast
 import contextlib
 from pathlib import Path
 
@@ -32,7 +33,7 @@ os.environ.setdefault("INDEXGAP_LANG", "en")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from indexgap import checks, repair, cli          # noqa: E402
+from indexgap import checks, repair, cli, i18n    # noqa: E402
 from indexgap import __version__                  # noqa: E402
 
 SITE = "https://borisowlexa2010-star.github.io/IndexGap"
@@ -562,12 +563,17 @@ def collect() -> dict:
                   for p in (ROOT / "indexgap").glob("*.py"))
     # находка — это кортеж (уровень, что, код, tr(текст)); собирается он
     # и через issues.append, и через return [...], поэтому привязки к append нет
+    # Текст находки — это все подряд идущие литералы внутри tr(...): длинное
+    # сообщение разбито на строки. Раньше бралась только первая, и английский
+    # сайт показывал обрывок русского исходника вместо перевода.
+    literal = r'"(?:[^"\\]|\\.)*"'
     pat = re.compile(
         r'\(\s*"(critical|warning|info)"\s*,\s*[^,\n]+,\s*'
-        r'"([a-z0-9-]+)"\s*,\s*\n?\s*tr\(\s*"((?:[^"\\]|\\.)*)"', re.S)
+        r'"([a-z0-9-]+)"\s*,\s*\n?\s*tr\(\s*((?:' + literal + r'\s*)+)', re.S)
     seen = {}
-    for level, code, message in pat.findall(src):
-        seen.setdefault(code, (level, message))
+    for level, code, literals in pat.findall(src):
+        source = "".join(ast.literal_eval(x) for x in re.findall(literal, literals))
+        seen.setdefault(code, (level, i18n.t(source)))
 
     # объединение: часть проверок эмитится, но не имеет записи в FIX
     codes = set(repair.FIX) | set(seen) | set(checks.CODE_WEIGHT)
@@ -577,7 +583,7 @@ def collect() -> dict:
         level, message = seen.get(code, ("", ""))
         out[code] = {
             "level": level,
-            "message": re.sub(r"\{a\d\}", "…", message).strip(),
+            "message": re.sub(r"\{a\d[^}]*\}", "…", message).strip(),
             "fix": repair._fix(code),
             "template_wide": code not in checks.NOT_TEMPLATE_WIDE,
             "grouped": code in repair.GROUPED,
