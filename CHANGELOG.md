@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.9.0 — 2026-09-25
+
+eventiq.io, the third live site, was clean page by page. What it showed was
+how the funnel talks about data it cannot fully see.
+
+* **An impressions report is no longer called an index.** The Search Console
+  "Performance" export lists pages that had impressions; an indexed page with
+  none is simply absent. On a young site with an average position of 15.5 the
+  funnel said "in the index 12, lost 26 — no cause could be established". The
+  26 had no impressions in three months. The caveat lived only in the HTML
+  report. Now, when every panel passed is an impressions export and nothing
+  else speaks to indexing, the step is "With impressions in search", the loss
+  is "no impressions in the period", the causes section is "Why pages have no
+  impressions" — in the console and in the HTML — and it points to Search
+  Console → Indexing → Pages for the actual index status. A real index export
+  alongside restores the index step.
+* **`doctor --live`.** The engine's addresses that are not on the site are an
+  echo of the past: on eventiq.io four of five "missing" pages already answered
+  301 to the right place, and on rumors.app six of seven stray hosts were
+  already closed. `--live` checks each over the network and lists only what is
+  left. A page is fine on 3xx, 404 or 410; a live 200 means the local build is
+  stale. A host is fine if it sends `noindex`, answers 401/403, is gone, or
+  redirects to another host. It is the only part of `doctor` that uses the
+  network, so it runs only on the flag.
+* **Redirects within a host are followed.** The first version of `--live`
+  counted a host closed on any redirect, and on rumors.app reported "8 of 8
+  already fine" about the one real problem: gitlab.rumors.app answers 302 to a
+  public sign-in page that carries no `noindex`. It now follows the chain on
+  the same host and judges the final answer. Caught by reading the details
+  behind the green line rather than trusting it.
+
+Also confirmed on eventiq.io and now pinned by a test: `#fragment` rows
+Search Console reports as separate pages are folded into their page, and
+downloadable CSV templates are not taken for pages.
+
+376 tests on 3.9, 3.12 and 3.14.
+
 ## 1.8.1 — 2026-09-24
 
 The real Search Console export, downloaded by hand from a live account, was not

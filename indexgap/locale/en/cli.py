@@ -315,4 +315,22 @@ MESSAGES = {
         "         → deleted or renamed. If a page had traffic, 301 it to the nearest live page; if not, 410 is enough.",
     "  ! robots.txt объявляет ещё {a0} sitemap-файл(а), которых нет в сверке, — шаг «в sitemap» будет занижен. Добавь:":
         "  ! robots.txt declares {a0} more sitemap file(s) that are not part of the check — the “in sitemap” step will come out low. Add:",
+
+    # ── doctor --live ─────────────────────────────────────────────────────
+    "\nПроверено вживую: {a0} из {a1} уже в порядке — перенаправлены, удалены или закрыты от индекса.":
+        "\nChecked live: {a0} of {a1} are already fine — redirected, removed or closed from the index.",
+    "         Выгрузка показывает прошлое. Что из этого уже исправлено, покажет --live (проверит каждый адрес по сети).":
+        "         The export shows the past. --live will show which of these are already fixed (it checks each address over the network).",
+    "Не удалось проверить ({a0}) — сеть или сайт не ответили.":
+        "Could not check ({a0}) — the network or the site did not answer.",
+    "Проверены первые {a0} из {a1}.":
+        "Checked the first {a0} of {a1}.",
+    "Требует действий:":
+        "Needs action:",
+    "отвечает {a0}, а среди файлов сайта её нет — локальная сборка устарела или страница собирается не отсюда":
+        "answers {a0}, but is not among the site's files — the local build is stale or the page is built elsewhere",
+    "открыт для индексации: отвечает 200 без noindex. Страница входа тоже страница — закрой хост заголовком X-Robots-Tag: noindex":
+        "open to indexing: answers 200 without noindex. A login page is still a page — close the host with X-Robots-Tag: noindex",
+    "проверить вживую адреса, которые поисковик знает, а на сайте их нет: стоит ли редирект, закрыт ли хост. Ходит в сеть":
+        "check live the addresses the engine knows but the site does not contain: is there a redirect, is the host closed. Uses the network",
 }

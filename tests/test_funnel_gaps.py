@@ -98,5 +98,93 @@ class TestSeveralSitemaps(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
+
+class TestImpressionsAreNotIndex(unittest.TestCase):
+    """
+    Выгрузка «Эффективность» из Search Console — отчёт о показах, а не об индексе.
+
+    На eventiq.io (молодой сайт, средняя позиция 15,5) воронка печатала «в индексе
+    12, потеряно 26 — причина не установлена». У 26 страниц просто не было
+    показов за три месяца. Оговорка жила только в HTML-отчёте, а консоль
+    уверенно называла непоказанное непроиндексированным.
+    """
+
+    PERFORMANCE = ("Top pages,Clicks,Impressions,CTR,Position\n"
+                   "https://example.com/a,3,40,7.5%,8\n")
+    COVERAGE = "URL,Last crawled\nhttps://example.com/a,2026-09-01\n"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="indexgap-impr-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def write(self, name, text):
+        path = os.path.join(self.dir, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def test_a_performance_export_is_marked_as_impressions(self):
+        result = doctor.read_sources([f"google={self.write('p.csv', self.PERFORMANCE)}"])
+        self.assertEqual(result["impressions"], ["google"])
+
+    def test_an_indexing_export_is_not(self):
+        result = doctor.read_sources([f"google={self.write('c.csv', self.COVERAGE)}"])
+        self.assertEqual(result["impressions"], [])
+
+    def pages(self):
+        from indexgap import core
+        root = os.path.join(self.dir, "site")
+        for name in ("a", "b", "c"):
+            os.makedirs(os.path.join(root, name))
+            with open(os.path.join(root, name, "index.html"), "w", encoding="utf-8") as fh:
+                # Связаны друг с другом: иначе «сироты» объясняют всё раньше,
+                # чем дело доходит до остатка без причины.
+                links = "".join(f'<a href="/{o}/">{o}</a>' for o in "abc" if o != name)
+                fh.write(f"<html><head><title>{name}</title></head><body><main>"
+                         f"<h1>{name}</h1><p>{'слово ' * 300}</p>{links}</main></body></html>")
+        return core.load_pages(root, SITE)[0]
+
+    def test_the_step_is_named_after_what_the_export_proves(self):
+        result = doctor.funnel(self.pages(), by_engine={"google": [SITE + "/a/"]},
+                               impressions=["google"])
+        self.assertTrue(result["impressions_only"])
+        names = [s["name"] for s in result["steps"]]
+        self.assertIn("С показами в поиске", names)
+
+    def test_a_real_index_export_next_to_it_keeps_the_index_step(self):
+        result = doctor.funnel(self.pages(),
+                               by_engine={"google": [SITE + "/a/"], "bing": [SITE + "/b/"]},
+                               impressions=["google"])
+        self.assertFalse(result["impressions_only"])
+
+    def test_unexplained_losses_are_called_what_they_are(self):
+        from indexgap import checks
+        pages = self.pages()
+        analysis = checks.run_all(pages, SITE + "/a/")
+        funnel = doctor.funnel(pages, by_engine={"google": [SITE + "/a/"]},
+                               impressions=["google"])
+        causes = [c["cause"] for c in doctor.explain(funnel, analysis)]
+        self.assertNotIn("причина не установлена локально", causes)
+        self.assertTrue(any("показов" in c for c in causes), causes)
+
+
+class TestFragments(unittest.TestCase):
+    """Search Console отдаёт переходы к разделу строками вида `/#how-it-works`.
+    На eventiq.io таких было девять. Это та же страница, а не пропавшая."""
+
+    def test_fragment_rows_fold_into_their_page(self):
+        from indexgap import core
+        root = tempfile.mkdtemp(prefix="indexgap-frag-")
+        self.addCleanup(shutil.rmtree, root, True)
+        with open(os.path.join(root, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write("<html><head><title>Home</title></head><body><main><h1>Home</h1>"
+                     f"<p>{'слово ' * 300}</p></main></body></html>")
+        pages = core.load_pages(root, SITE)[0]
+        result = doctor.funnel(pages, by_engine={"google": [
+            SITE + "/", SITE + "/#how-it-works", SITE + "/#solution"]})
+        self.assertEqual(result["indexed_unknown"], [])
+        self.assertEqual(doctor.foreign_urls(result, SITE)["missing"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -202,6 +202,83 @@ def foreign_urls(funnel_result: dict, site: str = "") -> dict:
             "missing": sorted(missing), "by_host": dict(sorted(by_host.items()))}
 
 
+def _probe(url: str, timeout: int = 10) -> tuple:
+    """
+    (код ответа, заголовки) одного адреса — без следования редиректам.
+
+    Следуй он за 301, перенаправленная страница выглядела бы живой: вернулся
+    бы 200 конечного адреса. Представляется именем пакета, как любой его запрос.
+    """
+    import urllib.error
+    from .core import request
+
+    class _Stay(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(_Stay)
+    try:
+        response = opener.open(request(url), timeout=timeout)
+        return response.status, dict(response.headers or {})
+    except urllib.error.HTTPError as error:
+        return error.code, dict(error.headers or {})
+    except Exception:
+        return None, {}
+
+
+def verify_live(foreign: dict, limit: int = 50, timeout: int = 10) -> dict:
+    """
+    Что из «поисковик знает, а на сайте нет» ещё требует действий.
+
+    Выгрузка показывает прошлое: на eventiq.io четыре «пропавшие» страницы из
+    пяти уже отдавали 301, на rumors.app шесть чужих хостов из семи уже были
+    закрыты noindex. Сделанное отделяется от несделанного по живому ответу.
+
+    Пропавшая страница в порядке, если отдаёт 3xx, 404 или 410; живой ответ 200
+    значит, что на сайте она есть, а в файлах нет — сборка устарела. Чужой хост
+    в порядке, если закрыт `X-Robots-Tag: noindex`, стоит за входом (401/403)
+    или исчез. Недоступный адрес не записывается в сделанное.
+    """
+    done, todo, unknown, details = [], [], [], {}
+    items = ([(k, "host") for k in foreign.get("other_hosts") or ()]
+             + [(k, "page") for k in foreign.get("missing") or ()])
+    for key, kind in items[:limit]:
+        url = "https:" + key if key.startswith("//") else key
+        status, headers = _probe(url, timeout=timeout)
+        lowered = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+        if kind == "host":
+            # Редирект внутри хоста ничего не закрывает: корень GitLab отвечает
+            # 302 на страницу входа, а та — 200 без noindex. Идём по цепочке и
+            # судим по последнему ответу. Редирект на другой хост — хост выведен.
+            from urllib.parse import urljoin, urlsplit
+            home_host = urlsplit(url).hostname
+            for _ in range(5):
+                if not (status and 300 <= status < 400 and lowered.get("location")):
+                    break
+                target = urljoin(url, lowered["location"])
+                if urlsplit(target).hostname != home_host:
+                    break
+                url = target
+                status, headers = _probe(url, timeout=timeout)
+                lowered = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+        info = {"key": key, "kind": kind, "status": status,
+                "location": lowered.get("location", ""),
+                "robots": lowered.get("x-robots-tag", "")}
+        details[key] = info
+        if status is None:
+            unknown.append(key)
+            continue
+        if kind == "page":
+            ok = 300 <= status < 400 or status in (404, 410)
+        else:
+            # Сюда 3xx доходит только как уход на другой хост.
+            ok = ("noindex" in info["robots"].lower() or status in (401, 403, 404, 410)
+                  or 300 <= status < 400)
+        (done if ok else todo).append(key if ok else info)
+    return {"done": done, "todo": todo, "unknown": unknown, "details": details,
+            "checked": min(len(items), limit), "total": len(items)}
+
+
 def _read_rows(csv_path: str) -> tuple:
     """CSV, XLSX, JSON, NDJSON, XML или список адресов — всё через `sources`."""
     return sources.read_table(csv_path)
@@ -341,6 +418,7 @@ def read_sources(specs: list, site: str = "") -> dict:
     индексом) и `by_source` (всё подряд, включая краулеры и сторонние сервисы).
     """
     out, extra, notes, unlabeled, kinds, cited = {}, {}, [], set(), {}, {}
+    impressions = set()
     for spec in specs or ():
         name, path = sources.parse_spec(spec)
         header = read_indexed_header(path)
@@ -361,6 +439,10 @@ def read_sources(specs: list, site: str = "") -> dict:
             counts = read_citations(path, site)
             cited[name] = {**cited.get(name, {}), **counts}
             continue
+        # «Эффективность» из Search Console — отчёт о показах: страница в индексе
+        # без показов в него не попадает. Узнаётся по столбцу показов.
+        if kind == sources.INDEX and _has_impressions(header):
+            impressions.add(name)
         result = read_indexed(path, site)
         notes += result.get("notes", [])
         urls = set(result["urls"])
@@ -377,12 +459,18 @@ def read_sources(specs: list, site: str = "") -> dict:
             tr("панели вебмастера среди выгрузок нет. Воронка построена на том, что есть, но подпись шага это учитывает: ")
             + "; ".join(sources.describe(list(extra))) + ".")
     return {"by_engine": out, "by_source": extra, "kinds": kinds, "cited": cited,
+            "impressions": sorted(impressions),
             "notes": notes, "unlabeled": sorted(unlabeled)}
+
+
+def _has_impressions(header) -> bool:
+    lowered = {str(h or "").strip().lower() for h in header or ()}
+    return bool(lowered & {"impressions", "показы", "impr", "показов"})
 
 
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
            by_engine: dict = None, by_source: dict = None,
-           cited: dict = None) -> dict:
+           cited: dict = None, impressions: list = None) -> dict:
     """
     Строит воронку и, главное, объясняет каждую потерю.
     Возвращает как числа, так и конкретные списки URL — чинить надо адресно.
@@ -394,6 +482,10 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
 
     display = {url_key(p.url): p.url for p in pages}
     generated = set(display)
+    # Все панели — отчёты о показах, и других свидетельств индексации нет.
+    live_panels = [n for n, u in (by_engine or {}).items() if u]
+    impressions_only = bool(live_panels) and not (by_source or {}) and all(
+        n in set(impressions or ()) for n in live_panels)
     publishable = {url_key(p.url) for p in pages if indexable(p)}
     blocked = generated - publishable
 
@@ -436,9 +528,16 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         # росла: закрытая от индексации страница, ещё сидящая в индексе,
         # давала «в индексе 3» после «в sitemap 2».
         label = sources.index_grade(list(engines_keys)) or tr("Хотя бы в одном индексе")
+        why = tr("источник знает про URL, но страницы в нём нет")
+        if impressions_only:
+            # Отчёт о показах, а не об индексе: на молодом сайте «потеряно 26»
+            # значило «у 26 страниц не было показов», и пакет называл это
+            # непроиндексированностью.
+            label = tr("С показами в поиске")
+            why = tr("показов за период не было — страница в индексе без показов "
+                     "в эту выгрузку не попадает")
         steps.append({"name": label, "count": len(known & in_index),
-                      "lost": len(known - in_index),
-                      "why": tr("источник знает про URL, но страницы в нём нет")})
+                      "lost": len(known - in_index), "why": why})
         for name in sorted(engines_keys):
             hit = engines_keys[name] & known
             kind = sources.kind_of(name)
@@ -518,6 +617,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "cited_unknown": cited_unknown,
         "cited_top": cited_top,
         "cited_not_in_sitemap": cited_off_map,
+        "impressions_only": impressions_only,
     }
 
 
@@ -632,7 +732,14 @@ def explain(funnel_result: dict, analysis: dict) -> list:
                         "urls": sorted(display.get(k, k) for k in keys)[:50]})
 
     rest = not_indexed - explained
-    if rest:
+    if rest and funnel_result.get("impressions_only"):
+        out.append({"cause": tr("показов за период нет, других причин локально не видно"),
+                    "count": len(rest),
+                    "fix": tr("для новых страниц и молодого сайта это обычно. Индексацию "
+                              "показывает Search Console → Индексирование → Страницы, "
+                              "а не эта выгрузка"),
+                    "urls": sorted(display.get(k, k) for k in rest)[:50]})
+    elif rest:
         out.append({"cause": tr("причина не установлена локально"),
                     "count": len(rest),
                     "fix": tr("проверить в Search Console статус конкретных URL и время с публикации"),

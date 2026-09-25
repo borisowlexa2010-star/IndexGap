@@ -237,8 +237,19 @@ and files.
 
 One honest caveat the tool states out loud: the Search Console "Pages" export
 is an *impressions* report, not an index report. A page that is indexed but has
-no impressions won't appear in it, so on a young site the funnel overstates
-losses.
+no impressions won't appear in it. When that export is the only panel, the step
+is called "with impressions in search" rather than "in the index", and pages
+without impressions are not reported as unindexed.
+
+**`doctor --live` separates what is done from what is left.** An export shows
+the past: on one live site four of five "missing" pages already answered 301,
+and on another six of seven stray hosts were already closed with `noindex`.
+With `--live` each such address is checked over the network — a page is fine
+if it redirects or answers 404/410, a host if it sends `noindex`, sits behind a
+login or has moved to another host — and only what still needs a hand is
+listed. Redirects within a host are followed to the final answer: a GitLab root
+that 302s to a public sign-in page is open, not closed. It is the one part of
+`doctor` that uses the network, so it runs only when asked.
 
 ---
 

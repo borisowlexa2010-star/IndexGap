@@ -178,4 +178,14 @@ MESSAGES = {
         "the Pages tab and export that.",
     "Цитируется: {a0}":
         "Cited: {a0}",
+
+    # ── отчёт о показах — не индекс ─────────────────────────────────────
+    "С показами в поиске":
+        "With impressions in search",
+    "для новых страниц и молодого сайта это обычно. Индексацию показывает Search Console → Индексирование → Страницы, а не эта выгрузка":
+        "usual for new pages and a young site. Indexing is shown in Search Console → Indexing → Pages, not in this export",
+    "показов за период не было — страница в индексе без показов в эту выгрузку не попадает":
+        "no impressions in the period — an indexed page with no impressions does not appear in this export",
+    "показов за период нет, других причин локально не видно":
+        "no impressions in the period, and no other cause visible locally",
 }

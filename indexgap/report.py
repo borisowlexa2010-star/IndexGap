@@ -274,7 +274,10 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
                 tr("<h2>Сравнение поисковиков</h2><div class=\"scroll\"><table><thead><tr><th>где страница</th><th class=\"n\">страниц</th><th>что это значит</th></tr></thead><tbody>") + rows + tr("</tbody></table></div><p class=\"note\">Страница, которой нет нигде, — почти всегда техническая проблема. Страница, которая есть в одном индексе и нет в другом, — уже вопрос оценки качества или скорости конкретного поисковика, и техническими правками обычно не лечится.</p>"))
 
     causes_block = (
-        tr("<h2>Почему страницы не в индексе</h2><div class=\"scroll\"><table><thead><tr><th>причина</th><th class=\"n\">страниц</th><th>что делать</th></tr></thead><tbody>") + cause_rows + tr("</tbody></table></div><p class=\"note\">Разбор адресный: конкретные URL по каждой причине лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>")
+        (tr("<h2>Почему у страниц нет показов</h2>")
+         if (funnel_result or {}).get("impressions_only")
+         else tr("<h2>Почему страницы не в индексе</h2>"))
+        + tr("<div class=\"scroll\"><table><thead><tr><th>причина</th><th class=\"n\">страниц</th><th>что делать</th></tr></thead><tbody>") + cause_rows + tr("</tbody></table></div><p class=\"note\">Разбор адресный: конкретные URL по каждой причине лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>")
     ) if cause_rows else ""
 
     funnel_block = ""
