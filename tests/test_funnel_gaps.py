@@ -88,6 +88,24 @@ class TestSeveralSitemaps(unittest.TestCase):
         missing = doctor.undeclared_sitemaps(robots, [f"{SITE}/sitemap.xml"])
         self.assertEqual(missing, [f"{SITE}/sitemap-blog.xml", f"{SITE}/sitemap-landings.xml"])
 
+    def test_images_and_alternates_are_not_pages(self):
+        """
+        Sitemap каталога виз несёт `<image:loc>` при каждой странице. Чтение
+        брало любой элемент с именем `loc`, и 831 картинка попала в шаг
+        «в sitemap» — и в «есть в sitemap, а страницы нет».
+        """
+        path = os.path.join(self.dir, "img.xml")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write('<?xml version="1.0"?>'
+                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+                     ' xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"'
+                     ' xmlns:xhtml="http://www.w3.org/1999/xhtml"><url>'
+                     f'<loc>{SITE}/en</loc>'
+                     f'<xhtml:link rel="alternate" hreflang="ar" href="{SITE}/ar"/>'
+                     f'<image:image><image:loc>{SITE}/cover.webp</image:loc></image:image>'
+                     '</url></urlset>')
+        self.assertEqual(doctor.read_sitemap(path)["urls"], [f"{SITE}/en"])
+
     def test_a_local_copy_counts_as_passed(self):
         """Скачанный sitemap-landings.xml — тот же файл, что объявлен по адресу."""
         robots = os.path.join(self.dir, "robots.txt")

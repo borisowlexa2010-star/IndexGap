@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.3 — 2026-09-25
+
+* **Images in a sitemap are not pages.** The reader took every element named
+  `loc`, and `<image:loc>` is one. On visatosingapore.com 831 cover images
+  entered the "in sitemap" step and the list "in the sitemap, but no such
+  page", which read 833 instead of 2. Only `<url>/<loc>` counts now; images,
+  videos and hreflang alternates inside a `<url>` are ignored.
+
+380 tests on 3.9, 3.12 and 3.14.
+
 ## 1.9.2 — 2026-09-25
 
 * **A redirect stub is not judged as a page.** On visatosingapore.com the
