@@ -155,6 +155,28 @@ class TestParkedTranslations(Fixture):
         # нашли и проиндексировали, а эта от индекса закрыта сознательно.
         self.assertFalse(on_contact & {"orphan", "unreachable", "deep"}, on_contact)
 
+    def test_a_parked_page_without_hreflang_is_not_asked_for_it(self):
+        """Пакет советует снять hreflang с запаркованных переводов. visatosingapore
+        так и сделал — и 1.9.0 ответил 1 418 предупреждениями «нет hreflang».
+        Закрытой странице hreflang не нужен: совет не должен спорить с собой."""
+        # Каждой странице её язык, как на настоящем сайте: иначе сайт не
+        # считается мультиязычным и проверка hreflang не включается вовсе.
+        files = {f"{lang}/apply/index.html": html(
+            f"Apply {lang}",
+            head=f'<link rel="canonical" href="{SITE}/en/apply/">'
+                 '<meta name="robots" content="noindex, follow">'
+        ).replace('lang="en"', f'lang="{lang}"', 1) for lang in LANGS}
+        _, found = self.findings(files)
+        on_parked = [f for f in found if f[1] == "hreflang-missing"
+                     and any(f"/{l}/apply" in f[0] for l in LANGS)]
+        self.assertEqual(on_parked, [])
+
+    def test_an_open_page_without_hreflang_on_a_multilingual_site_still_counts(self):
+        _, found = self.findings({
+            "ms/apply/index.html": html("Apply ms", links=["/en/"]),
+        })
+        self.assertIn("hreflang-missing", {f[1] for f in found if "/ms/apply" in f[0]})
+
     def test_an_open_translation_with_a_foreign_canonical_still_counts(self):
         """Открытый перевод с canonical на английский — настоящая беда: он
         хочет ранжироваться и сам себя из индекса выводит. Прятать нельзя."""

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.1 — 2026-09-25
+
+* **A closed page is no longer asked for hreflang.** The package advises
+  removing hreflang from parked translations; visatosingapore.com did exactly
+  that, and 1.9.0 answered with 1,566 "hreflang missing" warnings on the same
+  noindex pages — more than every other finding on the site together. A page
+  that is closed to indexing, or a redirect stub such as a locale-switching
+  root, is not part of any language cluster and is no longer counted. An open
+  page without hreflang on a multilingual site still is.
+
+378 tests on 3.9, 3.12 and 3.14.
+
 ## 1.9.0 — 2026-09-25
 
 eventiq.io, the third live site, was clean page by page. What it showed was

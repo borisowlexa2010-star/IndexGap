@@ -185,7 +185,13 @@ def check(pages: list, cfg: dict = None) -> dict:
         alternates = read_alternates(page)
         declared[page.key] = alternates
         if not alternates:
-            empty.append(page)
+            # Закрытой странице hreflang не нужен — пакет сам советует снять его
+            # с запаркованных переводов. visatosingapore так и сделал, а 1.9.0
+            # ответил 1 418 предупреждениями «нет hreflang». Заглушке-редиректу
+            # он не нужен тем более: это не страница.
+            from .checks import redirect_target
+            if indexable(page) and not redirect_target(page):
+                empty.append(page)
             continue
         keys = set()
         for code, href in alternates:
