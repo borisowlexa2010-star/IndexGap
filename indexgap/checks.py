@@ -830,6 +830,17 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     pairs = [(a, b, j) for a, b, j in dupes["pairs"]
              if a.url not in shells and b.url not in shells]
 
+    # Заглушка-редирект — не страница: человек и поисковик видят то, куда она
+    # ведёт. На каталоге виз девять языковых `/connect` и корень давали 40
+    # находок «нет title», «JS-оболочка», «canonical на другую» о страницах,
+    # которые живой сайт отдаёт кодом 307.
+    stubs = {p.url for p in pages if redirect_target(p)}
+    if stubs:
+        issues = [i for i in issues if i[1] not in stubs]
+        notes.append(tr(
+            "заглушек-редиректов: {a0}. Как страницы они не проверялись — "
+            "поисковик видит то, куда они ведут.", a0=len(stubs)))
+
     issues = _collapse_parked(issues, notes, pages, cfg)
 
     return {
