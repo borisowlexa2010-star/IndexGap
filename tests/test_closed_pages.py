@@ -92,6 +92,23 @@ class TestRedirectHome(Fixture):
         self.assertTrue(any("/en" in n and "редирект" in n for n in result["notes"]),
                         result["notes"])
 
+    def test_a_redirect_stub_is_not_judged_as_a_page(self):
+        """
+        На каталоге виз `/ar/connect` и ещё восемь языков — заглушки
+        `NEXT_REDIRECT` на `/en/connect`, живой сайт отдаёт 307. Каждая
+        получала «нет title», «нет description», «JS-оболочка» и «canonical
+        на другую страницу»: 40 находок о страницах, которых никто не увидит.
+        """
+        stub = REDIRECT_SHELL.replace("/en;307", "/en/a/;307")
+        pages = self.site(REDIRECT_SHELL)
+        pages += self.pages({"ar/a/index.html": stub})
+        result = checks.run_all(pages, SITE + "/")
+        on_stubs = [i for i in result["issues"]
+                    if self.key(i[1]) in (self.key(SITE + "/"), self.key(SITE + "/ar/a/"))]
+        self.assertEqual(on_stubs, [])
+        self.assertTrue(any("2" in n and "редирект" in n for n in result["notes"]),
+                        result["notes"])
+
 
 # ── запаркованные переводы ────────────────────────────────────────────────────
 

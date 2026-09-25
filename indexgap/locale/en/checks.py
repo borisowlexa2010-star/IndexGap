@@ -179,6 +179,9 @@ MESSAGES = {
         "the home page {a0} is a redirect stub pointing to {a1}. Click depth "
         "and reachability are measured from {a1}: the stub itself has no links, "
         "and without this the whole site would look unreachable.",
+    "заглушек-редиректов: {a0}. Как страницы они не проверялись — поисковик видит то, куда они ведут.":
+        "redirect stubs: {a0}. They were not checked as pages — a search "
+        "engine sees where they lead.",
     "{a0} страниц(ы) на {a1} язык(ах) закрыты noindex и отдают canonical той же странице на «{a2}». Это одно правило шаблона, а не {a0} проблем. По языкам: {a3}.":
         "{a0} page(s) in {a1} language(s) are closed with noindex and point "
         "their canonical at the same page in “{a2}”. That is one template rule, "

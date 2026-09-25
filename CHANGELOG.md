@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.2 — 2026-09-25
+
+* **A redirect stub is not judged as a page.** On visatosingapore.com the
+  `/connect` page in nine languages is a Next.js `NEXT_REDIRECT` stub to
+  `/en/connect`, and the live site answers 307. Each stub, and the root, was
+  reported for a missing title, a missing description, an empty JavaScript
+  shell and a canonical pointing elsewhere: 39 findings about pages nobody
+  sees. Stubs are still followed for the link graph; they no longer collect
+  page findings, and the report says how many there were.
+
+379 tests on 3.9, 3.12 and 3.14.
+
 ## 1.9.1 — 2026-09-25
 
 * **A closed page is no longer asked for hreflang.** The package advises
