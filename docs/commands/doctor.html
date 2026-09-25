@@ -15,7 +15,7 @@
  "@context":"https://schema.org","@type":"TechArticle",
  "headline":"indexgap doctor \u2014 the crawl-to-index funnel","description":"The crawl-to-index funnel. Usage, flags and where doctor sits in the indexgap pipeline.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/commands/doctor.html","inLanguage":"en",
- "datePublished":"2026-08-29","dateModified":"2026-09-24",
+ "datePublished":"2026-08-29","dateModified":"2026-09-25",
  "author":{"@type":"Person","name":"Alexey Borisov"},
  "publisher":{"@type":"Organization","name":"indexgap"},
  "isPartOf":{"@type":"WebSite","name":"indexgap","url":"https://borisowlexa2010-star.github.io/IndexGap"}
@@ -91,7 +91,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost. Given a Bing Webmaster Tools AI Performance export, it adds the step after the index: which pages Microsoft Copilot actually cites, which of them you have closed from search, and which you left out of the sitemap.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap doctor [-h] [--site SITE] [--home HOME] [--config CONFIG]
-                       [--profile PROFILE] [--sitemap SITEMAP]
+                       [--profile PROFILE] [--sitemap SITEMAP] [--live]
                        [--indexed [engine=]file.csv] [--gsc GSC] [--out OUT]
                        [--lang {en,ru}]
                        [root]
@@ -111,6 +111,9 @@ options:
                         thresholds and which checks run — see `indexgap
                         profiles`
   --sitemap SITEMAP     path or URL of sitemap.xml
+  --live                check live the addresses the engine knows but the site
+                        does not contain: is there a redirect, is the host
+                        closed. Uses the network
   --indexed [engine=]file.csv
                         an indexation export or Copilot citations from Bing AI
                         Performance; repeat it for different sources
@@ -124,9 +127,9 @@ options:
 <p><a href="profiles.html">← profiles</a> · <a href="cite.html">cite →</a></p>
 
 <footer>
-  <p>By Alexey Borisov. Updated <time datetime="2026-09-24">2026-09-24</time>,
-  for indexgap 1.8.1.</p>
-  <p>indexgap 1.8.1 — quality control for programmatic SEO pipelines.
+  <p>By Alexey Borisov. Updated <time datetime="2026-09-25">2026-09-25</time>,
+  for indexgap 1.9.0.</p>
+  <p>indexgap 1.9.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

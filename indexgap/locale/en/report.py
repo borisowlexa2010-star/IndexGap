@@ -80,9 +80,6 @@ MESSAGES = {
         'twenty are the same disease at different volumes. This is no longer a bug '
         'in one site but a property of how these sites get built — the habit is what '
         'needs fixing.</p>',
-    '<h2>Почему страницы не в индексе</h2><div class="scroll"><table><thead><tr><th>причина</th><th class="n">страниц</th><th>что делать</th></tr></thead><tbody>':
-        '<h2>Why pages are not indexed</h2><div class="scroll"><table><thead><tr>'
-        '<th>cause</th><th class="n">pages</th><th>what to do</th></tr></thead><tbody>',
     '<h2>Профили, по которым считали</h2><div class="scroll"><table><thead><tr><th>профиль</th><th>тип контента</th><th>что важно помнить</th></tr></thead><tbody>':
         '<h2>Profiles the numbers were computed with</h2><div class="scroll"><table>'
         '<thead><tr><th>profile</th><th>content type</th><th>worth remembering</th>'
@@ -225,4 +222,14 @@ MESSAGES = {
     "Переводы закрыты от индекса и отдают canonical оригиналу — правилом шаблона, а не постранично.":
         "Translations are closed from the index and hand their canonical to the "
         "original — by a template rule, not page by page.",
+
+    # ── заголовок причин зависит от того, что доказывает выгрузка ──────
+    "<h2>Почему страницы не в индексе</h2>":
+        "<h2>Why pages are not indexed</h2>",
+    "<div class=\"scroll\"><table><thead><tr><th>причина</th><th class=\"n\">страниц</th><th>что делать</th></tr></thead><tbody>":
+        "<div class=\"scroll\"><table><thead><tr><th>cause</th><th class=\"n\">pages</th><th>what to do</th></tr></thead><tbody>",
+    "<h2>Почему у страниц нет показов</h2>":
+        "<h2>Why pages have no impressions</h2>",
+    "\nПочему у страниц нет показов:":
+        "\nWhy pages have no impressions:",
 }
