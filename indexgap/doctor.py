@@ -127,6 +127,10 @@ def _child_sitemap(source: str, loc: str) -> tuple:
     base = os.path.realpath(os.path.dirname(os.path.abspath(source)))
     me = os.path.realpath(source)
     path = unquote(urlsplit(loc).path if remote else loc).lstrip("/")
+    # Путь из адреса привёл к самому индексу — он ссылается на себя. Идти за
+    # таким «дочерним» файлом в сеть нельзя: это был бы запрос ради петли.
+    if os.path.realpath(os.path.join(base, path)) == me:
+        return "", tr("{a0}: индекс ссылается сам на себя", a0=loc)
     for candidate in (os.path.join(base, path), os.path.join(base, os.path.basename(path))):
         real = os.path.realpath(candidate)
         inside = real == base or real.startswith(base + os.sep)
