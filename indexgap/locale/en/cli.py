@@ -2,15 +2,20 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    "\n! Адрес сайта определить не удалось.":
+        "\n! Could not determine the site address.",
+    "\n! Каталог со страницами найти не удалось.":
+        "\n! Could not find the directory with pages.",
+    "  Назови их сам:": "  Name them yourself:",
+    "<каталог со страницами>": "<directory with pages>",
+    "НЕ НАЙДЕНЫ": "NOT FOUND",
+    "Внимание по видам: {a0}": "Warnings by kind: {a0}",
     " и далее": " and more",
     " или ": " or ",
     "<адрес сайта>": "<site address>",
     "НЕ НАЙДЕН — впиши в indexgap.json": "NOT FOUND — put it in indexgap.json",
     "в файле остался блок брифа или TODO — страница не дописана":
         "a brief block or a TODO is left in the file — the page is unfinished",
-    "\n! Адрес сайта определить не удалось. Впиши его в indexgap.json полем `site`, иначе проверять нечего.":
-        "\n! Could not determine the site address. Put it in indexgap.json under "
-        "`site`, otherwise there is nothing to check.",
     "\nНи одна страничная находка не повторилась в двух проектах.":
         "\nNo page-level finding repeated across two projects.",
     "\nНовый ключ IndexNow для ЭТОГО проекта: {a0}":

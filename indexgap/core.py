@@ -80,6 +80,12 @@ META_ALIASES = {
 MAIN_TAGS = {"main", "article"}
 
 # Служебные файлы самого пакета: разбирать их как страницы сайта нельзя.
+# Каталог нарядов и метка отчёта: своё пакет страницами не считает. Иначе
+# после `brief --write` каждая команда начиналась с жалобы на собственные
+# файлы, а отчёт, сохранённый в каталог сайта, становился сиротой.
+OWN_DIRS = {"indexgap-briefs"}
+REPORT_MARK = "<!-- indexgap-report -->"
+
 OWN_FILES = {"indexgap-report.html", "indexgap-report.json", "indexgap-check.html",
              "indexgap-check.json", "indexgap-doctor.html", "indexgap-doctor.json"}
 
@@ -1023,7 +1029,8 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                     problems.append(tr(
                         "каталог {a0}/ пропущен как сборочный. Если проверять "
                         "нужно собранный сайт — передай его каталог явно.", a0=name))
-        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in skip]
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d not in skip and d not in OWN_DIRS]
         for name in sorted(filenames):
             if name.startswith(".") or name.lower() in OWN_FILES:
                 continue
@@ -1036,9 +1043,13 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             if _ERROR_PAGE.search(os.path.relpath(path, root).replace(os.sep, "/")):
                 continue
             try:
-                loaded.append(load_page(path, root, base_url))
+                page = load_page(path, root, base_url)
             except SourceError as exc:
                 problems.append(str(exc))
+                continue
+            if REPORT_MARK in (page.raw or "")[:400]:
+                continue
+            loaded.append(page)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.

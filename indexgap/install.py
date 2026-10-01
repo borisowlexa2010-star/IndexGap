@@ -29,7 +29,7 @@ import secrets
 import shutil
 from collections import Counter
 
-from .core import SourceError, DEFAULT_EXTS, SKIP_DIRS, read_text
+from .core import SourceError, DEFAULT_EXTS, OWN_DIRS, SKIP_DIRS, read_text
 from .i18n import tr
 
 SKILL_DIR = os.path.join(".claude", "skills")
@@ -41,6 +41,10 @@ AGENTS_END = "<!-- indexgap:end -->"
 # Каталоги, в которых обычно лежат страницы. Порядок — приоритет при равенстве.
 LIKELY_CONTENT = ("content", "src/content", "app/content", "pages", "src/pages",
                   "posts", "_posts", "docs", "articles", "blog", "site")
+# Куда генераторы кладут готовый сайт. Смотрится вторым: исходники, если они
+# есть, важнее собственной сборки. Без этого списка проект на Next.js, где
+# исходников в виде страниц нет вовсе, получал несуществующий `./content`.
+LIKELY_BUILD = (".next/server/app", "out", "dist", "public", "_site", "build")
 
 # Где обычно записан адрес сайта.
 SITE_FILES = ("package.json", "astro.config.mjs", "astro.config.ts", "astro.config.js",
@@ -63,7 +67,8 @@ def _pages_in(directory: str) -> int:
     total = 0
     for dirpath, dirnames, filenames in os.walk(directory):
         dirnames[:] = [d for d in dirnames
-                       if not d.startswith(".") and d not in SKIP_DIRS]
+                       if not d.startswith(".") and d not in SKIP_DIRS
+                       and d not in OWN_DIRS]
         total += sum(1 for f in filenames if f.lower().endswith(DEFAULT_EXTS))
         if total > 5000:
             break
@@ -78,22 +83,24 @@ def detect_content_dir(root: str) -> str:
     проекта, адреса сдвигаются на сегмент, и все страницы выглядят сиротами.
     Поэтому лучше угадать и показать, чем промолчать.
     """
-    candidates = {}
-    for name in LIKELY_CONTENT:
-        path = os.path.join(root, *name.split("/"))
-        if os.path.isdir(path):
-            count = _pages_in(path)
-            if count:
-                candidates[name] = count
-    if candidates:
-        best = max(candidates.items(), key=lambda kv: (kv[1], -LIKELY_CONTENT.index(kv[0])))
-        return os.path.join(".", *best[0].split("/"))
+    for names in (LIKELY_CONTENT, LIKELY_BUILD):
+        candidates = {}
+        for name in names:
+            path = os.path.join(root, *name.split("/"))
+            if os.path.isdir(path):
+                count = _pages_in(path)
+                if count:
+                    candidates[name] = count
+        if candidates:
+            best = max(candidates.items(), key=lambda kv: (kv[1], -names.index(kv[0])))
+            return os.path.join(".", *best[0].split("/"))
 
     # Ничего знакомого — берём подкаталог первого уровня с наибольшим числом страниц.
     best_name, best_count = "", 0
     for entry in sorted(os.listdir(root)):
         path = os.path.join(root, entry)
-        if not os.path.isdir(path) or entry.startswith(".") or entry in SKIP_DIRS:
+        if (not os.path.isdir(path) or entry.startswith(".") or entry in SKIP_DIRS
+                or entry in OWN_DIRS):
             continue
         count = _pages_in(path)
         if count > best_count:
@@ -386,12 +393,28 @@ def run(root: str, site: str = "", content: str = "", profile: str = "",
     if not os.path.isdir(root):
         raise SourceError(tr("Каталога {a0} нет.", a0=root))
 
+    # Что уже записано в indexgap.json, заново не угадывается: там может
+    # стоять выбор, сделанный руками, а повторный `init` после `brief --write`
+    # называл страницами каталог собственных нарядов.
+    known = {}
+    config_file = os.path.join(root, CONFIG_NAME)
+    if os.path.isfile(config_file) and not force:
+        try:
+            with open(config_file, encoding="utf-8-sig") as fh:
+                loaded = json.load(fh)
+            known = loaded if isinstance(loaded, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            known = {}
+    content = content or str(known.get("pages") or "")
+    site = site or str(known.get("site") or "")
+    dataset = dataset or str(known.get("dataset") or "")
+
     detected_content = content or detect_content_dir(root)
     detected_dataset = dataset or detect_dataset(root)
     detected_profile, why = ((profile, tr("задан флагом")) if profile
                              else detect_profile(root, detected_content, detected_dataset))
     detected = {
-        "content": detected_content or "./content",
+        "content": detected_content,
         "site": site or detect_site(root, detected_content),
         "dataset": detected_dataset,
         "profile": detected_profile,
