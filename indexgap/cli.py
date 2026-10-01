@@ -254,6 +254,25 @@ def _write_json(path, payload):
 
 # ── команды ───────────────────────────────────────────────────────────────────
 
+def _sitemaps(args) -> dict:
+    """Sitemap читается один раз за команду: по сети это запросы, а не файл."""
+    cached = getattr(args, "_sitemaps", None)
+    if cached is None:
+        cached = doctor.read_sitemaps(args.sitemap)
+        args._sitemaps = cached
+    return cached
+
+
+def _sitemap_hreflang(args, pages) -> None:
+    """hreflang, объявленный в sitemap, отдаётся страницам до проверок."""
+    if not getattr(args, "sitemap", None):
+        return
+    given = doctor.apply_sitemap_alternates(pages, _sitemaps(args).get("alternates"))
+    if given:
+        print(tr("hreflang взят из sitemap для {a0} страниц(ы): в самих страницах "
+                 "его нет", a0=given))
+
+
 def _analyse(args):
     """
     Общая часть `check` и `brief`: загрузить страницы, применить профиль,
@@ -272,6 +291,7 @@ def _analyse(args):
     print(tr("Профиль — {a0} ({a1})", a0=tr(project['_profile_title']),
              a1=project['_profile']))
 
+    _sitemap_hreflang(args, pages)
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""))
@@ -323,7 +343,7 @@ def cmd_check(args):
     sitemap_urls = None
     by_engine, by_source, cited, impressions = _collect_indexed(args)
     if args.sitemap:
-        sm = doctor.read_sitemaps(args.sitemap)
+        sm = _sitemaps(args)
         for error in sm["errors"]:
             print(tr("  ! sitemap не прочитан: {a0}", a0=error))
         if sm["urls"]:
@@ -607,6 +627,7 @@ def cmd_notify(args):
 def cmd_doctor(args):
     apply_project_defaults(args)
     pages = _load(args)
+    _sitemap_hreflang(args, pages)
     project = settings.resolve(args.root, pages, explicit=args.config)
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
@@ -615,7 +636,7 @@ def cmd_doctor(args):
 
     sitemap_urls = None
     if args.sitemap:
-        sm = doctor.read_sitemaps(args.sitemap)
+        sm = _sitemaps(args)
         if not sm["urls"] and sm["errors"]:
             raise SourceError(
                 tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['errors'][0]))

@@ -2,6 +2,14 @@
 """hreflang и всё, что про многоязычность, — English."""
 
 MESSAGES = {
+    "hreflang взят из sitemap для {a0} страниц(ы): в самих страницах его нет":
+        "hreflang was taken from the sitemap for {a0} page(s): the pages "
+        "themselves carry none",
+    "{a0} открыт(ых) страниц всё ещё называют их в своём hreflang — убрать нужно и оттуда.":
+        "{a0} open page(s) still name them in their own hreflang — remove them "
+        "there as well.",
+    "У {a0} из них canonical ведёт на страницу, которой среди файлов нет.":
+        "For {a0} of them the canonical points at a page that is not among the files.",
     "«{a0}» — не код страны по ISO 3166-1":
         "“{a0}” is not an ISO 3166-1 country code",
     "основной": "default",
