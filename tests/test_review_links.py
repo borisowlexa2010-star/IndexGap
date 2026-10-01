@@ -93,5 +93,49 @@ class TestRelativeLinks(Fixture):
         self.assertEqual(self.codes(result, "orphan", "unreachable"), [])
 
 
+class TestRedirectStubs(Fixture):
+    """
+    Заглушка-редирект не проверяется как страница — значит, признать заглушкой
+    настоящую страницу нельзя: все её находки молча пропадут.
+    """
+
+    def stub_urls(self, files):
+        pages, _ = self.site(files)
+        return sorted(p.url.replace(SITE, "") for p in pages if checks.redirect_target(p))
+
+    def test_noscript_or_delayed_refresh_and_quoted_digest_are_not_stubs(self):
+        noscript = '<noscript><meta http-equiv="refresh" content="0; url=/nojs/"></noscript>'
+        self.assertEqual(self.stub_urls({
+            "index.html": html("Главная", ["a/", "b/", "c/", "d/"], head=noscript),
+            "a/index.html": html("Автообновление", ["../"],
+                                 head='<meta http-equiv="refresh" content="300; url=/a/">'),
+            "b/index.html": html("Про Next.js", ["../"]).replace(
+                "</main>", "<code>NEXT_REDIRECT;replace;/login;307;</code></main>"),
+            "c/index.html": html("Закомментировано", ["../"],
+                                 head='<!-- <meta http-equiv="refresh" content="0; url=/old/"> -->'),
+            "d/index.html": html("Пример в тексте", ["../"]).replace(
+                "</main>", '<pre>&lt;meta http-equiv="refresh" content="0; url=/x/"&gt;</pre></main>'),
+        }), [])
+
+    def test_a_markdown_page_showing_a_redirect_is_not_a_stub(self):
+        md = ("---\ntitle: Как сделать редирект\n---\n\n# Редирект\n\n" + "слово " * 150
+              + '\n\n```html\n<meta http-equiv="refresh" content="0; url=/new/">\n```\n')
+        self.assertEqual(self.stub_urls({"index.md": md}), [])
+
+    def test_real_stubs_are_still_stubs(self):
+        next_stub = ('<!doctype html><html><head><title>x</title></head><body>'
+                     '<script>self.__next_f.push([1,"NEXT_REDIRECT;replace;/en;307;"])</script>'
+                     "</body></html>")
+        alias = ('<!doctype html><html><head><title>/new/</title>'
+                 '<link rel="canonical" href="/new/">'
+                 '<meta http-equiv="refresh" content="0; url=/new/"></head></html>')
+        self.assertEqual(self.stub_urls({
+            "index.html": next_stub,
+            "old/index.html": alias,
+            "en/index.html": html("Главная", ["/new/"]),
+            "new/index.html": html("Новая", ["/en/"]),
+        }), ["/", "/old/"])
+
+
 if __name__ == "__main__":
     unittest.main()
