@@ -97,5 +97,65 @@ class TestAiCrawlerLevel(unittest.TestCase):
         self.assertIn("info", [lvl for lvl, _ in english])
 
 
+class TestEventsProfileAndDates(unittest.TestCase):
+    """Дата публикации — не дата события."""
+
+    def page(self, **kw):
+        import json
+        from datetime import date
+        page = Page("текст")
+        page.meta = kw.get("meta", {})
+        page.jsonld = [json.dumps(j) for j in kw.get("jsonld", [])]
+        page.raw = kw.get("raw", "")
+        page.robots, page.canonical = "", ""
+        from indexgap import freshness
+        return freshness.page_dates(page)
+
+    def test_time_tag_on_non_event_not_stale(self):
+        raw = 'Last reviewed <time datetime="2026-03-02">2 March</time>'
+        self.assertEqual(self.page(raw=raw), {})
+        self.assertEqual(self.page(raw=raw, jsonld=[
+            {"@type": "NewsArticle", "datePublished": "2026-03-02"}]), {})
+
+    def test_time_tag_on_an_event_still_counts(self):
+        found = self.page(raw='<time datetime="2026-03-02">', jsonld=[
+            {"@type": "MusicEvent", "name": "Концерт"}])
+        self.assertEqual(sorted(found), ["time"])
+
+    def test_recurring_event_not_stale(self):
+        from datetime import date
+        found = self.page(jsonld=[{"@type": "Event", "startDate": "2026-01-05",
+                                   "eventSchedule": {"@type": "Schedule", "repeatFrequency": "P1W",
+                                                     "endDate": "2027-12-27"}}])
+        self.assertEqual(max(found.values()), date(2027, 12, 27))
+        open_ended = self.page(jsonld=[{"@type": "Event", "startDate": "2026-01-05",
+                                        "eventSchedule": {"@type": "Schedule",
+                                                          "repeatFrequency": "P1W"}}])
+        self.assertEqual(open_ended, {})
+
+    def test_a_blog_with_publish_dates_is_not_an_events_site(self):
+        import os, shutil, tempfile
+        from indexgap import install
+        root = tempfile.mkdtemp(prefix="indexgap-blog-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "content", "posts"))
+        for i in range(6):
+            with open(os.path.join(root, "content", "posts", f"p{i}.md"), "w", encoding="utf-8") as fh:
+                fh.write(f"---\ntitle: Пост {i}\ndate: 2026-0{i + 1}-10\n---\n\n" + "слово " * 200)
+        profile, _ = install.detect_profile(root, "content", "")
+        self.assertNotEqual(profile, "events")
+
+    def test_event_fields_still_select_the_events_profile(self):
+        import os, shutil, tempfile
+        from indexgap import install
+        root = tempfile.mkdtemp(prefix="indexgap-ev-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "content"))
+        for i in range(6):
+            with open(os.path.join(root, "content", f"e{i}.md"), "w", encoding="utf-8") as fh:
+                fh.write(f"---\ntitle: Концерт {i}\nstart_date: 2026-0{i + 1}-10\n---\n\n" + "слово " * 200)
+        self.assertEqual(install.detect_profile(root, "content", "")[0], "events")
+
+
 if __name__ == "__main__":
     unittest.main()

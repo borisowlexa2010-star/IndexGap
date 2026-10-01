@@ -49,7 +49,7 @@ class Fixture(unittest.TestCase):
             else:
                 head = f"---\ntitle: Страница {i}\n"
                 if dated:
-                    head += "date: 2026-03-01\n"
+                    head += "start_date: 2026-03-01\n"
                 head += "---\n\n"
                 body = head + "# Страница\n\n" + "текст страницы " * (3 if short else 60)
             self.write(f"{folder}/p{i}/index.{ext}", body)
