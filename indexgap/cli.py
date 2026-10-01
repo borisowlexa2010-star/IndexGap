@@ -679,10 +679,10 @@ def _print_live(live: dict) -> None:
                 why = tr("отвечает {a0}, а среди файлов сайта её нет — локальная "
                          "сборка устарела или страница собирается не отсюда",
                          a0=item["status"])
-            print(f"  {item['status']:>5}  {item['key']}")
+            print(f"  {item['status']:>5}  {item.get('url') or item['key']}")
             print(f"         → {why}")
     if unknown:
-        print(tr("Не удалось проверить ({a0}) — сеть или сайт не ответили.",
+        print(tr("Не удалось проверить ({a0}): нет ответа, сервер занят (429, 5xx) или редиректы не закончились.",
                  a0=len(unknown)))
     if live["total"] > live["checked"]:
         print(tr("Проверены первые {a0} из {a1}.", a0=live["checked"], a1=live["total"]))

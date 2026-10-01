@@ -278,7 +278,8 @@ def foreign_urls(funnel_result: dict, site: str = "") -> dict:
         else:
             missing.append(key)
     return {"other_hosts": sorted(other), "files": sorted(files),
-            "missing": sorted(missing), "by_host": dict(sorted(by_host.items()))}
+            "missing": sorted(missing), "by_host": dict(sorted(by_host.items())),
+            "exported": dict(funnel_result.get("exported") or {})}
 
 
 def _probe(url: str, timeout: int = 10) -> tuple:
@@ -295,14 +296,60 @@ def _probe(url: str, timeout: int = 10) -> tuple:
         def redirect_request(self, *args, **kwargs):
             return None
 
+    def headers_of(message) -> dict:
+        out = dict(message or {})
+        # Заголовок может прийти дважды, а dict оставляет один: сервер слал
+        # `nofollow` и отдельно `noindex`, и хост считался открытым.
+        every = (message.get_all("X-Robots-Tag")
+                 if hasattr(message, "get_all") else None)
+        if every:
+            out["X-Robots-Tag"] = ", ".join(every)
+        return out
+
     opener = urllib.request.build_opener(_Stay)
     try:
         response = opener.open(request(url), timeout=timeout)
-        return response.status, dict(response.headers or {})
+        headers = headers_of(response.headers)
+        # Хост закрывают и тегом в странице. Хватит начала: <meta robots> в <head>.
+        if "html" in str(headers.get("Content-Type", "")).lower():
+            try:
+                headers["_body"] = response.read(65536).decode("utf-8", "replace")
+            except Exception:
+                pass
+        return response.status, headers
     except urllib.error.HTTPError as error:
-        return error.code, dict(error.headers or {})
+        return error.code, headers_of(error.headers)
     except Exception:
         return None, {}
+
+
+# Чьё правило считается: общее или адресованное поисковику.
+_SEARCH_BOTS = ("googlebot", "bingbot", "yandex", "yandexbot", "duckduckbot",
+                "slurp", "baiduspider", "applebot")
+_META_ROBOTS = re.compile(
+    r"<meta\b[^>]{0,300}?\bname\s*=\s*[\"']?(?:robots|googlebot)[\"']?[^>]{0,300}>", re.I)
+_META_CONTENT = re.compile(r"\bcontent\s*=\s*[\"']([^\"']{0,200})[\"']", re.I)
+
+
+def _closed_by_robots(header: str, body: str = "") -> bool:
+    """
+    Закрыта ли страница от индекса: `noindex` или `none`, в заголовке или в теге.
+
+    Правило с именем бота (`otherbot: noindex`) закрывает только от него —
+    общим оно считается лишь для поисковиков.
+    """
+    for part in str(header or "").split(","):
+        agent, _, rule = part.strip().lower().rpartition(":")
+        if agent and agent.strip() not in _SEARCH_BOTS:
+            continue
+        if rule.strip() in ("noindex", "none"):
+            return True
+    for tag in _META_ROBOTS.findall(body or ""):
+        content = _META_CONTENT.search(tag)
+        if content and {"noindex", "none"} & {
+                t.strip().lower() for t in content.group(1).split(",")}:
+            return True
+    return False
 
 
 def verify_live(foreign: dict, limit: int = 50, timeout: int = 10) -> dict:
@@ -318,41 +365,70 @@ def verify_live(foreign: dict, limit: int = 50, timeout: int = 10) -> dict:
     в порядке, если закрыт `X-Robots-Tag: noindex`, стоит за входом (401/403)
     или исчез. Недоступный адрес не записывается в сделанное.
     """
+    from urllib.parse import quote, urljoin, urlsplit, urlunsplit
     done, todo, unknown, details = [], [], [], {}
+    exported = foreign.get("exported") or {}
     items = ([(k, "host") for k in foreign.get("other_hosts") or ()]
              + [(k, "page") for k in foreign.get("missing") or ()])
+
+    def address(key):
+        # Спрашивается адрес из выгрузки, а не ключ: у ключа нет слэша, `.html`
+        # и `www`, и живая страница отвечала на него 301 или 404.
+        url = exported.get(key) or ("https:" + key if key.startswith("//") else key)
+        parts = urlsplit(url)
+        return urlunsplit((parts.scheme, parts.netloc,
+                           quote(parts.path, safe="/%:@!$&'()*+,;=~-._"),
+                           quote(parts.query, safe="=&%:@!$'()*+,;/?~-._"), ""))
+
+    def lower(headers):
+        return {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+
     for key, kind in items[:limit]:
-        url = "https:" + key if key.startswith("//") else key
+        url = address(key)
         status, headers = _probe(url, timeout=timeout)
-        lowered = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+        lowered = lower(headers)
+        stuck = False
         if kind == "host":
             # Редирект внутри хоста ничего не закрывает: корень GitLab отвечает
             # 302 на страницу входа, а та — 200 без noindex. Идём по цепочке и
             # судим по последнему ответу. Редирект на другой хост — хост выведен.
-            from urllib.parse import urljoin, urlsplit
             home_host = urlsplit(url).hostname
             for _ in range(5):
-                if not (status and 300 <= status < 400 and lowered.get("location")):
+                if not (status and 300 <= status < 400):
+                    break
+                if not lowered.get("location"):
+                    stuck = True
                     break
                 target = urljoin(url, lowered["location"])
                 if urlsplit(target).hostname != home_host:
                     break
                 url = target
                 status, headers = _probe(url, timeout=timeout)
-                lowered = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
-        info = {"key": key, "kind": kind, "status": status,
+                lowered = lower(headers)
+            else:
+                # Пять переходов и всё ещё редирект внутри хоста — петля.
+                stuck = bool(status and 300 <= status < 400)
+        info = {"key": key, "kind": kind, "status": status, "url": url,
                 "location": lowered.get("location", ""),
                 "robots": lowered.get("x-robots-tag", "")}
         details[key] = info
-        if status is None:
+        # Нет ответа, сервер занят или просит подождать, цепочка не кончилась —
+        # это «не знаю», а не «в порядке» и не «открыт».
+        if status is None or status == 429 or status >= 500 or stuck:
             unknown.append(key)
             continue
+        closed = _closed_by_robots(info["robots"], lowered.get("_body", ""))
         if kind == "page":
-            ok = 300 <= status < 400 or status in (404, 410)
+            ok = 300 <= status < 400 or status in (404, 410) or closed
+            if not ok and status != 200:
+                unknown.append(key)
+                continue
         else:
             # Сюда 3xx доходит только как уход на другой хост.
-            ok = ("noindex" in info["robots"].lower() or status in (401, 403, 404, 410)
-                  or 300 <= status < 400)
+            ok = (closed or status in (401, 403, 404, 410) or 300 <= status < 400)
+            if not ok and status != 200:
+                unknown.append(key)
+                continue
         (done if ok else todo).append(key if ok else info)
     return {"done": done, "todo": todo, "unknown": unknown, "details": details,
             "checked": min(len(items), limit), "total": len(items)}
@@ -704,6 +780,13 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     others = {name: _keys(urls) for name, urls in (by_source or {}).items() if urls}
     engines_keys = dict(panels)
     engines_keys.update(others)
+    # Адрес, как он стоял в выгрузке: ключ для сравнения теряет слэш, `.html`
+    # и `www`, а спрашивать живой сайт нужно ровно о том, что знает поисковик.
+    exported = {}
+    for urls in list((by_engine or {}).values()) + list((by_source or {}).values()) \
+            + [indexed_urls or ()]:
+        for url in urls or ():
+            exported.setdefault(url_key(url), url)
     if engines_keys and indexed_urls is None:
         in_index = set().union(*engines_keys.values())
     elif indexed_urls is not None:
@@ -816,6 +899,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "stale_in_sitemap": stale_in_sitemap,
         "not_indexed": not_indexed,
         "indexed_unknown": indexed_unknown,
+        "exported": {k: exported[k] for k in indexed_unknown if k in exported},
         "has_sitemap": in_sitemap is not None,
         "has_index": in_index is not None,
         "cited_closed": cited_closed,
