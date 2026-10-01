@@ -96,7 +96,7 @@ def missing_keys(names=None) -> list:
     for name in sorted(names or PROVIDERS):
         meta = PROVIDERS.get(name)
         if meta:
-            out.append(f"{meta['title']}: {' или '.join(meta['env'])}")
+            out.append(f"{meta['title']}: {tr(' или ').join(meta['env'])}")
     return out
 
 
@@ -171,7 +171,7 @@ def ask(name: str, prompt: str, cfg: dict = None, env: dict = None) -> dict:
     key = _key(name, env)
     if not key:
         raise SourceError(tr("нет ключа для {a0}: задай {a1}",
-                             a0=meta["title"], a1=" или ".join(meta["env"])))
+                             a0=meta["title"], a1=tr(" или ").join(meta["env"])))
 
     if name == "perplexity":
         url, headers = meta["url"], {"Authorization": f"Bearer {key}"}

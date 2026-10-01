@@ -235,7 +235,7 @@ def read_dataset(path: str) -> dict:
     if ragged:
         shown = ", ".join(str(n) for n in ragged[:5])
         problems.append(
-            tr("в {a0} строк(ах) колонок больше, чем в шапке — лишнее отброшено (строки {a1}{a2})", a0=len(ragged), a1=shown, a2=' и далее' if len(ragged) > 5 else ''))
+            tr("в {a0} строк(ах) колонок больше, чем в шапке — лишнее отброшено (строки {a1}{a2})", a0=len(ragged), a1=shown, a2=tr(' и далее') if len(ragged) > 5 else ''))
     return {"rows": rows, "fields": fields, "encoding": encoding,
             "delimiter": "" if single_column else getattr(dialect, "delimiter", ","),
             "problems": problems}

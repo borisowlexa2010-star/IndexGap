@@ -800,7 +800,7 @@ def cmd_init(args):
     print(tr("Что понято про проект:"))
     print(tr("  страницы   {a0}", a0=d['content'])
           + (tr("   (угадано — проверь)") if d["content_guessed"] else ""))
-    print(tr("  сайт       {a0}", a0=d['site'] or 'НЕ НАЙДЕН — впиши в indexgap.json')
+    print(tr("  сайт       {a0}", a0=d['site'] or tr('НЕ НАЙДЕН — впиши в indexgap.json'))
           + (tr("   (угадано — проверь)") if d["site"] and d["site_guessed"] else ""))
     print(tr("  тип        {a0}   ({a1})", a0=d['profile'], a1=d['profile_why']))
     if d["dataset"]:

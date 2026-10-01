@@ -300,3 +300,57 @@ class TestLanguageDataStaysRussian(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestUnwrappedLiterals(unittest.TestCase):
+    """
+    Строки, которые обходили `tr()`: стояли в f-строке, в `or '…'`, в ключе
+    словаря. Тест словаря их не видел — он смотрит только размеченное, — и
+    первый же англоязычный пользователь получал «НЕ НАЙДЕН — впиши в…».
+    """
+
+    def setUp(self):
+        english()
+        self.dir = tempfile.mkdtemp(prefix="indexgap-lit-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.addCleanup(russian)
+
+    def assertEnglish(self, text):
+        self.assertFalse(CYRILLIC.search(str(text)), text)
+
+    def test_missing_api_keys_hint(self):
+        from indexgap import cite
+        self.assertEnglish(cite.missing_keys())
+
+    def test_leftover_brief_message(self):
+        from indexgap import content, core
+        path = os.path.join(self.dir, "a.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("---\ntitle: Page\n---\n\nTODO: write this page\n")
+        pages = core.load_pages(self.dir, SITE)[0]
+        found = [i for i in content.check_brief(pages) if i[2] == "brief-left"]
+        self.assertEqual(len(found), 1)
+        self.assertEnglish(found[0][3])
+
+    def test_a_todo_inside_code_is_not_a_leftover_brief(self):
+        from indexgap import content, core
+        path = os.path.join(self.dir, "a.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("---\ntitle: Page\n---\n\nText of the page.\n\n```js\n// TODO: refactor\n```\n")
+        pages = core.load_pages(self.dir, SITE)[0]
+        self.assertEqual([i for i in content.check_brief(pages) if i[2] == "brief-left"], [])
+
+    def test_ragged_dataset_message(self):
+        from indexgap import generate
+        path = os.path.join(self.dir, "d.csv")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("keyword,price\n" + "".join(f"k{i},1,extra\n" for i in range(8)))
+        self.assertEnglish(generate.read_dataset(path)["problems"])
+
+    def test_agents_block_and_config_without_a_site(self):
+        from indexgap import install
+        detected = {"profile": "catalog", "content": "./content", "site": "", "dataset": ""}
+        with open(os.path.join(self.dir, "AGENTS.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Project\n")
+        install.update_agents_md(self.dir, detected)
+        self.assertEnglish(open(os.path.join(self.dir, "AGENTS.md"), encoding="utf-8").read())
