@@ -77,10 +77,17 @@ class TestUrlMatching(Fixture):
 
     def test_index_md_and_html_collide_loudly(self):
         self.write("index.html", "<html><body><p>Раз</p></body></html>")
-        self.write("index.md", "# Раз")
+        self.write("index.md", "---\ntitle: Раз\n---\n\n# Раз")
         pages, problems = self.load()
         self.assertEqual(len(pages), 1)
         self.assertTrue(any("один URL" in p for p in problems))
+
+    def test_a_raw_markdown_twin_is_named_as_a_file_not_a_collision(self):
+        self.write("index.html", "<html><body><p>Раз</p></body></html>")
+        self.write("index.md", "# Раз")
+        pages, problems = self.load()
+        self.assertEqual(len(pages), 1)
+        self.assertTrue(any("index.md" in p for p in problems))
 
     def test_site_without_scheme_is_refused(self):
         with self.assertRaises(SourceError):
