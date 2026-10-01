@@ -321,8 +321,9 @@ MESSAGES = {
         "\nChecked live: {a0} of {a1} are already fine — redirected, removed or closed from the index.",
     "         Выгрузка показывает прошлое. Что из этого уже исправлено, покажет --live (проверит каждый адрес по сети).":
         "         The export shows the past. --live will show which of these are already fixed (it checks each address over the network).",
-    "Не удалось проверить ({a0}) — сеть или сайт не ответили.":
-        "Could not check ({a0}) — the network or the site did not answer.",
+    "Не удалось проверить ({a0}): нет ответа, сервер занят (429, 5xx) или редиректы не закончились.":
+        "Could not check ({a0}): no answer, the server is busy (429, 5xx) or the "
+        "redirects never ended.",
     "Проверены первые {a0} из {a1}.":
         "Checked the first {a0} of {a1}.",
     "Требует действий:":
