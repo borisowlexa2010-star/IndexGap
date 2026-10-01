@@ -2,6 +2,18 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "Amazon не будет использовать страницу":
+        "Amazon will not use the page",
+    "ByteDance не будет использовать страницу":
+        "ByteDance will not use the page",
+    "Claude не сможет открыть страницу по прямой просьбе пользователя":
+        "Claude will not be able to open the page when a user asks it to",
+    "Common Crawl не возьмёт страницу в свой набор (им пользуются многие модели)":
+        "Common Crawl will not take the page into its corpus (many models draw on it)",
+    "Meta не будет использовать страницу для обучения":
+        "Meta will not use the page for training",
+    "Perplexity не сможет открыть страницу по прямой просьбе пользователя":
+        "Perplexity will not be able to open the page when a user asks it to",
     "{a0}: {a1} адрес(ов) поисковик сам называет не проиндексированными ({a2}) — в шаг «в индексе» они не засчитаны":
         "{a0}: the search engine itself reports {a1} address(es) as not indexed "
         "({a2}) — they are not counted in the index step",
@@ -181,8 +193,6 @@ MESSAGES = {
         "quoted noticeably more often",
     "не нашёл ни одного абзаца — цитировать нечего":
         "no paragraph found — there is nothing to quote",
-    "не покажет": "will not show",
-    "не проиндексирует": "will not index",
     "не указан автор или организация — сигнал E-E-A-T":
         "no author or organisation is given — an E-E-A-T signal",
     "нет машиночитаемой даты публикации или обновления":

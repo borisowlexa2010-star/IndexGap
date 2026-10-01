@@ -67,7 +67,19 @@ AI_AGENTS = {
     "google-extended": N_("Gemini не будет использовать страницу для обучения (на AI Overviews не влияет)"),
     "applebot-extended": N_("Apple Intelligence не будет использовать страницу"),
     "bingbot": N_("Bing не проиндексирует страницу — а вместе с ним Copilot"),
+    "claude-user": N_("Claude не сможет открыть страницу по прямой просьбе пользователя"),
+    "perplexity-user": N_("Perplexity не сможет открыть страницу по прямой просьбе пользователя"),
+    "ccbot": N_("Common Crawl не возьмёт страницу в свой набор (им пользуются многие модели)"),
+    "bytespider": N_("ByteDance не будет использовать страницу"),
+    "amazonbot": N_("Amazon не будет использовать страницу"),
+    "meta-externalagent": N_("Meta не будет использовать страницу для обучения"),
 }
+
+# Закрытие этих ботов убирает страницу из поиска или из ответов с поиском —
+# это потеря трафика, а не решение про обучение. Важность записана здесь, а не
+# выводится из текста сообщения: раньше она искалась по русскому слову внутри
+# уже переведённой строки, и в английском выводе все четыре были «инфо».
+AI_SEARCH_AGENTS = {"oai-searchbot", "perplexitybot", "claude-searchbot", "bingbot"}
 
 
 def read_robots(path: str) -> dict:
@@ -156,7 +168,7 @@ def check_robots(robots: dict) -> list:
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
         if entry and _blocks_everything(entry):
-            level = "critical" if tr("не покажет") in why or tr("не проиндексирует") in why else "info"
+            level = "critical" if agent in AI_SEARCH_AGENTS else "info"
             issues.append((level, "robots.txt", "ai-crawler-blocked",
                            tr("{a0} закрыт: {a1}", a0=agent, a1=tr(why))))
     if not robots.get("sitemaps"):
