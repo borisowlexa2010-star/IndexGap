@@ -2,6 +2,11 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    " — возможно, имелось в виду «{a0}»": " — perhaps “{a0}” was meant",
+    "{a0}: метка «{a1}» мне не знакома, файл засчитан как список адресов":
+        "{a0}: the label “{a1}” is not one I know, the file was counted as a plain "
+        "list of addresses",
+    "таблица не читается ({a0})": "the table cannot be read ({a0})",
     "Amazon не будет использовать страницу":
         "Amazon will not use the page",
     "ByteDance не будет использовать страницу":

@@ -635,7 +635,12 @@ def read_citations(csv_path: str, site: str = "") -> dict:
             url = base + url
         if not url.startswith(("http://", "https://")):
             continue
-        raw = str(row[count_col]).strip().replace(",", "").replace(" ", "")
+        # Число цитирований — целое. Разряды в нём пишут запятой, пробелом,
+        # неразрывным и узким пробелом и точкой; `1 866` с узким пробелом
+        # выбрасывал строку, а `1.866` читался как единица.
+        raw = re.sub(r"[\s\u00a0\u202f\u2009,']", "", str(row[count_col]))
+        if re.fullmatch(r"\d{1,3}(\.\d{3})+", raw):
+            raw = raw.replace(".", "")
         try:
             count = int(float(raw))
         except ValueError:
@@ -665,6 +670,14 @@ def read_sources(specs: list, site: str = "") -> dict:
         header = read_indexed_header(path)
         if name:
             kind = sources.kind_of(name)
+            if name not in sources.TOOLS:
+                # Незнакомая метка молча становилась «просто списком»: опечатка
+                # `gogle=` убирала из воронки шаг индекса без единого слова.
+                close = sources.nearest_tool(name)
+                notes.append(tr("{a0}: метка «{a1}» мне не знакома, файл засчитан как "
+                                "список адресов", a0=os.path.basename(path), a1=name)
+                             + (tr(" — возможно, имелось в виду «{a0}»", a0=close)
+                                if close else ""))
             # Подпись в самом файле сильнее метки, которую ему дали: выгрузка
             # цитирований под именем `bing=` читалась как индекс Bing.
             signed, signed_kind = sources.signature_of(header)
