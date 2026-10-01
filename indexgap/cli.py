@@ -639,6 +639,8 @@ def cmd_doctor(args):
         lost = tr("  (потеряно {a0}: {a1})", a0=step['lost'], a1=step['why']) if step.get("lost") else ""
         print(f"  {step['name']:<28} {step['count']:>6}{lost}")
 
+    _print_sitemap_detail(funnel_result)
+
     if cross:
         print(tr("\nСравнение поисковиков:"))
         for c in cross:
@@ -681,6 +683,40 @@ def cmd_doctor(args):
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     print(tr("Проверки текста здесь не запускались — это делает `indexgap check`."))
     return 0
+
+
+def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:
+    """
+    Какие именно страницы расходятся с sitemap.
+
+    «Потеряно 1» без адреса — не задание. Эти списки считались всегда, но
+    жили только в JSON: в консоли стояло число, и искать страницу приходилось
+    самому.
+    """
+    groups = (
+        (funnel_result.get("missing_from_sitemap"),
+         "missing"),
+        (funnel_result.get("closed_in_sitemap"),
+         "closed"),
+        (["https:" + k if k.startswith("//") else k
+          for k in funnel_result.get("stale_in_sitemap") or ()],
+         "stale"),
+    )
+    for urls, kind in groups:
+        if not urls:
+            continue
+        if kind == "missing":
+            title = tr("Открыты для индексации, а в sitemap их нет ({a0}):", a0=len(urls))
+        elif kind == "closed":
+            title = tr("Закрыты от индексации, а в sitemap стоят ({a0}) — sitemap просит "
+                       "обойти то, что запрещено индексировать:", a0=len(urls))
+        else:
+            title = tr("В sitemap есть, а среди страниц сайта нет ({a0}):", a0=len(urls))
+        print("\n" + title)
+        for url in urls[:limit]:
+            print(f"         {url}")
+        if len(urls) > limit:
+            print(tr("         … и ещё {a0}", a0=len(urls) - limit))
 
 
 def _warn_undeclared(robots_path: str, given) -> None:

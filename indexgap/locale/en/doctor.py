@@ -2,6 +2,19 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "ни один из {a0} адресов sitemap не совпал с адресами сайта: в sitemap записан хост {a1}. Страницы на месте — в sitemap не тот адрес сайта (частая причина — он собран с адресом dev-сервера или превью).":
+        "none of the {a0} sitemap addresses matched the site's addresses: the "
+        "sitemap is written for the host {a1}. The pages are there — the sitemap "
+        "carries the wrong site address (often it was built with a dev-server or "
+        "preview address).",
+    "Открыты для индексации, а в sitemap их нет ({a0}):":
+        "Open to indexing but missing from the sitemap ({a0}):",
+    "Закрыты от индексации, а в sitemap стоят ({a0}) — sitemap просит обойти то, что запрещено индексировать:":
+        "Closed to indexing but listed in the sitemap ({a0}) — the sitemap asks "
+        "for a crawl of what must not be indexed:",
+    "В sitemap есть, а среди страниц сайта нет ({a0}):":
+        "In the sitemap but not among the site's pages ({a0}):",
+    "         … и ещё {a0}": "         … and {a0} more",
     " — возможно, имелось в виду «{a0}»": " — perhaps “{a0}” was meant",
     "{a0}: метка «{a1}» мне не знакома, файл засчитан как список адресов":
         "{a0}: the label “{a1}” is not one I know, the file was counted as a plain "
