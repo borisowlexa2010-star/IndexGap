@@ -186,8 +186,9 @@ def ask(name: str, prompt: str, cfg: dict = None, env: dict = None) -> dict:
         payload = {"model": model, "input": prompt,
                    "tools": [{"type": "web_search"}]}
     elif name == "gemini":
-        url = meta["url"] + f"?key={key}"
-        headers = {}
+        # Ключ идёт заголовком, а не в адресе: адрес попадает в логи прокси и
+        # в текст ошибок.
+        url, headers = meta["url"], {"x-goog-api-key": key}
         payload = {"model": model, "input": prompt,
                    "tools": [{"type": "google_search"}]}
     else:

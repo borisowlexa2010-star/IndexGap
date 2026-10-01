@@ -278,5 +278,120 @@ class TestPathologicalInput(Fixture):
                          "a   b <!-- open")
 
 
+class TestInitInAHostileRepo(Fixture):
+    def repo(self):
+        root = os.path.join(self.dir, "repo")
+        os.makedirs(os.path.join(root, "content"))
+        for i in range(3):
+            with open(os.path.join(root, "content", f"p{i}.md"), "w", encoding="utf-8") as fh:
+                fh.write(f"---\ntitle: Page {i}\n---\n\ntext")
+        return root
+
+    def test_init_refuses_symlinked_targets(self):
+        """Клонированный репозиторий может прислать вместо файла ссылку на чужой:
+        `init` перезаписывал то, на что она ведёт, — вне проекта."""
+        from indexgap import install
+        for name in (".gitignore", "indexgap.json", "AGENTS.md"):
+            root = self.repo()
+            outside = os.path.join(self.dir, "outside-" + name.strip("."))
+            with open(outside, "w", encoding="utf-8") as fh:
+                fh.write("чужой файл\n")
+            os.symlink(outside, os.path.join(root, name))
+            with self.assertRaises(core.SourceError, msg=name):
+                install.run(root, site="https://example.com", agents=True, force=True)
+            self.assertEqual(open(outside, encoding="utf-8").read(), "чужой файл\n", name)
+            shutil.rmtree(root)
+
+    def test_a_symlinked_skills_directory_is_refused_too(self):
+        from indexgap import install
+        root = self.repo()
+        outside = os.path.join(self.dir, "elsewhere")
+        os.makedirs(outside)
+        os.symlink(outside, os.path.join(root, ".claude"))
+        with self.assertRaises(core.SourceError):
+            install.run(root, site="https://example.com")
+        self.assertEqual(os.listdir(outside), [])
+
+    def test_detect_site_rejects_non_hostname_cname(self):
+        """Содержимое CNAME попадало в напечатанную команду и в блок ```bash
+        в AGENTS.md как есть — вместе с `; echo …`, если он там был."""
+        from indexgap import install
+        root = self.repo()
+        with open(os.path.join(root, "CNAME"), "w", encoding="utf-8") as fh:
+            fh.write("evil.example/ ; echo INJECTED #\n")
+        self.assertEqual(install.detect_site(root), "")
+        with open(os.path.join(root, "CNAME"), "w", encoding="utf-8") as fh:
+            fh.write("docs.example.com\n")
+        self.assertEqual(install.detect_site(root), "https://docs.example.com/")
+
+
+class TestOutputIsNotAWeapon(Fixture):
+    def test_url_key_keeps_control_characters_encoded(self):
+        """Адрес из выгрузки с `%0a::error file=…` печатался раскодированным:
+        строка с начала столбца — команда для GitHub Actions."""
+        key = core.url_key("https://example.com/gone%0a::error file=app.py::X%1b]0;T%07")
+        self.assertNotRegex(key, r"[\x00-\x1f\x7f]")
+        self.assertIn("%0A", key)
+        self.assertEqual(core.url_key("https://example.com/%D0%B2%D0%B8%D0%B7%D0%B0"),
+                         "//example.com/виза")
+
+    def run_cli(self, argv):
+        import contextlib
+        from indexgap import cli
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                return cli.main(argv), out.getvalue()
+            except SystemExit as exc:
+                return exc.code, out.getvalue()
+
+    def site(self):
+        self.write("site/index.html", "<html><head><title>Главная страница</title></head><body>"
+                                      f"<main><h1>Главная</h1><p>{'слово ' * 80}</p></main></body></html>")
+        return os.path.join(self.dir, "site")
+
+    def test_out_never_overwrites_foreign_json(self):
+        """`--out package.html` заменял соседний `package.json`."""
+        root = self.site()
+        foreign = self.write("package.json", '{"name": "my-app"}')
+        code, _ = self.run_cli(["check", root, "--site", SITE,
+                                "--out", os.path.join(self.dir, "package.html")])
+        self.assertEqual(code, 2)
+        self.assertEqual(open(foreign, encoding="utf-8").read(), '{"name": "my-app"}')
+
+    def test_its_own_report_pair_is_rewritten(self):
+        root = self.site()
+        out = os.path.join(self.dir, "r.html")
+        self.assertEqual(self.run_cli(["check", root, "--site", SITE, "--out", out])[0], 0)
+        self.assertEqual(self.run_cli(["check", root, "--site", SITE, "--out", out])[0], 0)
+
+    def test_portfolio_does_not_overwrite_its_own_input(self):
+        root = self.site()
+        spec = self.write("pf.json", '{"projects": [{"name": "a", "root": "%s", '
+                                     '"site": "https://example.com"}]}' % root.replace("\\", "/"))
+        before = open(spec, encoding="utf-8").read()
+        code, _ = self.run_cli(["portfolio", spec, "--out", os.path.join(self.dir, "pf.html")])
+        self.assertEqual(code, 2)
+        self.assertEqual(open(spec, encoding="utf-8").read(), before)
+
+
+class TestKeysStayOutOfUrls(unittest.TestCase):
+    def test_gemini_key_goes_in_a_header(self):
+        from indexgap import cite
+        seen = {}
+
+        def fake(url, payload, headers):
+            seen["url"], seen["headers"] = url, headers
+            return {}
+        with mock.patch.object(cite, "_post", fake), \
+                mock.patch.dict(os.environ, {"GEMINI_API_KEY": "secret-key-value"}):
+            try:
+                cite.ask("gemini", "question")
+            except Exception:
+                pass
+        self.assertNotIn("secret-key-value", seen.get("url", ""))
+        self.assertIn("secret-key-value", "".join(seen.get("headers", {}).values()))
+
+
 if __name__ == "__main__":
     unittest.main()

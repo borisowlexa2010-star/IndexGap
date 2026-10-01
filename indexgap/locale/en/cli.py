@@ -2,6 +2,13 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    "{a0} — это каталог, а нужен файл.": "{a0} is a directory, a file is needed.",
+    "{a0} уже существует и это не данные отчёта indexgap.\n    Перезаписывать чужой файл я не буду — укажи другое имя через --out.":
+        "{a0} already exists and is not indexgap report data.\n    I will not "
+        "overwrite someone else's file — choose another name with --out.",
+    "{a0} — символическая ссылка или ведёт за пределы проекта. Писать по ней не стал: убери ссылку или положи на её место обычный файл.":
+        "{a0} is a symbolic link or leads outside the project. It was not written "
+        "to: remove the link or put an ordinary file in its place.",
     "    Он записан в {a0}. Закоммить его: без него в CI так будет при каждой сборке.":
         "    It is written to {a0}. Commit it: without it CI will do this on every build.",
     "  ! манифеста нет — первый прогон: всё считается новым, у всех страниц сегодняшний lastmod.":

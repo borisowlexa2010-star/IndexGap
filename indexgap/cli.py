@@ -247,9 +247,53 @@ def _read_rows(args):
     return data["rows"]
 
 
+JSON_MARK = "_indexgap"
+
+
+def check_json_path(path: str) -> str:
+    """
+    Данные отчёта не должны затирать чужой файл — как и сам отчёт.
+
+    `--out package.html` писал рядом `package.json` и заменял им настоящий,
+    а портфель с `--out pf.html` перезаписывал собственный входной `pf.json`.
+    Своим файл считается по метке внутри; отчёты прежних версий, где метки
+    ещё не было, узнаются по имени `indexgap-…` или по соседнему HTML-отчёту.
+    """
+    if not os.path.exists(path):
+        return path
+    if os.path.isdir(path):
+        raise SourceError(tr("{a0} — это каталог, а нужен файл.", a0=path))
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            head = fh.read(4096)
+    except OSError:
+        head = ""
+    if f'"{JSON_MARK}"' in head or os.path.basename(path).startswith("indexgap-"):
+        return path
+    sibling = os.path.splitext(path)[0] + ".html"
+    try:
+        with open(sibling, "r", encoding="utf-8", errors="ignore") as fh:
+            if REPORT_MARK in fh.read(4096):
+                return path
+    except OSError:
+        pass
+    raise SourceError(tr(
+        "{a0} уже существует и это не данные отчёта indexgap.\n    Перезаписывать "
+        "чужой файл я не буду — укажи другое имя через --out.", a0=path))
+
+
 def _write_json(path, payload):
-    with open(path, "w", encoding="utf-8") as fh:
+    from . import __version__
+    if isinstance(payload, dict):
+        payload = {JSON_MARK: __version__, **payload}
+    with open(check_json_path(path), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2, default=str)
+
+
+def _check_report_pair(out: str) -> None:
+    """Оба файла отчёта проверяются до работы, а не после неё."""
+    check_out_path(out)
+    check_json_path(os.path.splitext(out)[0] + ".json")
 
 
 # ── команды ───────────────────────────────────────────────────────────────────
@@ -335,6 +379,7 @@ def _analyse(args):
 
 
 def cmd_check(args):
+    _check_report_pair(args.out)
     got = _analyse(args)
     pages, project, analysis = got["pages"], got["project"], got["analysis"]
     notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
@@ -625,6 +670,7 @@ def cmd_notify(args):
 
 
 def cmd_doctor(args):
+    _check_report_pair(args.out)
     apply_project_defaults(args)
     pages = _load(args)
     _sitemap_hreflang(args, pages)
@@ -956,6 +1002,7 @@ def cmd_init(args):
 
 
 def cmd_portfolio(args):
+    _check_report_pair(args.out)
     specs = portfolio.read_portfolio(args.portfolio)
     print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
     results = []
@@ -1063,6 +1110,10 @@ def cmd_cite(args):
     for note in cite.notes_for(ready):
         print(f"  ! {note}")
 
+    # Путь проверяется до платных вызовов: раньше деньги тратились, а потом
+    # результат выбрасывался, потому что файл «уже существует».
+    if args.send:
+        check_json_path(os.path.splitext(args.out)[0] + ".json")
     if not args.send:
         print(tr("\nЭто пробный прогон: ничего не отправлено. Чтобы спросить "
                  "по-настоящему — добавь --send. Вызовы платные, счёт придёт "
@@ -1107,7 +1158,7 @@ def cmd_cite(args):
     for line in result["errors"][:5]:
         print(f"  ! {line}")
 
-    path = os.path.splitext(check_out_path(args.out))[0] + ".json"
+    path = os.path.splitext(args.out)[0] + ".json"
     _write_json(path, result)
     print(tr("\nДанные: {a0}", a0=path))
     return 0

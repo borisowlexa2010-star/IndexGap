@@ -145,8 +145,11 @@ def detect_site(root: str, content_dir: str = "") -> str:
             continue
         if name == "CNAME":
             host = text.strip().splitlines()[0].strip() if text.strip() else ""
-            if host:
-                return f"https://{host}/"
+            # Только имя хоста. Строка отсюда попадает в напечатанную команду и
+            # в блок ```bash``` в AGENTS.md — всё, что не хост, там лишнее.
+            if _HOST.match(host):
+                return f"https://{host.lower()}/"
+            continue
         for match in SITE_RE.finditer(text):
             url = match.group(0)
             if any(bad in url for bad in ("schema.org", "w3.org", "npmjs", "github.com",
@@ -159,7 +162,7 @@ def detect_site(root: str, content_dir: str = "") -> str:
 def _origin(url: str) -> str:
     from urllib.parse import urlsplit
     parts = urlsplit(url)
-    if not parts.scheme or not parts.netloc:
+    if parts.scheme not in ("http", "https") or not _HOST.match(parts.netloc or ""):
         return ""
     return f"{parts.scheme}://{parts.netloc}/"
 
@@ -255,6 +258,28 @@ def skills_source() -> str:
     raise SourceError(tr("не найден каталог скиллов внутри пакета — переустанови indexgap"))
 
 
+def _inside(root: str, path: str) -> str:
+    """
+    Путь, в который можно писать: он лежит внутри проекта и не ссылка.
+
+    Клонированный репозиторий может прислать вместо `.gitignore`, `AGENTS.md`
+    или каталога `.claude` символическую ссылку на что угодно. Запись по ней
+    меняет файл за пределами проекта — этого `init` не делает.
+    """
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(path)
+    if os.path.islink(path) or not (real == real_root or real.startswith(real_root + os.sep)):
+        raise SourceError(tr(
+            "{a0} — символическая ссылка или ведёт за пределы проекта. Писать по "
+            "ней не стал: убери ссылку или положи на её место обычный файл.",
+            a0=os.path.relpath(path, root)))
+    return path
+
+
+_HOST = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                   r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?::\d{1,5})?$", re.I)
+
+
 def install_skills(target_root: str) -> list:
     """
     Кладёт скиллы в `.claude/skills/<имя>/SKILL.md`.
@@ -280,8 +305,9 @@ def install_skills(target_root: str) -> list:
         if not os.path.isfile(skill_file):
             continue
         destination = os.path.join(target_root, SKILL_DIR, name)
+        _inside(target_root, destination)
         os.makedirs(destination, exist_ok=True)
-        shutil.copyfile(skill_file, os.path.join(destination, "SKILL.md"))
+        shutil.copyfile(skill_file, _inside(target_root, os.path.join(destination, "SKILL.md")))
         written.append(os.path.join(SKILL_DIR, name, "SKILL.md"))
     if not written:
         raise SourceError(tr("в пакете не оказалось ни одного скилла"))
@@ -296,6 +322,7 @@ def write_config(root: str, detected: dict, force: bool = False) -> tuple:
     path = os.path.join(root, CONFIG_NAME)
     if os.path.isfile(path) and not force:
         return path, False
+    _inside(root, path)
 
     config = {
         "_comment": tr("Настройки этого проекта. Профиль задаёт пороги по типу контента; всё, что написано здесь явно, сильнее профиля. Ключ IndexNow сюда не пишется: он свой у каждого сайта."),
@@ -344,7 +371,7 @@ def update_gitignore(root: str) -> bool:
     if not missing:
         return False
     block = "\n" + GITIGNORE_MARK + "\n" + "\n".join(missing) + "\n"
-    with open(path, "a", encoding="utf-8") as fh:
+    with open(_inside(root, path), "a", encoding="utf-8") as fh:
         fh.write(block)
     return True
 
@@ -373,7 +400,7 @@ def update_agents_md(root: str, detected: dict, create: bool = False) -> str:
         updated = head + block + tail
     else:
         updated = (existing.rstrip() + "\n\n" + block + "\n") if existing else block + "\n"
-    with open(path, "w", encoding="utf-8") as fh:
+    with open(_inside(root, path), "w", encoding="utf-8") as fh:
         fh.write(updated)
     return path
 
