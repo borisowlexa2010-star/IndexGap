@@ -91,8 +91,9 @@ font-size:.85rem;color:var(--ink3)}
 <p>Generates the sitemap from the pages found, not from the dataset — so a page that failed to generate does not get announced to search engines as though it had.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap sitemap [-h] [--site SITE] [--home HOME] [--config CONFIG]
-                        [--profile PROFILE] [--out-dir OUT_DIR]
-                        [--public-prefix PUBLIC_PREFIX] [--lang {en,ru}]
+                        [--profile PROFILE] [--out-dir OUT_DIR] [--force]
+                        [--manifest MANIFEST] [--public-prefix PUBLIC_PREFIX]
+                        [--lang {en,ru}]
                         [root]
 
 positional arguments:
@@ -110,6 +111,8 @@ options:
                         thresholds and which checks run — see `indexgap
                         profiles`
   --out-dir OUT_DIR     where to write; next to the pages by default
+  --force               replace sitemap.xml even if indexgap did not write it
+  --manifest MANIFEST   path to the manifest; next to indexgap.json by default
   --public-prefix PUBLIC_PREFIX
                         the path the files will be served under, if --out-dir
                         is not the publish root
@@ -121,8 +124,8 @@ options:
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-10-01">2026-10-01</time>,
-  for indexgap 1.10.0.</p>
-  <p>indexgap 1.10.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.11.0.</p>
+  <p>indexgap 1.11.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

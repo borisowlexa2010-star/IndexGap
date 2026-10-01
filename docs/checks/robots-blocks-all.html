@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>robots blocks all — indexgap check</title>
-<meta name="description" content="robots blocks all: what indexgap reports, why it matters and how to fix it. Reported as critical.">
+<meta name="description" content="robots blocks all: what indexgap reports, why it matters and how to fix it. Reported as warning.">
 <link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/robots-blocks-all.html">
 <meta property="og:type" content="article">
 <meta property="og:title" content="robots blocks all — indexgap check">
-<meta property="og:description" content="robots blocks all: what indexgap reports, why it matters and how to fix it. Reported as critical.">
+<meta property="og:description" content="robots blocks all: what indexgap reports, why it matters and how to fix it. Reported as warning.">
 <meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/robots-blocks-all.html">
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"robots blocks all \u2014 indexgap check","description":"robots blocks all: what indexgap reports, why it matters and how to fix it. Reported as critical.",
+ "headline":"robots blocks all \u2014 indexgap check","description":"robots blocks all: what indexgap reports, why it matters and how to fix it. Reported as warning.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/robots-blocks-all.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-10-01",
  "author":{"@type":"Person","name":"Alexey Borisov"},
@@ -87,7 +87,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>robots blocks all</h1>
 <div class="meta">
-  <span class="tag critical">critical</span>
+  <span class="tag warning">warning</span>
   <span class="tag">robots-blocks-all</span>
   <span class="tag acc">robots.txt</span>
 </div>
@@ -95,7 +95,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>critical  robots-blocks-all  Disallow: / for every agent — the whole site is closed to every search engine</code></pre>
+<pre><code>warning  robots-blocks-all  Disallow: / for every agent except … — other search engines and AI search cannot see the site</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>Remove `Disallow: /` — right now the site is closed to every search engine.</p></div>
 
@@ -117,8 +117,8 @@ to, with the thresholds the result has to satisfy.</p>
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-10-01">2026-10-01</time>,
-  for indexgap 1.10.0.</p>
-  <p>indexgap 1.10.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.11.0.</p>
+  <p>indexgap 1.11.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

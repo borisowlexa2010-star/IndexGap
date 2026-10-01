@@ -1,5 +1,83 @@
 # Changelog
 
+## 1.11.0 — 2026-10-01
+
+The second wave of the ten-reviewer audit: the findings rated high. Where a
+check was silently off, it is on; where the tool wrote without asking, it asks;
+and a large site costs a quarter of the memory.
+
+**Checks that were silently off**
+
+* **A template is recognised by what it substitutes.** A page that differs
+  from its neighbour only by a city name every twenty words scored 0.6 on
+  five-word shingles and drew no finding at all — five thousand pages of one
+  template ended "Critical: 0". In a candidate pair, the few words each page
+  has alone are treated as slot values and the similarity is taken again.
+* **`low-uniqueness` works on multilingual sites.** Phrases were counted over
+  all pages at once, so with two languages no phrase ever reached "90% of
+  pages". They are counted within a language now.
+* **Words are words in every script.** Hindi, Bengali and vocalised Arabic were
+  split at their combining marks; Chinese was one "word" per clause, so two
+  identical Chinese pages were never compared. The content hash keeps the old
+  tokenisation, so no `lastmod` moves on upgrade.
+* **hreflang declared in the sitemap is read** (`xhtml:link`), and a site with
+  `/en/`, `/de/`, `/fr/` and a hard-coded `lang="en"` is no longer taken for
+  monolingual and skipped.
+* **Shared header and footer are trimmed on sites without `<main>`**, by a 90%
+  majority rather than unanimity.
+
+**Wrong verdicts**
+
+* Links with `?utm_source=`, an IDN host against its punycode, and `:443` all
+  resolve to their page; redirect stubs pass their target on (Hugo aliases).
+* Build-directory names (`vendor`, `coverage`, `build`, `public`) are skipped
+  only at the root of a project with sources — inside a built site they are
+  sections, and used to vanish silently.
+* Hugo's TOML front matter is parsed. A raw Markdown twin no longer displaces
+  its HTML page.
+* `is_shell` was wrong both ways: a 30-word contact page and a Chinese article
+  were "JavaScript shells", a Vite build with one module script was not.
+* FAQ markup is compared after unescaping and typographic normalisation; a
+  dataset row claimed by a slug is not lent to a hub or a blog post by title.
+* A tool name in an export's file name must be a whole word: `bing` is no
+  longer found in `plumbing-pros.com`. xlsx rows are placed by cell reference
+  and the sheet with addresses is chosen; GA4's `#` preamble is skipped.
+* `doctor` names the pages: missing from the sitemap, closed but listed in it,
+  listed but gone — and says so when the sitemap was built for another host.
+  Citation counts are summed across URL variants.
+
+**Writing only where asked**
+
+* `indexgap sitemap` refuses to replace a `sitemap.xml` it did not write
+  (`--force` to insist).
+* **The manifest moves next to `indexgap.json` and is meant to be committed.**
+  It was git-ignored and lived beside the pages, so a clean CI checkout made
+  every page new on every deploy. A missing manifest is said out loud, and
+  `notify --send` without one needs `--first`. An existing manifest beside the
+  pages keeps working where it is; entries are matched by address key.
+* A flat `about.html` whose canonical says `/about.html` keeps that address in
+  the sitemap instead of `/about/`.
+* An IndexNow POST is not redirected; a 202 is called pending.
+* `init` refuses to write through symbolic links, ignores a `CNAME` that is not
+  a host name, finds a Next.js or static build when there are no sources,
+  trusts an existing `indexgap.json`, and no longer invents `./content`.
+* The JSON beside a report is guarded like the report: `--out package.html` no
+  longer replaces `package.json`.
+
+**Also**
+
+* Peak memory on a 4,273-page build: 4.4 GB → 0.95 GB; the run: 60 s → 42 s.
+  Only the handful of tags the checks read is kept from each page's source.
+* Parsing is linear on hostile input (unclosed fences, 40 KB of `[`).
+* Mistyped thresholds are named; impossible ones are errors with words.
+* `examples/demo-site`: ten pages with one of each common failure, to run
+  before your own site. `--version`. The first advice in the console is no
+  longer cut at 80 characters.
+* The version lives in the package alone; the sdist carries the whole suite;
+  tests cannot open a network socket.
+
+558 tests on 3.9, 3.12 and 3.14.
+
 ## 1.10.0 — 2026-10-01
 
 Ten independent reviewers went through the package before its public launch,
