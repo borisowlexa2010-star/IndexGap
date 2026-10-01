@@ -949,6 +949,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             if not name.lower().endswith(exts):
                 continue
             path = os.path.join(dirpath, name)
+            # Страница ошибки — не страница сайта: на неё никто не ссылается,
+            # она короткая, и в sitemap ей не место. Её выдаёт почти любой
+            # генератор, и каждая получала «сироту» и «тонкую».
+            if _ERROR_PAGE.search(os.path.relpath(path, root).replace(os.sep, "/")):
+                continue
             try:
                 page = load_page(path, root, base_url)
             except SourceError as exc:
@@ -980,6 +985,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
     pages.sort(key=lambda p: p.url)
     return pages, problems
+
+
+_ERROR_PAGE = re.compile(
+    r"(^|/)(40[134]|50[0-4x]|5xx|4xx|offline|_not-found|not-found|_error)"
+    r"(\.html?|/index\.html?)$", re.I)
 
 
 def _drop_raw_markdown(pages: list) -> tuple:
