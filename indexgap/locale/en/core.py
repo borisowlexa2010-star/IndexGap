@@ -133,6 +133,6 @@ MESSAGES = {
     "рядом лежит датасет {a0}": "a dataset sits next to it: {a0}",
     "страниц не найдено, взят профиль по умолчанию":
         "no pages found, falling back to the default profile",
-    "у {a0} из {a1} страниц есть дата во фронтматтере":
-        "{a0} of {a1} pages carry a date in their frontmatter",
+    "у {a0} из {a1} страниц есть дата события":
+        "{a0} of {a1} pages carry an event date",
 }

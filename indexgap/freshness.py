@@ -66,8 +66,13 @@ def page_dates(page) -> dict:
             if parsed:
                 found[f"frontmatter:{key}"] = parsed
 
+    is_event = bool(found)
     for raw in page.jsonld or ():
         for node in _ld_nodes(raw):
+            kinds = node.get("@type")
+            kinds = kinds if isinstance(kinds, list) else [kinds]
+            event = any("event" in str(k).lower() for k in kinds)
+            is_event = is_event or event
             for key, value in node.items():
                 if str(key).lower() in DATE_FIELDS:
                     parsed = _parse_date(value)
@@ -80,11 +85,35 @@ def page_dates(page) -> dict:
                     parsed = _parse_date(offer.get("validThrough"))
                     if parsed:
                         found["jsonld:validThrough"] = parsed
+            if not event:
+                continue
+            # Событие по расписанию идёт до конца расписания, а не до первой
+            # даты: еженедельная встреча с `endDate` через год объявлялась
+            # прошедшей на третьей неделе. Расписание без конца — бессрочное.
+            schedules = node.get("eventSchedule")
+            schedules = schedules if isinstance(schedules, list) else [schedules]
+            for schedule in schedules:
+                if not isinstance(schedule, dict):
+                    continue
+                parsed = _parse_date(schedule.get("endDate"))
+                if not parsed:
+                    return {}
+                found["jsonld:eventSchedule"] = parsed
+            parts = node.get("subEvent")
+            for part in parts if isinstance(parts, list) else [parts]:
+                if isinstance(part, dict):
+                    parsed = _parse_date(part.get("endDate") or part.get("startDate"))
+                    if parsed:
+                        found.setdefault("jsonld:subEvent", parsed)
+                        found["jsonld:subEvent"] = max(found["jsonld:subEvent"], parsed)
 
-    for match in re.finditer(r"<time[^>]+datetime=[\"']([^\"']+)", page.raw or "", re.I):
-        parsed = _parse_date(match.group(1))
-        if parsed:
-            found.setdefault("time", parsed)
+    # <time> стоит на любой странице: «проверено 2 марта», дата публикации
+    # новости. Датой события он становится, только если страница — событие.
+    if is_event:
+        for match in re.finditer(r"<time[^>]+datetime=[\"']([^\"']+)", page.raw or "", re.I):
+            parsed = _parse_date(match.group(1))
+            if parsed:
+                found.setdefault("time", parsed)
     return found
 
 

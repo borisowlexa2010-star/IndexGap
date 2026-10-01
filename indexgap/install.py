@@ -50,7 +50,13 @@ SITE_FILES = ("package.json", "astro.config.mjs", "astro.config.ts", "astro.conf
 
 SITE_RE = re.compile(r"https?://[a-z0-9.-]+\.[a-z]{2,}(?:/[^\s\"'<>,)]*)?", re.I)
 KEYWORD_COLUMNS = ("keyword", "keywords", "ключ", "query", "term", "запрос")
-DATE_FIELDS = ("date", "startdate", "start_date", "event_date", "published")
+# Поля, которые есть только у события. `date` и `published` сюда не входят:
+# это дата публикации, она стоит у каждого поста Hugo и Jekyll, и по ней блог
+# получал профиль «события» — после чего каждый пост старше двух недель
+# объявлялся «тем, чего уже нет».
+DATE_FIELDS = ("startdate", "start_date", "event_date", "eventdate",
+               "enddate", "end_date", "starts", "begins")
+_EVENT_MARKUP = re.compile(r'"@type"\s*:\s*"[A-Za-z]*Event"')
 
 
 def _pages_in(directory: str) -> int:
@@ -206,7 +212,8 @@ def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:
                 continue
             pages += 1
             head = text[:1200].lower()
-            if any(re.search(rf"^\s*{f}\s*:", head, re.M) for f in DATE_FIELDS):
+            if (any(re.search(rf"^\s*{f}\s*:", head, re.M) for f in DATE_FIELDS)
+                    or _EVENT_MARKUP.search(text)):
                 dated += 1
             if len(re.findall(r"\w+", text, flags=re.UNICODE)) < 120:
                 short += 1
@@ -216,7 +223,7 @@ def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:
     if not pages:
         return "catalog", tr("страниц не найдено, взят профиль по умолчанию")
     if dated / pages >= 0.4:
-        return "events", tr("у {a0} из {a1} страниц есть дата во фронтматтере", a0=dated, a1=pages)
+        return "events", tr("у {a0} из {a1} страниц есть дата события", a0=dated, a1=pages)
     if pages <= 40 and html / pages >= 0.6:
         return "product", tr("{a0} страниц, почти все собранный HTML — похоже на лендинги", a0=pages)
     if not dataset and short / pages >= 0.5:
