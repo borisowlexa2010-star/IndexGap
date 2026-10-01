@@ -2,6 +2,34 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "{a0} — не обычный файл":
+        "{a0} is not a regular file",
+    "{a0}: «{a1}» внутри архива больше {a2} МБ — читать не стал":
+        "{a0}: “{a1}” inside the archive is over {a2} MB — not read",
+    "{a0}: больше {a1} МБ — читать не стал":
+        "{a0}: over {a1} MB — not read",
+    "{a0}: дочерний sitemap на другом хосте не читается — если он ваш, передайте его отдельным --sitemap":
+        "{a0}: a child sitemap on another host is not followed — if it is yours, "
+        "pass it as a separate --sitemap",
+    "{a0}: дочерний адрес не http(s), не читается":
+        "{a0}: the child address is not http(s) and is not read",
+    "{a0}: дочерний файл не найден рядом с индексом":
+        "{a0}: the child file was not found next to the index",
+    "{a0}: индекс не дал ни одного адреса":
+        "{a0}: the index produced no addresses",
+    "{a0}: индекс ссылается сам на себя":
+        "{a0}: the index refers to itself",
+    "больше {a0} sitemap-файлов за один прогон — остальные не читались":
+        "more than {a0} sitemap files in one run — the rest were not read",
+    "в XML объявлен DOCTYPE — такой файл не читается: ни sitemap, ни выгрузке он не нужен":
+        "the XML declares a DOCTYPE — such a file is not read: neither a sitemap "
+        "nor an export needs one",
+    "не удалось распаковать gzip ({a0})":
+        "could not unpack gzip ({a0})",
+    "после распаковки больше {a0} МБ — читать не стал":
+        "over {a0} MB once unpacked — not read",
+    "это не похоже на XML ({a0})":
+        "this does not look like XML ({a0})",
     # ── doctor ────────────────────────────────────────────────────────────────
     "\n    В файле только относительные пути — передай --site.":
         "\n    The file holds only relative paths — pass --site.",
@@ -23,14 +51,12 @@ MESSAGES = {
         "{a0}: the “{a1}” column was found, but it holds no addresses.",
     "{a0}: не нашёл колонку с адресами страниц.\n    Заголовки файла: ":
         "{a0}: could not find a column of page addresses.\n    File headers: ",
-    "{a0}: не удалось распаковать gzip ({a1})": "{a0}: could not unpack gzip ({a1})",
-    "{a0}: не удалось уверенно определить источник, файл засчитан как «{a1}» ({a2}). Если это не так, укажи явно: --indexed google={a3} или --indexed ahrefs={a4}":
+"{a0}: не удалось уверенно определить источник, файл засчитан как «{a1}» ({a2}). Если это не так, укажи явно: --indexed google={a3} или --indexed ahrefs={a4}":
         "{a0}: could not identify the source with confidence, the file was counted "
         "as “{a1}” ({a2}). If that is wrong, say so explicitly: --indexed "
         "google={a3} or --indexed ahrefs={a4}",
     "{a0}: файл пустой.": "{a0}: the file is empty.",
-    "{a0}: это не похоже на XML ({a1})": "{a0}: this does not look like XML ({a1})",
-    "В sitemap": "In the sitemap",
+"В sitemap": "In the sitemap",
     "Пригодно к индексации": "Indexable",
     "Сгенерировано": "Generated",
     "Хотя бы в одном индексе": "In at least one index",

@@ -97,6 +97,53 @@ class SourceError(Exception):
     """Файл невозможно прочитать. Сообщение адресовано человеку, не разработчику."""
 
 
+# Потолок на всё, что читается целиком в память: sitemap, выгрузка, лист книги.
+# Протокол sitemap разрешает 50 МБ; вдвое больше — запас, а не приглашение.
+# Без потолка архив в сто килобайт разворачивался в сотни мегабайт.
+MAX_INPUT_BYTES = 100 * 1024 * 1024
+
+
+def too_big(size: int) -> bool:
+    return size > MAX_INPUT_BYTES
+
+
+def gunzip(data: bytes) -> bytes:
+    """Распаковка с потолком. Бросает SourceError, а не трейсбек zlib."""
+    import gzip
+    import io
+    import zlib
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as fh:
+            out = fh.read(MAX_INPUT_BYTES + 1)
+    except (OSError, EOFError, zlib.error) as exc:
+        raise SourceError(tr("не удалось распаковать gzip ({a0})", a0=exc))
+    if too_big(len(out)):
+        raise SourceError(tr("после распаковки больше {a0} МБ — читать не стал",
+                             a0=MAX_INPUT_BYTES // (1024 * 1024)))
+    return out
+
+
+def parse_xml(data):
+    """
+    XML без объявления типа документа.
+
+    Ни sitemap, ни лист xlsx в DTD не нуждаются, а раздувание сущностей живёт
+    именно там: на Python 3.9 со старым expat файл в 494 байта давал строку
+    в сто миллионов символов. Проще не читать такой документ вовсе.
+    """
+    from xml.etree import ElementTree
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    probe = data[:65536].replace(b"\x00", b"").upper()
+    if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+        raise SourceError(tr("в XML объявлен DOCTYPE — такой файл не читается: "
+                             "ни sitemap, ни выгрузке он не нужен"))
+    try:
+        return ElementTree.fromstring(data)
+    except ElementTree.ParseError as exc:
+        raise SourceError(tr("это не похоже на XML ({a0})", a0=exc))
+
+
 @dataclass
 class Page:
     path: str                      # путь к файлу на диске
@@ -981,7 +1028,9 @@ def save_manifest(path: str, data: dict) -> None:
     """
     directory = os.path.dirname(os.path.abspath(path)) or "."
     os.makedirs(directory, exist_ok=True)
-    tmp = os.path.join(directory, f".{os.path.basename(path)}.tmp")
+    # Имя временного файла своё у каждого процесса: два одновременных прогона
+    # с общим именем отнимали файл друг у друга прямо перед переименованием.
+    tmp = os.path.join(directory, f".{os.path.basename(path)}.{os.getpid()}.tmp")
     # `_broken` — служебный флаг чтения, наружу он не пишется. Остальные
     # служебные ключи (например список созданных шардов) сохраняются:
     # без них пакет не знает, какие файлы он вправе убирать за собой.
