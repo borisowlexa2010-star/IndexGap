@@ -268,6 +268,7 @@ _NOT_LIVE = re.compile(
     r"<!--.*?-->|<noscript\b.*?</noscript>|<pre\b.*?</pre>|<code\b.*?</code>|"
     r"<textarea\b.*?</textarea>", re.I | re.S)
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
+_REFRESH_WORD = re.compile(r"refresh", re.I)
 
 
 def redirect_target(page) -> str:
@@ -283,9 +284,23 @@ def redirect_target(page) -> str:
     Редиректом считается meta refresh с нулевой задержкой, стоящий в живой
     разметке, и `NEXT_REDIRECT` внутри <script> на странице без текста.
     """
+    # Спрашивают об этом много раз за прогон, а исходник бывает в сотни
+    # килобайт: ответ запоминается на странице.
+    try:
+        return page._redirect_target
+    except AttributeError:
+        target = _redirect_target(page)
+        try:
+            page._redirect_target = target
+        except AttributeError:
+            pass
+        return target
+
+
+def _redirect_target(page) -> str:
     from urllib.parse import urljoin
     raw = getattr(page, "raw", "") or ""
-    if "refresh" not in raw.lower() and "NEXT_REDIRECT" not in raw:
+    if "NEXT_REDIRECT" not in raw and not _REFRESH_WORD.search(raw):
         return ""
     if str(getattr(page, "path", "")).lower().endswith((".md", ".markdown")):
         return ""

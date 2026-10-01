@@ -65,6 +65,33 @@ def _days_between(a: str, b: str) -> int:
 DRAFT_STATUSES = {"draft", "черновик", "todo", "wip", "unpublished"}
 
 
+def is_draft(page, today: str = None) -> bool:
+    """
+    Черновик на языке своего генератора.
+
+    `status: draft` ставит сам пакет, но у генераторов свои слова: Hugo пишет
+    `draft: true`, Jekyll — `published: false`, и оба не собирают страницу с
+    датой публикации в будущем. Раньше понималось только первое, и черновики
+    Hugo уезжали в sitemap и в IndexNow.
+
+    Поле `date` сюда не входит намеренно: у события это дата события, и
+    будущее событие — как раз то, что нужно показать поисковику.
+    """
+    meta = {str(k).lower().replace("-", "_"): v for k, v in (page.meta or {}).items()}
+    if str(meta.get("status", "")).strip().lower() in DRAFT_STATUSES:
+        return True
+    if str(meta.get("draft", "")).strip().lower() in ("true", "yes", "1"):
+        return True
+    if str(meta.get("published", "")).strip().lower() in ("false", "no", "0"):
+        return True
+    today = today or date.today().isoformat()
+    for key in ("publishdate", "publish_date"):
+        value = str(meta.get(key, "")).strip().strip("'\"")[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", value) and value > today:
+            return True
+    return False
+
+
 def indexable(page) -> bool:
     """Страница, которую вообще имеет смысл показывать поисковику."""
     if page.noindex:
@@ -72,7 +99,11 @@ def indexable(page) -> bool:
     # Черновик не публикуется. Раньше страница со `status: draft` спокойно
     # уезжала и в sitemap, и в очередь IndexNow: проверка смотрела только
     # на noindex и canonical, а `status` ставит в каждую заготовку сам пакет.
-    if str(page.meta.get("status", "")).strip().lower() in DRAFT_STATUSES:
+    if is_draft(page):
+        return False
+    # Заглушка-редирект — не страница: поисковик видит то, куда она ведёт.
+    from .checks import redirect_target
+    if redirect_target(page):
         return False
     if page.canonical:
         # Сравнение по ключу: относительный canonical `/visa/` — это та же
@@ -206,9 +237,7 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         "removed": removed,
         "included": len(entries),
         "excluded": len(pages) - len(entries),
-        "drafts": sorted(p.url for p in pages
-                         if str(p.meta.get("status", "")).strip().lower()
-                         in DRAFT_STATUSES),
+        "drafts": sorted(p.url for p in pages if is_draft(p)),
     }
 
 
