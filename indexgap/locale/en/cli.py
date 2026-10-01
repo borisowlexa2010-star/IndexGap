@@ -2,6 +2,12 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    " и далее": " and more",
+    " или ": " or ",
+    "<адрес сайта>": "<site address>",
+    "НЕ НАЙДЕН — впиши в indexgap.json": "NOT FOUND — put it in indexgap.json",
+    "в файле остался блок брифа или TODO — страница не дописана":
+        "a brief block or a TODO is left in the file — the page is unfinished",
     "\n! Адрес сайта определить не удалось. Впиши его в indexgap.json полем `site`, иначе проверять нечего.":
         "\n! Could not determine the site address. Put it in indexgap.json under "
         "`site`, otherwise there is nothing to check.",

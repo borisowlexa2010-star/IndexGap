@@ -437,6 +437,9 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
 
 
 BRIEF_MARKERS = ("БРИФ ДЛЯ АГЕНТА", "BRIEF FOR THE AGENT", "<!-- TODO", "TODO:")
+_NOT_PROSE = re.compile(
+    r"<script\b.*?</script>|<style\b.*?</style>|<pre\b.*?</pre>|<code\b.*?</code>|"
+    r"^```.*?^```", re.I | re.S | re.M)
 
 # Иероглиф несёт примерно столько же, сколько слово: «中文» — это «на китайском»,
 # и по длине его мерить нельзя. На живом сайте виз переключатель языков и ссылки
@@ -489,10 +492,12 @@ def check_brief(pages: list, cfg: dict = None) -> list:
     cfg = {**CONFIG, **(cfg or {})}
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
-        raw = page.raw or ""
+        # `TODO:` в скрипте или в примере кода — заметка разработчика, а не
+        # недописанная страница.
+        raw = _NOT_PROSE.sub(" ", page.raw or "")
         if any(marker in raw for marker in BRIEF_MARKERS):
             issues.append(("critical", page.url, "brief-left",
-                           "в файле остался блок брифа или TODO — страница не дописана"))
+                           tr("в файле остался блок брифа или TODO — страница не дописана")))
         status = (page.meta.get("status") or "").lower()
         if status in ("draft", "черновик", "todo"):
             issues.append(("critical", page.url, "still-draft",
