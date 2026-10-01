@@ -1,5 +1,87 @@
 # Changelog
 
+## 1.10.0 — 2026-10-01
+
+Ten independent reviewers went through the package before its public launch,
+each on its own area, each required to reproduce what it reported. 83 findings
+came back, 14 of them a wrong verdict on an ordinary site. This release is the
+first wave: every critical one, the two security findings that mattered, and
+what was needed around them.
+
+**Wrong verdicts on ordinary sites**
+
+* **The parser keeps a stack of open elements.** It used to count start tags up
+  and end tags down — but `<img>`, `<br>` and `<hr>` never close, `<p>` and
+  `<li>` need not, and a self-closing `<path/>` inside a skipped `<svg>` closed
+  what it never opened. The footer leaked into the page text and into its hash,
+  so a new year in the footer changed `lastmod` across the site; a logo in the
+  header left a page with no paragraphs; an icon in the text dropped
+  everything after it from the page.
+* **Relative links resolve from the file.** A link from `about.html` to
+  `contact.html` was resolved against `/about/`. Flat sites — Sphinx, mdBook,
+  MkDocs, hand-written — got an orphan for every sibling link and a "canonical
+  elsewhere" for a canonical pointing at itself. Markdown sources follow both
+  habits: `[b](b.md)` from the file, `[b](../b/)` from the rendered address.
+* **An export is read for what it proves.** A Search Console drilldown of
+  "Crawled - currently not indexed", a list of excluded pages, a submission log
+  — each was a list of addresses under an engine's name, and each was counted
+  as proof of indexing. The `Issue` row of `Metadata.csv` and a status column
+  now decide; such rows go to `excluded`, with the engine's own reason.
+* **An impressions report is recognised by its shape.** Compare mode ("Last 28
+  days Impressions") and the Japanese panel were not, and pages without
+  impressions were again called not indexed.
+* **`--live` asks about the address the engine knows.** It probed the
+  comparison key — no trailing slash, no `.html`, no `www` — so a live page
+  answered 301 or 404 and was reported as already dealt with. It now also reads
+  every `X-Robots-Tag` header, `none`, bot-scoped rules and `<meta robots>`, and
+  calls 429, 5xx and redirect loops "unknown" rather than "fine".
+* **A publish date is not an event date.** A `date:` in front matter selected
+  the events profile, and a Hugo or Jekyll blog had every post older than two
+  weeks reported as something that no longer exists.
+* **Numbers are read whole.** `1,299.99 USD`, verbatim from the dataset, was
+  reported as an invented `299.99 USD`; a `3-5 days` range gave the row no
+  numbers; and `$95` against `$60` in the data was not seen at all, because the
+  currency was only looked for after the number.
+* **Severity does not depend on the output language.** A blocked AI search
+  crawler was critical in Russian and info in English: the level was derived
+  from a Russian word inside an already translated message.
+* **hreflang.** A one-way link to a page with no hreflang at all — the
+  commonest broken cluster — was skipped. Regional versions were recognised by
+  `<html lang>`, which is `en` on both `/us/` and `/uk/`, so correctly annotated
+  pages were called duplicates. Any two- or three-letter first path segment
+  (`/app/`, `/faq/`, `/api/`) counted as a language. Parked translations are
+  recognised when the default language lives at the root.
+* **A redirect stub must actually redirect.** An article quoting
+  `NEXT_REDIRECT` in `<code>`, a page with a `<noscript>` refresh, a page that
+  reloads itself every five minutes were all taken for stubs — and a stub loses
+  its findings.
+* **Not pages:** `404.html`, `500.html`, Next's `_not-found`; and for the
+  sitemap and IndexNow, redirect stubs, Hugo's `draft: true`, Jekyll's
+  `published: false` and a future `publishDate`.
+* **A sitemap index whose children share its file name** (multilingual Hugo)
+  resolved to itself and returned no addresses and no error.
+
+**Security**
+
+* `indexgap sitemap` deleted whatever the manifest called a stale shard,
+  including `../` and absolute paths. Only `sitemap-N.xml` is removed now, and
+  manifest entries are validated before they reach the XML.
+* A sitemap index fetched over the network could name a local path as its
+  child, or an internal address, or hundreds of files. A remote index leads
+  only to http(s) on its own host; a local one never leaves its directory;
+  200 files per run at most.
+* 100 MB ceiling on anything read whole — responses, gzip, zip and xlsx
+  members. XML that declares a DOCTYPE is refused.
+
+**Also**
+
+* No Russian in English mode: six strings bypassed the catalogue.
+* hreflang alternates are collected in the one parse a page already gets. The
+  check used to re-parse every document; a 4,273-page build is about 12% faster
+  end to end.
+
+462 tests on 3.9, 3.12 and 3.14.
+
 ## 1.9.5 — 2026-09-25
 
 * **Breadcrumbs, bylines and a table of contents are not the answer.**
