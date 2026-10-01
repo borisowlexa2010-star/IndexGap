@@ -2,6 +2,9 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "Disallow: / для всех агентов, кроме {a0} — остальные поисковики и ИИ-поиск сайт не видят":
+        "Disallow: / for every agent except {a0} — other search engines and AI "
+        "search cannot see the site",
     "ни один из {a0} адресов sitemap не совпал с адресами сайта: в sitemap записан хост {a1}. Страницы на месте — в sitemap не тот адрес сайта (частая причина — он собран с адресом dev-сервера или превью).":
         "none of the {a0} sitemap addresses matched the site's addresses: the "
         "sitemap is written for the host {a1}. The pages are there — the sitemap "

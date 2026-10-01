@@ -293,40 +293,50 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
         by_slug.setdefault(slug, row)
 
     matched, ambiguous = {}, []
+    # Сначала надёжные связи — по ключу во фронтматтере и по slug, для всех
+    # страниц. Строка, у которой так нашлась своя страница, приблизительному
+    # сопоставлению по заголовку уже не предлагается: иначе строку «austin
+    # villa» получали ещё и хаб `/austin/`, и статья блога с теми же словами в
+    # заголовке — и их числа сверялись с чужими данными.
+    claimed, pending = set(), []
     for page in pages:
         key = (page.meta.get("keyword") or "").strip().lower()
         row = by_keyword.get(key) if key else None
-
-        clashed = False
         if row is None:
             slug = _slug_of(page, root)
             if slug in slug_clash:
                 ambiguous.append(page.url)
-                clashed = True
-            else:
-                row = by_slug.get(slug)
+                continue
+            row = by_slug.get(slug)
+        if row is not None:
+            matched[page.url] = row
+            claimed.add(id(row))
+        else:
+            pending.append(page)
+    free = sorted(k for k, r in by_keyword.items() if id(r) not in claimed)
 
-        if row is None and not clashed:
-            haystack = " ".join([page.title] + [t for _, t in page.headings[:2]]).lower()
-            # Ключи из Вордстата в именительном падеже, заголовки — в предложном.
-            # Без нормализации словоформ сопоставлялось 10 страниц из 100,
-            # и сверка фактов молча выключалась на девяти десятых сайта.
-            haystack_tokens = _stems(haystack)
-            scored = []
-            for candidate_key in sorted(by_keyword):
-                key_tokens = _stems(candidate_key)
-                if not key_tokens:
-                    continue
-                scored.append((len(key_tokens & haystack_tokens) / len(key_tokens),
-                               len(key_tokens), candidate_key))
-            scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
-            if scored and scored[0][0] >= cfg["match_min_score"]:
-                # Ничья означает, что мы не знаем, какая строка чья.
-                if len(scored) > 1 and abs(scored[1][0] - scored[0][0]) < 1e-9 \
-                        and scored[1][1] == scored[0][1]:
-                    ambiguous.append(page.url)
-                else:
-                    row = by_keyword[scored[0][2]]
+    for page in pending:
+        row = None
+        haystack = " ".join([page.title] + [t for _, t in page.headings[:2]]).lower()
+        # Ключи из Вордстата в именительном падеже, заголовки — в предложном.
+        # Без нормализации словоформ сопоставлялось 10 страниц из 100,
+        # и сверка фактов молча выключалась на девяти десятых сайта.
+        haystack_tokens = _stems(haystack)
+        scored = []
+        for candidate_key in free:
+            key_tokens = _stems(candidate_key)
+            if not key_tokens:
+                continue
+            scored.append((len(key_tokens & haystack_tokens) / len(key_tokens),
+                           len(key_tokens), candidate_key))
+        scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
+        if scored and scored[0][0] >= cfg["match_min_score"]:
+            # Ничья означает, что мы не знаем, какая строка чья.
+            if len(scored) > 1 and abs(scored[1][0] - scored[0][0]) < 1e-9 \
+                    and scored[1][1] == scored[0][1]:
+                ambiguous.append(page.url)
+            else:
+                row = by_keyword[scored[0][2]]
 
         if row is not None:
             matched[page.url] = row
