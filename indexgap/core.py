@@ -272,6 +272,9 @@ _EXT_RE = re.compile(r"\.(html?|md|markdown)$", re.I)
 _INDEX_RE = re.compile(r"(^|/)index\.(html?|md|markdown)$", re.I)
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
 def url_key(url: str) -> str:
     """
     Приводит адрес к форме, в которой ссылка и страница сравнимы.
@@ -287,6 +290,11 @@ def url_key(url: str) -> str:
     # `{{base}}/{{slug}}` в шаблоне даёт `/guides//visa/`. Сервер такую страницу
     # отдаёт, а сравнение по сырой строке объявляло её сиротой.
     path = re.sub(r"/{2,}", "/", path)
+    # Управляющие символы остаются закодированными. Адрес приходит и из чужих
+    # выгрузок, а ключ печатается: `%0a::error file=…` после раскодирования
+    # становился отдельной строкой вывода — командой для GitHub Actions.
+    if _CONTROL.search(path):
+        path = _CONTROL.sub(lambda m: "%%%02X" % ord(m.group()), path)
     path = _INDEX_RE.sub(r"\1", path)
     path = _EXT_RE.sub("", path)
     if len(path) > 1:
