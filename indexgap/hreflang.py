@@ -101,6 +101,9 @@ class _Links(HTMLParser):
 
 def read_alternates(page) -> list:
     """Список (код, href) со страницы. Пустой — значит разметки нет."""
+    ready = getattr(page, "alternates", None)
+    if ready is not None:
+        return ready
     raw = page.raw or ""
     if "alternate" not in raw.lower():
         return []

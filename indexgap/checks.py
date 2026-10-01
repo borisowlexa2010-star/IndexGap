@@ -268,7 +268,6 @@ _NOT_LIVE = re.compile(
     r"<!--.*?-->|<noscript\b.*?</noscript>|<pre\b.*?</pre>|<code\b.*?</code>|"
     r"<textarea\b.*?</textarea>", re.I | re.S)
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
-_REFRESH_WORD = re.compile(r"refresh", re.I)
 
 
 def redirect_target(page) -> str:
@@ -300,18 +299,27 @@ def redirect_target(page) -> str:
 def _redirect_target(page) -> str:
     from urllib.parse import urljoin
     raw = getattr(page, "raw", "") or ""
-    if "NEXT_REDIRECT" not in raw and not _REFRESH_WORD.search(raw):
-        return ""
     if str(getattr(page, "path", "")).lower().endswith((".md", ".markdown")):
         return ""
+    # Дешёвые признаки первыми: вычищать исходник в сотни килобайт стоит,
+    # только если в нём вообще есть что искать.
+    by_script = ("NEXT_REDIRECT" in raw
+                 and len((getattr(page, "text", "") or "").split()) < 30)
+    # Подстрока ищется на порядок быстрее выражения без учёта регистра, а на
+    # большинстве страниц `http-equiv` нет вовсе.
+    by_meta = (("http-equiv" in raw or "HTTP-EQUIV" in raw or "Http-Equiv" in raw)
+               and bool(_REFRESH.search(raw)))
+    if not by_script and not by_meta:
+        return ""
     live = _NOT_LIVE.sub(" ", raw)
-    for tag in _META_TAG.findall(live):
-        if not _REFRESH.search(tag):
-            continue
-        found = _REFRESH_CONTENT.search(tag)
-        if found and float(found.group(1)) <= 1:
-            return urljoin(page.url, found.group(2).strip())
-    if "NEXT_REDIRECT" in live and len((getattr(page, "text", "") or "").split()) < 30:
+    if by_meta:
+        for tag in _META_TAG.findall(live):
+            if not _REFRESH.search(tag):
+                continue
+            found = _REFRESH_CONTENT.search(tag)
+            if found and float(found.group(1)) <= 1:
+                return urljoin(page.url, found.group(2).strip())
+    if by_script:
         for script in _SCRIPT.findall(live):
             found = _NEXT_REDIRECT.search(script)
             if found:
@@ -764,8 +772,10 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
     by_lang = Counter(lang for lang, _ in parked.values())
     source = Counter(to for _, to in parked.values()).most_common(1)[0][0]
     languages = ", ".join(f"{lang} {n}" for lang, n in sorted(by_lang.items()))
+    # Считается объявленная разметка, а не слово в исходнике: переключатель
+    # языков `<a hreflang="en">` — не альтернатива, а ссылка.
     with_hreflang = sum(1 for p in pages if p.url in parked
-                        and "hreflang" in (p.raw or "").lower())
+                        and hreflang.read_alternates(p))
 
     message = tr(
         "{a0} страниц(ы) на {a1} язык(ах) закрыты noindex и отдают canonical той же "
