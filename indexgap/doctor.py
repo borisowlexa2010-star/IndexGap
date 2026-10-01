@@ -790,11 +790,21 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     def show(keys):
         return sorted(display.get(k, k) for k in keys)
 
-    in_sitemap = _keys(sitemap_urls or []) if sitemap_urls is not None else None
+    def fold(keys):
+        # `/a/?utm_source=newsletter` — это страница `/a/`: если адреса с
+        # такими параметрами среди страниц нет, а без них есть, он её и значит.
+        # Иначе метка в ссылке из рассылки объявляла страницу «удалённой».
+        out = set()
+        for key in keys:
+            bare = key.split("?", 1)[0]
+            out.add(bare if key not in generated and bare in generated else key)
+        return out
+
+    in_sitemap = fold(_keys(sitemap_urls or [])) if sitemap_urls is not None else None
     # Панели вебмастера и всё остальное считаются вместе, но помнят, кто есть кто:
     # от состава зависит, как честно назвать шаг.
-    panels = {name: _keys(urls) for name, urls in (by_engine or {}).items() if urls}
-    others = {name: _keys(urls) for name, urls in (by_source or {}).items() if urls}
+    panels = {name: fold(_keys(urls)) for name, urls in (by_engine or {}).items() if urls}
+    others = {name: fold(_keys(urls)) for name, urls in (by_source or {}).items() if urls}
     engines_keys = dict(panels)
     engines_keys.update(others)
     # Адрес, как он стоял в выгрузке: ключ для сравнения теряет слэш, `.html`
@@ -807,12 +817,15 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     if engines_keys and indexed_urls is None:
         in_index = set().union(*engines_keys.values())
     elif indexed_urls is not None:
-        in_index = _keys(indexed_urls)
+        in_index = fold(_keys(indexed_urls))
     else:
         in_index = None
 
     missing_from_sitemap = show(publishable - in_sitemap) if in_sitemap is not None else []
     stale_in_sitemap = sorted(in_sitemap - generated) if in_sitemap is not None else []
+    # Закрытая страница в sitemap — противоречие: сайт просит её обойти и
+    # запрещает индексировать. Раньше оно считалось, но нигде не показывалось.
+    closed_in_sitemap = show(in_sitemap & blocked) if in_sitemap is not None else []
 
     known = in_sitemap & publishable if in_sitemap is not None else publishable
     not_indexed = show(known - in_index) if in_index is not None else []
@@ -855,14 +868,24 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
 
     # Цитирование — последний шаг, а не вклад в индекс. База — то, что точно в
     # индексе, если индекс известен; иначе всё пригодное.
-    cited_keys = {name: {url_key(u): n for u, n in counts.items()}
-                  for name, counts in (cited or {}).items() if counts}
+    # Варианты одного адреса складываются: `/a/`, `/a` и `/a/index.html` —
+    # одна страница, и раньше из трёх строк оставалась последняя.
+    cited_keys = {}
+    for name, counts in (cited or {}).items():
+        merged = {}
+        for u, n in (counts or {}).items():
+            for key in fold({url_key(u)}):
+                merged[key] = merged.get(key, 0) + n
+        if merged:
+            cited_keys[name] = merged
     cited_closed, cited_unknown, cited_top, cited_off_map = [], [], [], []
     if cited_keys:
         # База — индексируемые страницы, а не «в sitemap»: цитирование
         # доказывает, что ИИ страницу нашёл, и sitemap тут ни при чём. Иначе
         # процитированная страница, которой нет в sitemap, тихо выпадала.
-        base = (publishable & in_index) if in_index is not None else publishable
+        # И не «в индексе»: выгрузка показов Google, где страницы нет, не
+        # отменяет того, что Copilot её процитировал.
+        base = publishable
         every = {}
         for counts in cited_keys.values():
             for k, n in counts.items():
@@ -898,6 +921,13 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         foreign.append(
             tr("панели вебмастера среди выгрузок нет, поэтому строгого ответа «в индексе или нет» здесь не будет: ")
             + "; ".join(sources.describe(list(others))) + ".")
+    if in_sitemap and generated and not (in_sitemap & generated):
+        hosts = sorted({k.lstrip("/").split("/", 1)[0] for k in in_sitemap})
+        foreign.append(tr(
+            "ни один из {a0} адресов sitemap не совпал с адресами сайта: в sitemap "
+            "записан хост {a1}. Страницы на месте — в sitemap не тот адрес сайта "
+            "(частая причина — он собран с адресом dev-сервера или превью).",
+            a0=len(in_sitemap), a1=", ".join(hosts[:3])))
     if in_index is not None and generated and not (in_index & generated) and in_index:
         foreign.append(
             tr("ни один из {a0} адресов выгрузки не совпал с адресами сайта. Скорее всего, это экспорт другого проекта или другой домен (проверь --site). Раздел индексации ниже смысла не имеет.", a0=len(in_index)))
@@ -916,6 +946,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "stale_in_sitemap": stale_in_sitemap,
         "not_indexed": not_indexed,
         "indexed_unknown": indexed_unknown,
+        "closed_in_sitemap": closed_in_sitemap,
         "exported": {k: exported[k] for k in indexed_unknown if k in exported},
         "has_sitemap": in_sitemap is not None,
         "has_index": in_index is not None,
