@@ -810,31 +810,96 @@ FRONTMATTER_TOML = re.compile(
     r"^\ufeff?\s*\+{3}[ \t]*\r?\n(?:(?=\+{3}[ \t]*(?:\r?\n|$))|(.*?)\r?\n)"
     r"\+{3}[ \t]*(?:\r?\n|$)", re.S)
 FRONTMATTER_OPEN = re.compile(r"^\ufeff?\s*-{3,}[ \t]*\r?\n")
-MD_LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)")
-MD_HEADING = re.compile(r"^(#{1,4})\s+(.+?)\s*$", re.M)
-MD_FENCE = re.compile(r"^([ \t]*)(```|~~~).*?^\1?\2[ \t]*$", re.S | re.M)
+# Длины ограничены намеренно. Без границ каждое из этих выражений на
+# подобранном вводе — сорок килобайт открывающих скобок, незакрытых блоков
+# кода или пустых строк — работало за квадрат и подвешивало разбор одной
+# страницы на десятки секунд. Настоящая разметка в границы укладывается.
+MD_LINK = re.compile(r"(?<!!)\[([^\]\n]{0,1000})\]\(([^)\s]{1,2000})")
+MD_HEADING = re.compile(r"^(#{1,4})[ \t]+([^\n]+?)[ \t]*$", re.M)
+_FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)")
 
 
 def _strip_fences(md: str) -> str:
-    """Заголовок внутри блока кода — это комментарий, а не заголовок страницы."""
-    return MD_FENCE.sub("\n", md)
+    """
+    Заголовок внутри блока кода — это комментарий, а не заголовок страницы.
+
+    Блоки вырезаются построчно. Незакрытый блок тянется до конца текста — как
+    его и покажет любой рендер.
+    """
+    if "```" not in md and "~~~" not in md:
+        return md
+    out, fence = [], ""
+    for line in md.split("\n"):
+        mark = _FENCE_LINE.match(line)
+        if fence:
+            if mark and mark.group(1) == fence:
+                fence = ""
+                out.append("")
+            continue
+        if mark:
+            fence = mark.group(1)
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def drop_spans(text: str, spans) -> str:
+    """
+    Вырезает куски между открывающей и закрывающей меткой: `<!--` … `-->`,
+    `<pre` … `</pre>`. Без учёта регистра и за один проход на каждую пару.
+
+    Выражение вида `<pre\b.*?</pre>` на тексте, где блок открыт и не закрыт,
+    от каждого открытия идёт до конца — и так столько раз, сколько открытий.
+    Здесь незакрытый блок останавливает поиск этой пары.
+    """
+    if not text:
+        return text
+    lowered = text.lower()
+    cuts = []
+    for opener, closer in spans:
+        start = 0
+        while True:
+            at = lowered.find(opener, start)
+            if at < 0:
+                break
+            follows = lowered[at + len(opener):at + len(opener) + 1]
+            if opener[-1].isalpha() and (follows.isalnum() or follows == "-"):
+                start = at + len(opener)          # `<pre` внутри `<preview>`
+                continue
+            end = lowered.find(closer, at + len(opener))
+            if end < 0:
+                break
+            cuts.append((at, end + len(closer)))
+            start = end + len(closer)
+    if not cuts:
+        return text
+    cuts.sort()
+    out, position = [], 0
+    for at, end in cuts:
+        if at < position:
+            continue
+        out.append(text[position:at])
+        out.append(" ")
+        position = end
+    out.append(text[position:])
+    return "".join(out)
 
 
 def _strip_markdown(md: str) -> str:
     md = _strip_fences(md)
-    md = re.sub(r"`[^`]*`", " ", md)
-    md = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", md)
-    md = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", md)
-    md = re.sub(r"<!--.*?-->", " ", md, flags=re.S)
-    md = re.sub(r"<[^>]+>", " ", md)          # сырой HTML внутри markdown
-    md = re.sub(r"^[#>\-\*\+\s]+", " ", md, flags=re.M)
+    md = re.sub(r"`[^`\n]{0,2000}`", " ", md)
+    md = re.sub(r"!\[[^\]\n]{0,1000}\]\([^)\n]{0,2000}\)", " ", md)
+    md = re.sub(r"\[([^\]\n]{0,1000})\]\([^)\n]{0,2000}\)", r"\1", md)
+    md = drop_spans(md, (("<!--", "-->"),))
+    md = re.sub(r"<[^<>]{1,5000}>", " ", md)  # сырой HTML внутри markdown
+    md = re.sub(r"^[#>\-\*\+ \t]+", " ", md, flags=re.M)
     md = re.sub(r"[*_~]", "", md)
     return _clean(md)
 
 
 def _md_paragraphs(md: str) -> list:
     body = _strip_fences(md)
-    body = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
+    body = drop_spans(body, (("<!--", "-->"),))
     out = []
     for block in re.split(r"\n[ \t]*\n", body):
         block = block.strip()
@@ -982,10 +1047,10 @@ def load_page(path: str, root: str, base_url: str) -> Page:
             encoding=encoding,
             notes=notes,
             paragraphs=_md_paragraphs(body),
-            blocks={"li": len(re.findall(r"^\s*[-*+]\s+", body, re.M)),
-                    "table": len(re.findall(r"^\s*\|.+\|\s*$", body, re.M)) and 1 or 0,
-                    "img": len(re.findall(r"!\[[^\]]*\]\(", body)),
-                    "img_no_alt": len(re.findall(r"!\[\s*\]\(", body)),
+            blocks={"li": len(re.findall(r"^[ \t]*[-*+][ \t]+", body, re.M)),
+                    "table": len(re.findall(r"^[ \t]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
+                    "img": len(re.findall(r"!\[[^\]\n]{0,1000}\]\(", body)),
+                    "img_no_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
                     "script": 0, "p": 0},
         )
     else:

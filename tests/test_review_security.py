@@ -225,5 +225,58 @@ class TestArchives(Fixture):
             sources.read_table(path)
 
 
+class TestPathologicalInput(Fixture):
+    """
+    Ввод, подобранный под выражение: сорок килобайт открывающих скобок,
+    незакрытых блоков кода, пустых строк. Каждое из прежних выражений работало
+    на таком за квадрат — от шести до тридцати четырёх секунд на страницу. В CI
+    это страница из пользовательского контента, которая останавливает сборку.
+    """
+
+    BUDGET = 3.0
+
+    def timed(self, call):
+        import time
+        started = time.time()
+        call()
+        return time.time() - started
+
+    def load(self, name, text):
+        path = self.write(name, text)
+        return lambda: core.load_page(path, self.dir, SITE)
+
+    def test_pathological_inputs_parse_in_linear_time(self):
+        head = "---\ntitle: x\n---\n\n"
+        cases = {
+            "fences.md": head + "```a\n" * 12000,
+            "brackets.md": head + "[" * 48000,
+            "blank.md": head + "\n" * 39000 + "text",
+            "comments.md": head + "<!-- " * 12000,
+            "backticks.md": head + "`" * 40000,
+        }
+        for name, text in cases.items():
+            self.assertLess(self.timed(self.load(name, text)), self.BUDGET, name)
+
+    def test_unclosed_html_blocks_do_not_stall_the_checks(self):
+        from indexgap import checks, content, freshness
+        for tag in ("<pre ", "<code ", "<noscript ", "<!-- ", "<time ", "<meta "):
+            page = core.load_page(self.write("p.html", "<html><head>"
+                                  '<meta http-equiv="refresh" content="5; url=/x/"></head>'
+                                  "<body><p>TODO: x " + tag * 20000 + "</p></body></html>"),
+                                  self.dir, SITE)
+            page.jsonld = ['{"@type": "Event"}']
+            took = self.timed(lambda: (checks._redirect_target(page), content.check_brief([page]),
+                                       freshness.page_dates(page)))
+            self.assertLess(took, self.BUDGET, tag)
+
+    def test_fences_and_spans_still_mean_what_they_meant(self):
+        self.assertEqual(core._strip_fences("a\n```py\n# not a heading\n```\nb"), "a\n\nb")
+        self.assertEqual(core._strip_fences("a\n~~~\ncode\n"), "a")
+        self.assertEqual(core.drop_spans("a <PRE>x</pre> b <preview>c</preview>",
+                                         (("<pre", "</pre>"),)), "a   b <preview>c</preview>")
+        self.assertEqual(core.drop_spans("a <!-- x --> b <!-- open", (("<!--", "-->"),)),
+                         "a   b <!-- open")
+
+
 if __name__ == "__main__":
     unittest.main()

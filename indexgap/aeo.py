@@ -397,7 +397,7 @@ def check_provenance(page) -> list:
             # Издатель — тоже «кто за этим стоит»; находка так и называется:
             # «автор или организация».
             has_author = has_author or bool(keys & {"author", "publisher", "creator"})
-    if not has_date and re.search(r"<time[^>]+datetime=", page.raw or "", re.I):
+    if not has_date and re.search(r"<time\b[^<>]{0,500}?datetime=", page.raw or "", re.I):
         has_date = True
     if not has_date:
         issues.append(("info", page.url, "no-date",

@@ -110,7 +110,7 @@ def page_dates(page) -> dict:
     # <time> стоит на любой странице: «проверено 2 марта», дата публикации
     # новости. Датой события он становится, только если страница — событие.
     if is_event:
-        for match in re.finditer(r"<time[^>]+datetime=[\"']([^\"']+)", page.raw or "", re.I):
+        for match in re.finditer(r"<time\b[^<>]{0,500}?datetime=[\"']([^\"'<>]{1,60})", page.raw or "", re.I):
             parsed = _parse_date(match.group(1))
             if parsed:
                 found.setdefault("time", parsed)
