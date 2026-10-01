@@ -165,6 +165,7 @@ class Page:
     jsonld: list = field(default_factory=list)     # сырые блоки application/ld+json
     paragraphs: list = field(default_factory=list) # абзацы основного текста
     blocks: dict = field(default_factory=dict)     # счётчики li/table/img и т.п.
+    alternates: list = None                        # hreflang: (код, href); None — не собирались
 
     @property
     def key(self) -> str:
@@ -392,6 +393,7 @@ class _Extractor(HTMLParser):
         self.headings = []
         self.anchors = []
         self.jsonld = []
+        self.alternates = []       # (код hreflang как написан, href)
         self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0,
                        "script": 0, "p": 0}
         self.meta = {}             # author, datePublished и прочее из <meta>
@@ -547,8 +549,16 @@ class _Extractor(HTMLParser):
                 # раньше они были невидимы, и на каждой HTML-странице выдавались
                 # «нет даты» и «нет автора» — 402 ложные находки на 201 странице.
                 self.meta.setdefault(META_ALIASES.get(name, name), content)
-        elif tag == "link" and "canonical" in a.get("rel", "").lower():
-            self.canonical = a.get("href", "").strip()
+        elif tag == "link":
+            rel = a.get("rel", "").lower()
+            if "canonical" in rel:
+                self.canonical = a.get("href", "").strip()
+            # Альтернативы hreflang собираются здесь же, за тот же проход.
+            # Раньше их читал отдельный разбор того же документа, и не один
+            # раз: на каталоге в четыре тысячи страниц это было сорок секунд
+            # из шестидесяти восьми.
+            if "alternate" in rel.split() and a.get("hreflang"):
+                self.alternates.append((a["hreflang"].strip(), a.get("href", "").strip()))
         elif tag in ("h1", "h2", "h3", "h4"):
             self._flush_paragraph()
             self._in_heading = int(tag[1])
@@ -684,6 +694,7 @@ class _Extractor(HTMLParser):
 _ASIDE_NAMES = ("breadcrumb", "breadcrumbs", "byline", "toc",
                 "table-of-contents", "post-meta", "article-meta")
 _ASIDE_NOT = ("has", "with", "without", "no", "is", "show", "hide")
+_ASIDE_HINT = re.compile(r"breadcrumb|byline|toc|table-of-contents|-meta|_meta", re.I)
 _ASIDE_NEVER = {"html", "body", "main", "article"}
 
 # Какой открытый элемент закрывает новый тег, если закрывающего не написали.
@@ -702,7 +713,11 @@ def _is_aside(tag: str, attrs: dict) -> bool:
         return True
     if tag in _ASIDE_NEVER:
         return False
-    for token in attrs.get("class", "").lower().split():
+    classes = attrs.get("class", "")
+    # Вызывается на каждом теге страницы, а служебных среди них единицы.
+    if not classes or not _ASIDE_HINT.search(classes):
+        return False
+    for token in classes.lower().split():
         for name in _ASIDE_NAMES:
             if token == name:
                 return True
@@ -891,6 +906,7 @@ def load_page(path: str, root: str, base_url: str) -> Page:
             encoding=encoding,
             notes=notes,
             jsonld=ex.jsonld,
+            alternates=ex.alternates,
             paragraphs=ex.paragraphs,
             blocks=ex.blocks,
         )
