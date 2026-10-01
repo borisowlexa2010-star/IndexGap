@@ -653,7 +653,6 @@ def _clusters(edges: list) -> list:
 
 
 # Первый сегмент пути — код языка: `ar`, `zh`, `pt-br`, `zh-hans`.
-_LOCALE = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,4})?$", re.I)
 _URL_IN_TEXT = re.compile(r"https?://[^\s,»\"'<>)]+")
 
 # Что следует из того, что страница закрыта и отдаёт canonical оригиналу.
@@ -665,11 +664,35 @@ PARKED_ECHOES = {
 }
 
 
+# Страны, которыми сайты называют региональные разделы. Языком такой сегмент
+# не является, но раздел — региональная версия, и вести себя должен как она.
+_REGION_PREFIXES = {"us", "gb", "au", "nz", "sg", "ae", "za", "mx", "jp", "cn",
+                    "kr", "hk", "tw", "ph", "ie", "at"}
+
+
+def _is_locale(segment: str) -> bool:
+    """
+    Языковой ли это префикс пути.
+
+    Формы кода мало: `/app/`, `/go/`, `/faq/`, `/api/`, `/img/`, `/new/` —
+    тоже две-три буквы, и каждая считалась языком: главной приписывали
+    «переводы» в `/api/` и `/faq/`, а перенос `/old/` → `/new/` объявлялся
+    запаркованными переводами. Языком считается то, что есть в ISO 639-1.
+    """
+    match = hreflang._TAG_RE.match(segment or "")
+    if not match:
+        return False
+    primary = match.group(1).lower()
+    if primary in hreflang.LANGUAGES:
+        return True
+    return primary in _REGION_PREFIXES and not (match.group(2) or match.group(3))
+
+
 def _locale_split(url: str) -> tuple:
     """(хост, язык, остаток пути) — язык пуст, если первого сегмента-кода нет."""
     host, _, path = url_key(url).lstrip("/").partition("/")
     first, _, rest = path.partition("/")
-    if _LOCALE.match(first or ""):
+    if _is_locale(first):
         return host, first.lower(), rest.strip("/")
     return host, "", path.strip("/")
 
@@ -686,14 +709,18 @@ def parked_translations(pages: list, cfg: dict = None) -> dict:
     cfg = {**CONFIG, **(cfg or {})}
     parked = {}
     for p in pages:
-        if "noindex" not in (p.robots or "").lower() or not p.canonical:
+        # `robots: none` закрывает так же, как noindex.
+        if not p.noindex or not p.canonical:
             continue
         if url_key(p.canonical) == url_key(p.url):
             continue
         host, lang, rest = _locale_split(p.url)
         to_host, to_lang, to_rest = _locale_split(p.canonical)
-        if lang and to_lang and lang != to_lang and host == to_host and rest == to_rest:
-            parked[p.url] = (lang, to_lang)
+        # Оригинал может жить и без префикса: в Next.js, Astro, Hugo и
+        # Docusaurus основной язык по умолчанию стоит в корне. Раньше такой
+        # сайт получал по две критичные находки на каждый закрытый перевод.
+        if lang and lang != to_lang and host == to_host and rest == to_rest:
+            parked[p.url] = (lang, to_lang or tr("основной"))
     return parked if len(parked) >= cfg["parked_rule_min"] else {}
 
 
@@ -840,7 +867,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # — задача. Поэтому счёт групп говорится вслух.
     groups = _clusters([(a.url, b.url) for a, b, j in dupes["pairs"]
                         if j >= cfg["near_duplicate"] and a.url not in shells
-                        and b.url not in shells])
+                        and b.url not in shells
+                        and tuple(sorted((a.url, b.url))) not in regional])
     if groups:
         biggest = max(len(g) for g in groups)
         notes.append(
