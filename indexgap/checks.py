@@ -345,11 +345,20 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         targets = set()
         for link in p.links:
             key = url_key(link)
-            target = by_key.get(key)
+            # `/a/?utm_source=nav` — ссылка на `/a/`: если страницы с такими
+            # параметрами нет, это та же страница с меткой в адресе.
+            target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
             if target and target != p.url:
                 targets.add(target)
             elif not target:
                 unresolved.add(key)
+        # Заглушка-редирект ведёт туда, куда перебрасывает, — хотя ссылки <a>
+        # в ней нет. Алиасы Hugo так и устроены, и всё за ними считалось
+        # недостижимым.
+        landing = redirect_target(p)
+        landing = by_key.get(url_key(landing)) if landing else None
+        if landing and landing != p.url:
+            targets.add(landing)
         outbound[p.url] = targets
         for t in targets:
             inbound[t].add(p.url)
@@ -360,11 +369,13 @@ def link_graph(pages: list, home_url: str = None) -> dict:
     redirected_from = None
     if home:
         by_url = {p.url: p for p in pages}
-        for _ in range(3):                    # цепочка, но не бесконечная
+        walked = {home}
+        while True:                           # цепочка, но не петля
             target = redirect_target(by_url[home])
             nxt = by_key.get(url_key(target)) if target else None
-            if not nxt or nxt == home:
+            if not nxt or nxt in walked:
                 break
+            walked.add(nxt)
             redirected_from = redirected_from or home
             home = nxt
     # Раньше флаг зависел от того, передали ли адрес: CLI передавал None,
@@ -842,15 +853,22 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # Ссылки нужны странице, чтобы её нашли и проиндексировали. Закрытой от
     # индекса они ни к чему: «сирота» и «недостижима» на ней — следствие
     # решения её закрыть, а не отдельная беда. Сама находка noindex остаётся.
-    closed = {p.url for p in pages if "noindex" in (p.robots or "").lower()}
+    # `robots: none` закрывает так же, как noindex.
+    closed = {p.url for p in pages if p.noindex}
+    # Заглушка-редирект и пустая оболочка тоже не сироты. Список чистится
+    # один раз и здесь: раньше консоль, карточка в отчёте и JSON считали
+    # каждый по-своему и показывали 0, 3 и 3 для одного и того же сайта.
+    spared = closed | shells | {p.url for p in pages if redirect_target(p)}
+    graph["orphans"] = [u for u in graph["orphans"] if u not in spared]
+    orphaned = set(graph["orphans"])
+    graph["unreachable"] = [u for u in graph["unreachable"]
+                            if u not in spared and u not in orphaned]
     for url in graph["orphans"]:
-        if url not in shells and url not in closed:
-            issues.append(("critical", url, "orphan",
-                           tr("ни одна внутренняя ссылка не ведёт на страницу")))
+        issues.append(("critical", url, "orphan",
+                       tr("ни одна внутренняя ссылка не ведёт на страницу")))
     for url in graph["unreachable"]:
-        if url not in graph["orphans"] and url not in shells and url not in closed:
-            issues.append(("critical", url, "unreachable",
-                           tr("до страницы нельзя дойти от главной по ссылкам")))
+        issues.append(("critical", url, "unreachable",
+                       tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
         if url in shells or url in closed:
             continue
