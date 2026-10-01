@@ -49,6 +49,93 @@ def _keys(urls) -> set:
     return {url_key(u) for u in urls if u}
 
 
+# Сколько sitemap-файлов читается за один прогон. Индекс с чужого сервера
+# решает, сколько запросов сделает пакет; без потолка один адрес превращался
+# в девятьсот запросов, а на глубине три — в десятки тысяч.
+MAX_SITEMAPS = 200
+
+
+def _host(url: str) -> str:
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).netloc or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _fetch_sitemap(source: str) -> bytes:
+    """Байты sitemap с диска или по сети. Любая беда — SourceError словами."""
+    import http.client
+    from . import core
+    if source.startswith(("http://", "https://")):
+        from urllib.parse import quote
+        # Пробел или кириллица в адресе роняли http.client раньше запроса.
+        url = quote(source, safe=":/?&=%#+,;@~-._!$'()*[]")
+        try:
+            with urllib.request.urlopen(core.request(url), timeout=30) as resp:
+                data = resp.read(core.MAX_INPUT_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            raise SourceError(tr("{a0} отдал {a1}", a0=source, a1=exc.code))
+        except (urllib.error.URLError, http.client.HTTPException,
+                OSError, ValueError) as exc:
+            raise SourceError(tr("{a0} не читается: {a1}", a0=source, a1=exc))
+    else:
+        if not os.path.exists(source):
+            raise SourceError(tr("файл {a0} не найден", a0=source))
+        # Каталог, именованный канал или /dev/zero файлом не считаются:
+        # чтение из них либо падает, либо не кончается.
+        if not os.path.isfile(source):
+            raise SourceError(tr("{a0} — не обычный файл", a0=source))
+        if core.too_big(os.path.getsize(source)):
+            raise SourceError(tr("{a0}: больше {a1} МБ — читать не стал", a0=source,
+                                 a1=core.MAX_INPUT_BYTES // (1024 * 1024)))
+        try:
+            with open(source, "rb") as fh:
+                data = fh.read()
+        except OSError as exc:
+            raise SourceError(tr("{a0} не читается: {a1}", a0=source, a1=exc))
+    if core.too_big(len(data)):
+        raise SourceError(tr("{a0}: больше {a1} МБ — читать не стал", a0=source,
+                             a1=core.MAX_INPUT_BYTES // (1024 * 1024)))
+    if data[:2] == b"\x1f\x8b":
+        try:
+            data = core.gunzip(data)
+        except SourceError as exc:
+            raise SourceError(f"{source}: {exc}")
+    return data
+
+
+def _child_sitemap(source: str, loc: str) -> tuple:
+    """
+    Куда идти за дочерним файлом индекса: (источник, ошибка).
+
+    Индекс не выбирает, что пакету читать. Индекс из сети ведёт только на свой
+    же хост и только по http(s): иначе чужой sitemap называл дочерним локальный
+    путь, и тот читался, или адрес во внутренней сети, и туда уходил запрос.
+    Индекс с диска ищет дочерние файлы рядом с собой — по пути из адреса
+    (`/en/sitemap.xml` → `en/sitemap.xml`), потом по имени — и не выходит за
+    свой каталог.
+    """
+    from urllib.parse import unquote, urlsplit
+    remote = loc.startswith(("http://", "https://"))
+    if source.startswith(("http://", "https://")):
+        if not remote:
+            return "", tr("{a0}: дочерний адрес не http(s), не читается", a0=loc)
+        if _host(loc) != _host(source):
+            return "", tr("{a0}: дочерний sitemap на другом хосте не читается — "
+                          "если он ваш, передайте его отдельным --sitemap", a0=loc)
+        return loc, ""
+    base = os.path.realpath(os.path.dirname(os.path.abspath(source)))
+    me = os.path.realpath(source)
+    path = unquote(urlsplit(loc).path if remote else loc).lstrip("/")
+    for candidate in (os.path.join(base, path), os.path.join(base, os.path.basename(path))):
+        real = os.path.realpath(candidate)
+        inside = real == base or real.startswith(base + os.sep)
+        if inside and real != me and os.path.isfile(real):
+            return real, ""
+    if remote:
+        return loc, ""
+    return "", tr("{a0}: дочерний файл не найден рядом с индексом", a0=loc)
+
+
 def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
     """
     Читает sitemap с диска или по URL, разворачивает sitemap-index.
@@ -57,40 +144,26 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
     возвращался пустой список, и опечатка в пути выглядела как «сайт
     не попал в sitemap целиком».
     """
+    from .core import parse_xml
     if _depth > 3:
         return {"urls": [], "error": tr("слишком глубокая вложенность sitemap-индексов")}
-    # Индекс, ссылающийся сам на себя, раскручивался в сотни тысяч разборов
-    # и мегабайты текста ошибки — а по сети это были бы столько же запросов.
     _seen = set() if _seen is None else _seen
-    if source in _seen:
-        return {"urls": [], "error": ""}
-    _seen.add(source)
+    key = source if source.startswith(("http://", "https://")) else os.path.realpath(source)
+    # Петля — это ошибка, и молчать о ней нельзя: индекс, сославшийся на себя,
+    # давал ноль адресов без единого слова, и воронка сообщала, что из sitemap
+    # выпал весь сайт.
+    if key in _seen:
+        return {"urls": [], "error": tr("{a0}: индекс ссылается сам на себя", a0=source)}
+    if len(_seen) >= MAX_SITEMAPS:
+        return {"urls": [], "error": tr(
+            "больше {a0} sitemap-файлов за один прогон — остальные не читались",
+            a0=MAX_SITEMAPS)}
+    _seen.add(key)
     try:
-        if source.startswith(("http://", "https://")):
-            from .core import request
-            with urllib.request.urlopen(request(source), timeout=30) as resp:
-                data = resp.read()
-        else:
-            if not os.path.exists(source):
-                return {"urls": [], "error": tr("файл {a0} не найден", a0=source)}
-            with open(source, "rb") as fh:
-                data = fh.read()
-    except urllib.error.HTTPError as exc:
-        return {"urls": [], "error": tr("{a0} отдал {a1}", a0=source, a1=exc.code)}
-    except (urllib.error.URLError, OSError) as exc:
-        return {"urls": [], "error": tr("{a0} не читается: {a1}", a0=source, a1=exc)}
-
-    if data[:2] == b"\x1f\x8b":
-        import gzip
-        try:
-            data = gzip.decompress(data)
-        except OSError as exc:
-            return {"urls": [], "error": tr("{a0}: не удалось распаковать gzip ({a1})", a0=source, a1=exc)}
-
-    try:
-        root = ElementTree.fromstring(data)
-    except ElementTree.ParseError as exc:
-        return {"urls": [], "error": tr("{a0}: это не похоже на XML ({a1})", a0=source, a1=exc)}
+        root = parse_xml(_fetch_sitemap(source))
+    except SourceError as exc:
+        text = str(exc)
+        return {"urls": [], "error": text if source in text else f"{source}: {text}"}
 
     tag = root.tag.rsplit("}", 1)[-1]
     if tag == "sitemapindex":
@@ -101,16 +174,17 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
                         if c.tag.rsplit("}", 1)[-1] == "loc" and c.text), "")
             if not loc:
                 continue
-            loc = loc.strip()
-            child = loc
-            if not source.startswith("http"):
-                sibling = os.path.join(os.path.dirname(source), os.path.basename(loc))
-                if os.path.exists(sibling):
-                    child = sibling
-            result = read_sitemap(child, _depth + 1, _seen)
-            urls.extend(result["urls"])
-            if result["error"] and result["error"] not in errors:
-                errors.append(result["error"])
+            child, problem = _child_sitemap(source, loc.strip())
+            if child:
+                result = read_sitemap(child, _depth + 1, _seen)
+                urls.extend(result["urls"])
+                problem = result["error"]
+            if problem and problem not in errors:
+                errors.append(problem)
+            if len(_seen) >= MAX_SITEMAPS and problem:
+                break
+        if not urls and not errors:
+            errors.append(tr("{a0}: индекс не дал ни одного адреса", a0=source))
         return {"urls": urls, "error": "; ".join(errors[:5])}
 
     # Только <url>/<loc>: у <image:loc> и <video:loc> то же имя, и 831

@@ -82,6 +82,10 @@ def indexable(page) -> bool:
     return True
 
 
+_SHARD_NAME = re.compile(r"^sitemap-\d+\.xml$")
+_LASTMOD = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$")
+
+
 def _shard_loc(base_url: str, public_prefix: str, name: str) -> str:
     prefix = (public_prefix or "").strip("/")
     parts = [base_url.rstrip("/")]
@@ -126,9 +130,13 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
     entries = []
     for p in included:
         h = p.content_hash
-        prev = manifest.get(p.url) or {}
+        prev = manifest.get(p.url)
+        prev = prev if isinstance(prev, dict) else {}
         lastmod = prev.get("lastmod") if prev.get("hash") == h else None
-        lastmod = lastmod or today
+        # Дата из манифеста попадает в XML как есть — значит, это должна быть
+        # дата, а не что угодно, что туда вписали.
+        if not (isinstance(lastmod, str) and _LASTMOD.match(lastmod)):
+            lastmod = today
         entry = dict(prev)
         entry["hash"] = h
         entry["lastmod"] = lastmod
@@ -142,7 +150,7 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         lines = ['<?xml version="1.0" encoding="UTF-8"?>',
                  '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
         for url, lastmod in chunk:
-            lines.append(f"  <url><loc>{escape(url)}</loc><lastmod>{lastmod}</lastmod></url>")
+            lines.append(f"  <url><loc>{escape(url)}</loc><lastmod>{escape(lastmod)}</lastmod></url>")
         lines.append("</urlset>")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
@@ -152,9 +160,12 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
     # поисковик продолжит ходить по файлам с несуществующими URL.
     # Но убирать можно ТОЛЬКО то, что пакет создал сам и записал в манифест:
     # поиск по маске сносил чужие sitemap-news.xml и sitemap-images.xml.
+    # И только по имени, которое пакет сам даёт шардам: манифест из чужого
+    # репозитория называл «шардом» `../../что-угодно`, и файл удалялся.
+    listed = manifest.get("_shards")
     stale = {os.path.join(out_dir, name)
-             for name in (manifest.get("_shards") or [])
-             if isinstance(name, str)}
+             for name in (listed if isinstance(listed, list) else [])
+             if isinstance(name, str) and _SHARD_NAME.match(name)}
 
     if len(entries) <= MAX_URLS_PER_FILE:
         write_urlset(os.path.join(out_dir, "sitemap.xml"), entries)
@@ -213,7 +224,8 @@ def diff_changed(pages: list, manifest: dict) -> dict:
     for p in pages:
         if not indexable(p):
             continue
-        prev = (manifest.get(p.url) or {}).get("notified")
+        entry = manifest.get(p.url)
+        prev = entry.get("notified") if isinstance(entry, dict) else None
         if prev is None:
             new.append(p.url)
         elif prev != p.content_hash:

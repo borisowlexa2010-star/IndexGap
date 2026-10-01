@@ -40,6 +40,7 @@ import os
 import re
 import zipfile
 
+from . import core
 from .core import SourceError, read_text
 from .i18n import N_, tr
 
@@ -206,6 +207,23 @@ _SHEET_RE = re.compile(r"xl/worksheets/sheet\d+\.xml$")
 _XML_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 
+def _member(archive, name: str, path: str) -> bytes:
+    """Файл из архива — с потолком на размер после распаковки."""
+    info = archive.getinfo(name)
+    limit = core.MAX_INPUT_BYTES
+    if core.too_big(info.file_size):
+        raise SourceError(tr("{a0}: «{a1}» внутри архива больше {a2} МБ — читать не стал",
+                             a0=path, a1=name, a2=limit // (1024 * 1024)))
+    # Размер в заголовке архива пишет тот, кто архив собрал, — поэтому
+    # потолок держится и при самом чтении.
+    with archive.open(name) as fh:
+        data = fh.read(limit + 1)
+    if core.too_big(len(data)):
+        raise SourceError(tr("{a0}: «{a1}» внутри архива больше {a2} МБ — читать не стал",
+                             a0=path, a1=name, a2=limit // (1024 * 1024)))
+    return data
+
+
 def _read_xlsx(path: str) -> list:
     """
     XLSX без сторонних библиотек: это zip с XML внутри.
@@ -219,15 +237,13 @@ def _read_xlsx(path: str) -> list:
             names = book.namelist()
             shared = []
             if "xl/sharedStrings.xml" in names:
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(book.read("xl/sharedStrings.xml"))
+                root = core.parse_xml(_member(book, "xl/sharedStrings.xml", path))
                 for si in root:
                     shared.append("".join(t.text or "" for t in si.iter(_XML_NS + "t")))
             sheets = sorted(n for n in names if _SHEET_RE.search(n))
             if not sheets:
                 raise SourceError(tr("{a0}: в книге нет ни одного листа.", a0=path))
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(book.read(sheets[0]))
+            root = core.parse_xml(_member(book, sheets[0], path))
             rows = []
             for row in root.iter(_XML_NS + "row"):
                 values = []
@@ -299,8 +315,10 @@ def _read_json(text: str) -> list:
 
 
 def _read_xml_locs(text: str) -> list:
-    locs = re.findall(r"<loc>\s*([^<]+?)\s*</loc>", text)
-    return [[u] for u in locs]
+    # Без ленивого квантора между двумя `\s*`: тот вариант на четырёх
+    # килобайтах подобранного ввода думал сорок секунд.
+    locs = (u.strip() for u in re.findall(r"<loc>([^<]*)</loc>", text))
+    return [[u] for u in locs if u]
 
 
 def read_table(path: str) -> tuple:
@@ -395,7 +413,9 @@ def _read_zip_tables(path: str) -> list:
                 if not name.lower().endswith((".csv", ".tsv", ".txt")):
                     continue
                 try:
-                    raw = archive.read(name)
+                    raw = _member(archive, name, path)
+                except SourceError:
+                    raise
                 except Exception:
                     continue
                 for codec in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
