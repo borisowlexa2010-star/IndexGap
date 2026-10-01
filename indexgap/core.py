@@ -86,9 +86,20 @@ OWN_FILES = {"indexgap-report.html", "indexgap-report.json", "indexgap-check.htm
 # Каталоги сборки пропускаются: иначе `indexgap check .` в обычном репозитории
 # статического генератора разбирает и исходники, и собранный сайт, и каждая
 # страница оказывается собственным почти-дублем.
-SKIP_DIRS = {"node_modules", ".git", ".svn", "__pycache__", ".next", ".nuxt",
-             "vendor", ".venv", "venv", "public", "_site", "dist", "build",
-             "out", ".output", "target", ".vercel", ".astro", "coverage"}
+# Служебное на любой глубине: это никогда не раздел сайта.
+ALWAYS_SKIP = {"node_modules", ".git", ".svn", "__pycache__", ".next", ".nuxt",
+               ".venv", "venv", ".output", ".vercel", ".astro"}
+# Куда генераторы кладут сборку. Пропускаются только в корне проекта с
+# исходниками: внутри готового сайта `vendor`, `coverage`, `build`, `public` —
+# обычные слова, и раньше такие разделы исчезали молча.
+BUILD_DIRS = {"vendor", "public", "_site", "dist", "build", "out", "target",
+              "coverage"}
+SKIP_DIRS = ALWAYS_SKIP | BUILD_DIRS
+# По чему видно, что перед нами проект с исходниками, а не готовый сайт.
+SOURCE_MARKERS = ("package.json", "pyproject.toml", "Gemfile", "go.mod",
+                  "Cargo.toml", "composer.json", "hugo.toml", "hugo.yaml",
+                  "config.toml", "_config.yml", "astro.config.mjs", "Makefile",
+                  ".git")
 
 DEFAULT_EXTS = (".html", ".htm", ".md", ".markdown")
 
@@ -365,7 +376,9 @@ def read_text(path: str) -> tuple:
     for encoding in order:
         try:
             text = data.decode(encoding)
-        except (UnicodeDecodeError, LookupError):
+        except (UnicodeError, LookupError):
+            # `<meta charset="undefined">` — такой кодек в Python есть, и он
+            # бросает голый UnicodeError: объявленная ерунда роняла весь прогон.
             continue
         return text, _canonical_encoding(encoding)
     raise SourceError(
@@ -735,7 +748,15 @@ def _clean(text: str) -> str:
 
 # ── Markdown ──────────────────────────────────────────────────────────────────
 
-FRONTMATTER = re.compile(r"^\ufeff?\s*-{3,}[ \t]*\r?\n(.*?)\r?\n-{3,}[ \t]*(?:\r?\n|$)", re.S)
+# Пустой блок (`---` и сразу `---`) закрывается первым же вариантом: без него
+# выражение искало закрытие дальше и съедало текст до первой черты `---`.
+FRONTMATTER = re.compile(
+    r"^\ufeff?\s*-{3,}[ \t]*\r?\n(?:(?=-{3,}[ \t]*(?:\r?\n|$))|(.*?)\r?\n)"
+    r"-{3,}[ \t]*(?:\r?\n|$)", re.S)
+# TOML-шапка Hugo: `+++` … `+++`.
+FRONTMATTER_TOML = re.compile(
+    r"^\ufeff?\s*\+{3}[ \t]*\r?\n(?:(?=\+{3}[ \t]*(?:\r?\n|$))|(.*?)\r?\n)"
+    r"\+{3}[ \t]*(?:\r?\n|$)", re.S)
 FRONTMATTER_OPEN = re.compile(r"^\ufeff?\s*-{3,}[ \t]*\r?\n")
 MD_LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)")
 MD_HEADING = re.compile(r"^(#{1,4})\s+(.+?)\s*$", re.M)
@@ -777,6 +798,33 @@ def _unquote_value(value: str) -> str:
         if len(value) >= 2 and value.startswith(ch) and value.endswith(ch):
             return value[1:-1]
     return value
+
+
+def _parse_toml_frontmatter(block: str) -> dict:
+    """
+    Верхний уровень TOML: `ключ = значение`. Таблицы (`[params]`) и всё, что
+    внутри них, пропускаются — как вложенные ключи в YAML.
+    """
+    out, nested = {}, False
+    for line in block.replace("\r\n", "\n").split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            nested = True
+            continue
+        if nested or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        value = value.strip()
+        if value[:1] in ("\"", "'"):
+            quote_char = value[0]
+            end = value.find(quote_char, 1)
+            value = value[1:end] if end > 0 else value[1:]
+        else:
+            value = value.split("#", 1)[0].strip()
+        out[key.strip().strip("\"'").lower()] = _clean(value)
+    return out
 
 
 def _parse_frontmatter(block: str) -> dict:
@@ -850,9 +898,13 @@ def load_page(path: str, root: str, base_url: str) -> Page:
     if path.lower().endswith((".md", ".markdown")):
         meta, body = {}, raw
         m = FRONTMATTER.match(raw)
+        toml = None if m else FRONTMATTER_TOML.match(raw)
         if m:
-            meta = _parse_frontmatter(m.group(1))
+            meta = _parse_frontmatter(m.group(1) or "")
             body = raw[m.end():]
+        elif toml:
+            meta = _parse_toml_frontmatter(toml.group(1) or "")
+            body = raw[toml.end():]
         elif FRONTMATTER_OPEN.match(raw):
             notes.append(tr("фронтматтер открыт, но не закрыт: строка `---` в конце блока"))
         elif raw.lstrip()[:3] == "---":
@@ -955,10 +1007,18 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
     и страницы с совпавшими URL. Раньше первый же битый симлинк ронял весь прогон,
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
-    pages, problems, by_key = [], [], {}
+    pages, problems, by_key, loaded = [], [], {}, []
+    source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames
-                       if not d.startswith(".") and d not in SKIP_DIRS]
+        skip = set(ALWAYS_SKIP)
+        if dirpath == root and source_repo:
+            skip |= BUILD_DIRS
+            for name in sorted(d for d in dirnames if d in BUILD_DIRS):
+                if _has_pages(os.path.join(root, name), exts):
+                    problems.append(tr(
+                        "каталог {a0}/ пропущен как сборочный. Если проверять "
+                        "нужно собранный сайт — передай его каталог явно.", a0=name))
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in skip]
         for name in sorted(filenames):
             if name.startswith(".") or name.lower() in OWN_FILES:
                 continue
@@ -971,29 +1031,32 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             if _ERROR_PAGE.search(os.path.relpath(path, root).replace(os.sep, "/")):
                 continue
             try:
-                page = load_page(path, root, base_url)
+                loaded.append(load_page(path, root, base_url))
             except SourceError as exc:
                 problems.append(str(exc))
-                continue
-            other = by_key.get(page.key)
-            if other is not None:
-                # Из двух файлов с одним адресом берём содержательный, а не тот,
-                # что раньше встретился в обходе: заглушка `about.html` рядом
-                # с настоящей `about/index.html` уносила её исходящие ссылки,
-                # и целевые страницы становились ложными сиротами.
-                keep, drop = ((page, other)
-                              if (len(page.links), len(page.text)) >
-                                 (len(other.links), len(other.text))
-                              else (other, page))
-                problems.append(
-                    tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
-                if keep is page:
-                    pages[pages.index(other)] = page
-                    by_key[page.key] = page
-                continue
+    # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
+    # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
+    # сырой файл — и страница пропадала вовсе.
+    loaded, raw_md = _drop_raw_markdown(loaded)
+    for page in loaded:
+        other = by_key.get(page.key)
+        if other is None:
             by_key[page.key] = page
             pages.append(page)
-    pages, raw_md = _drop_raw_markdown(pages)
+            continue
+        # Из двух файлов с одним адресом берём содержательный, а не тот,
+        # что раньше встретился в обходе: заглушка `about.html` рядом
+        # с настоящей `about/index.html` уносила её исходящие ссылки,
+        # и целевые страницы становились ложными сиротами.
+        keep, drop = ((page, other)
+                      if (len(page.links), len(page.text)) >
+                         (len(other.links), len(other.text))
+                      else (other, page))
+        problems.append(
+            tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
+        if keep is page:
+            pages[pages.index(other)] = page
+            by_key[page.key] = page
     if raw_md:
         problems.append(tr(
             "{a0} файл(ов) .md рядом с HTML без front matter — это файлы, а не "
@@ -1001,6 +1064,13 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
     pages.sort(key=lambda p: p.url)
     return pages, problems
+
+
+def _has_pages(path: str, exts) -> bool:
+    for _dirpath, _dirnames, filenames in os.walk(path):
+        if any(name.lower().endswith(exts) for name in filenames):
+            return True
+    return False
 
 
 _ERROR_PAGE = re.compile(

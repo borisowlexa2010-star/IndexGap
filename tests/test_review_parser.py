@@ -116,5 +116,86 @@ class TestAsideBlocks(Fixture):
         self.assertEqual(page.paragraphs, [BODY])
 
 
+class Site(unittest.TestCase):
+    def site(self, files, raw=()):
+        root = tempfile.mkdtemp(prefix="indexgap-site-")
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel, text in files.items():
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            mode = "wb" if isinstance(text, bytes) else "w"
+            with open(path, mode, **({} if mode == "wb" else {"encoding": "utf-8"})) as fh:
+                fh.write(text)
+        self.root = root
+        return core.load_pages(root, SITE)
+
+
+def doc(title):
+    return (f"<html><head><title>{title} — страница</title></head><body><main>"
+            f"<h1>{title}</h1><p>{BODY}</p></main></body></html>")
+
+
+class TestWhatCountsAsAPage(Site):
+    def test_nested_vendor_coverage_build_dirs_are_pages(self):
+        """Имена сборочных каталогов — обычные слова: `/vendor/acme/` в каталоге
+        поставщиков, `/coverage/` на сайте страховой, `/public/` в документации.
+        Внутри готового сайта они пропускались молча, и разделы исчезали."""
+        pages, _ = self.site({
+            "index.html": doc("Главная"),
+            "vendor/acme/index.html": doc("Поставщик"),
+            "coverage/index.html": doc("Покрытие"),
+            "docs/build/index.html": doc("Сборка"),
+            "public/index.html": doc("Публичное"),
+            "node_modules/pkg/index.html": doc("Пакет"),
+        })
+        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages),
+                         ["/", "/coverage/", "/docs/build/", "/public/", "/vendor/acme/"])
+
+    def test_build_dirs_of_a_source_repo_are_skipped_and_named(self):
+        pages, problems = self.site({
+            "package.json": "{}",
+            "index.html": doc("Главная"),
+            "dist/index.html": doc("Сборка"),
+            "src/about.html": doc("О нас"),
+        })
+        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages), ["/", "/src/about/"])
+        self.assertTrue(any("dist" in p for p in problems), problems)
+
+    def test_markdown_twin_never_displaces_its_html_page(self):
+        pages, problems = self.site({
+            "index.html": doc("Главная"),
+            "guide.html": doc("Гид"),
+            "guide.md": "# Гид\n\n[a](/a/) [b](/b/) [c](/c/) " + "слово " * 300,
+        })
+        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages), ["/", "/guide/"])
+        self.assertFalse(any("один URL" in p for p in problems), problems)
+
+
+class TestFrontMatter(Site):
+    def test_toml_front_matter_is_parsed(self):
+        """`+++` — формат архетипа Hugo по умолчанию."""
+        pages, _ = self.site({"posts/a.md": (
+            '+++\ntitle = "Заголовок из TOML"\ndescription = \'Описание страницы\'\n'
+            "draft = false\ntags = [\"a\", \"b\"]\n+++\n\n# Раздел\n\nТекст страницы целиком.\n")})
+        page = pages[0]
+        self.assertEqual(page.title, "Заголовок из TOML")
+        self.assertEqual(page.description, "Описание страницы")
+        self.assertNotIn("title", page.text)
+        self.assertNotIn("+++", page.text)
+
+    def test_empty_front_matter_does_not_eat_body(self):
+        pages, _ = self.site({"a.md": "---\n---\n# Раздел\n\nТекст до черты.\n\n---\n\nТекст после черты.\n"})
+        self.assertIn("Текст до черты", pages[0].text)
+        self.assertIn("Текст после черты", pages[0].text)
+        self.assertEqual(pages[0].notes, [])
+
+
+class TestEncoding(Site):
+    def test_an_unusable_declared_charset_is_not_a_crash(self):
+        pages, _ = self.site({"index.html": doc("Главная").replace(
+            "<head>", '<head><meta charset="undefined">').encode("utf-8")})
+        self.assertEqual(pages[0].title, "Главная — страница")
+
+
 if __name__ == "__main__":
     unittest.main()

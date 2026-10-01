@@ -2,6 +2,9 @@
 """core, freshness, publish, portfolio, engines, install — English."""
 
 MESSAGES = {
+    "каталог {a0}/ пропущен как сборочный. Если проверять нужно собранный сайт — передай его каталог явно.":
+        "the {a0}/ directory was skipped as build output. If the built site is "
+        "what you want checked, pass that directory explicitly.",
     # ── core ──────────────────────────────────────────────────────────────────
     "--site {a0} — так не годится: нужен полный адрес со схемой.\n    Попробуй: --site https://{a1}":
         "--site {a0} won't do: a full address with the scheme is required.\n"
