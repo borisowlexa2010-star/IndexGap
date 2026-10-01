@@ -365,6 +365,18 @@ class TestOutputIsNotAWeapon(Fixture):
         self.assertEqual(self.run_cli(["check", root, "--site", SITE, "--out", out])[0], 0)
         self.assertEqual(self.run_cli(["check", root, "--site", SITE, "--out", out])[0], 0)
 
+    def test_a_report_pair_from_an_older_version_is_still_its_own(self):
+        """У отчётов прежних версий метки в JSON нет. Их узнают по соседнему
+        HTML-отчёту — в том числе названному без расширения."""
+        root = self.site()
+        for name in ("old.html", "old"):
+            out = os.path.join(self.dir, name)
+            self.assertEqual(self.run_cli(["check", root, "--site", SITE, "--out", out])[0], 0)
+            data = os.path.splitext(out)[0] + ".json"
+            with open(data, "w", encoding="utf-8") as fh:
+                fh.write('{"site": "https://example.com", "issues": []}')
+            self.assertEqual(self.run_cli(["check", root, "--site", SITE, "--out", out])[0], 0, name)
+
     def test_portfolio_does_not_overwrite_its_own_input(self):
         root = self.site()
         spec = self.write("pf.json", '{"projects": [{"name": "a", "root": "%s", '
