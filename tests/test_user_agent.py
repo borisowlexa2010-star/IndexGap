@@ -65,7 +65,7 @@ class TestUserAgent(unittest.TestCase):
 
     def test_indexnow_submission(self):
         capture = Capture(b"")
-        with mock.patch("urllib.request.urlopen", capture):
+        with mock.patch.object(publish, "_open", capture):
             publish.submit_indexnow(["https://example.com/a"], "https://example.com",
                                     "k" * 32, dry_run=False)
         self.assert_named(capture)

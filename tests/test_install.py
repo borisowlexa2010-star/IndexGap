@@ -191,7 +191,9 @@ class TestInstall(Fixture):
         install.run(self.dir)
         second = open(os.path.join(self.dir, ".gitignore"), encoding="utf-8").read()
         self.assertEqual(first, second)
-        self.assertIn(".indexgap-manifest.json", first)
+        self.assertIn("indexgap-check.html", first)
+        # Манифест от git не прячется: в нём история lastmod и отправок.
+        self.assertNotIn(".indexgap-manifest.json", first)
 
     def test_agents_md_is_updated_not_duplicated(self):
         self.pages()

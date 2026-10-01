@@ -318,7 +318,10 @@ def write_config(root: str, detected: dict, force: bool = False) -> tuple:
     return path, True
 
 
-GITIGNORE_LINES = (".indexgap-manifest.json", "indexgap-check.html", "indexgap-check.json",
+# Манифеста здесь нет намеренно: в нём записано, когда страница менялась и что
+# уже отправлено. Спрятанный от git, он пропадал при каждой чистой сборке, и
+# CI считал весь сайт новым при каждом деплое.
+GITIGNORE_LINES = ("indexgap-check.html", "indexgap-check.json",
                    "indexgap-doctor.html", "indexgap-doctor.json", "indexgap-portfolio.html",
                    "indexgap-portfolio.json", "indexgap-cite.json",
                    # Наряды перезаписываются каждым прогоном: держать их

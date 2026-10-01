@@ -126,6 +126,22 @@ def _shard_loc(base_url: str, public_prefix: str, name: str) -> str:
     return "/".join(parts)
 
 
+def foreign_sitemap(out_dir: str, manifest: dict) -> str:
+    """
+    Путь к sitemap.xml, который написал не пакет, — или пустая строка.
+
+    Своим файл считается, если он записан в манифесте: пакет заносит туда всё,
+    что создаёт. Файл без записи — чужой, и молча заменять его нельзя.
+    """
+    path = os.path.join(out_dir, "sitemap.xml")
+    if not os.path.isfile(path):
+        return ""
+    listed = (manifest or {}).get("_shards")
+    if isinstance(listed, list) and "sitemap.xml" in listed:
+        return ""
+    return path
+
+
 def build_sitemap(pages: list, out_dir: str, base_url: str,
                   manifest: dict = None, today: str = None,
                   public_prefix: str = "") -> dict:
@@ -291,6 +307,21 @@ def write_key_file(out_dir: str, key: str) -> str:
     return path
 
 
+def _open(req, timeout: int = 30):
+    """
+    Запрос без следования редиректам.
+
+    Редирект на POST выполнять нельзя: urllib превратил бы его в GET, получил
+    бы 200 от какой-нибудь страницы — и адреса отметились бы отправленными,
+    хотя не отправлено ничего.
+    """
+    class _Stay(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    return urllib.request.build_opener(_Stay).open(req, timeout=timeout)
+
+
 def submit_indexnow(urls: list, base_url: str, key: str,
                     key_location: str = None, dry_run: bool = True,
                     timeout: int = 30) -> dict:
@@ -305,7 +336,7 @@ def submit_indexnow(urls: list, base_url: str, key: str,
     key = check_key(key)
     host = urlparse(base_url).netloc
     key_location = key_location or f"{base_url.rstrip('/')}/{key}.txt"
-    results, accepted = [], []
+    results, accepted, pending = [], [], False
 
     for i in range(0, len(urls), INDEXNOW_BATCH):
         batch = urls[i:i + INDEXNOW_BATCH]
@@ -321,16 +352,23 @@ def submit_indexnow(urls: list, base_url: str, key: str,
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                results.append({"batch": len(batch), "status": resp.status})
+            with _open(req, timeout) as resp:
+                result = {"batch": len(batch), "status": resp.status}
                 if 200 <= resp.status < 300:
                     accepted.extend(batch)
+                if resp.status == 202:
+                    # Принято, но ключ ещё не проверен: если файл ключа не
+                    # откроется, адреса обработаны не будут.
+                    pending = True
+                    result["error"] = tr("принято, ключ ещё проверяется — убедись, "
+                                         "что файл ключа открывается по своему адресу")
+                results.append(result)
         except urllib.error.HTTPError as e:
             results.append({"batch": len(batch), "status": e.code,
                             "error": _explain_indexnow(e.code)})
             # Ошибка ключа или формата повторится на каждом батче — смысла
             # долбить сервер двадцатью заведомо провальными запросами нет.
-            if e.code in (400, 403, 422, 429) or e.code >= 500:
+            if e.code in (400, 403, 422, 429) or e.code >= 500 or 300 <= e.code < 400:
                 results.append({"batch": 0, "status": "stopped",
                                 "error": tr("остановился, чтобы не усугублять; принятые батчи сохранены")})
                 break
@@ -343,7 +381,7 @@ def submit_indexnow(urls: list, base_url: str, key: str,
             results.append({"batch": len(batch), "status": "network",
                             "error": f"{type(e).__name__}: {reason}"})
             break
-    return {"results": results, "accepted": accepted}
+    return {"results": results, "accepted": accepted, "pending": pending}
 
 
 def _explain_indexnow(code: int) -> str:
@@ -352,4 +390,8 @@ def _explain_indexnow(code: int) -> str:
         403: tr("ключ не найден по keyLocation — проверь, что файл лежит в корне и доступен"),
         422: tr("URL не принадлежат указанному host, либо ключ не совпадает"),
         429: tr("слишком часто — притормози и повтори позже"),
+        301: tr("сервер перенаправил запрос — ничего не отправлено"),
+        302: tr("сервер перенаправил запрос — ничего не отправлено"),
+        307: tr("сервер перенаправил запрос — ничего не отправлено"),
+        308: tr("сервер перенаправил запрос — ничего не отправлено"),
     }.get(code, tr("неизвестная ошибка"))
