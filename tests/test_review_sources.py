@@ -132,5 +132,100 @@ class TestCitationsUnderAnotherLabel(Fixture):
         self.assertEqual(sum(sum(v.values()) for v in result["cited"].values()), 15)
 
 
+class TestWhoseFile(Fixture):
+    def identify(self, name, header="URL,Clicks"):
+        from indexgap import sources
+        path = self.write(name, header + f"\n{SITE}/a,1\n")
+        return sources.identify(path, header.split(","))[0]
+
+    def test_domain_substring_in_filename_does_not_pick_a_tool(self):
+        """`bing` внутри `plumbing-pros.com` и `climbing.shop`, `gsc` внутри
+        `dogscare.com` — это имя сайта, а не инструмента."""
+        for name in ("plumbing-pros.com-organic.Pages-us.csv", "climbing.shop-top-pages.csv",
+                     "dogscare.com-top-pages.csv"):
+            self.assertEqual(self.identify(name), "", name)
+
+    def test_a_tool_named_in_the_file_is_still_found(self):
+        for name, tool in (("bing-pages.csv", "bing"), ("gsc_export.csv", "google"),
+                           ("example.com-Performance-on-Search-2026-09-24.csv", "google"),
+                           ("ahrefs-top-pages.csv", "ahrefs"),
+                           ("yandex-webmaster-pages.csv", "yandex"),
+                           ("google-analytics-landing.csv", "ga4"),
+                           ("internal_html.csv", "screamingfrog")):
+            self.assertEqual(self.identify(name), tool, name)
+
+    def test_unknown_source_label_is_reported(self):
+        path = self.write("pages.csv", f"URL\n{SITE}/a\n")
+        result = doctor.read_sources([f"gogle={path}"])
+        self.assertTrue(any("gogle" in n and "google" in n for n in result["notes"]),
+                        result["notes"])
+
+    def test_a_path_with_an_equals_sign_is_a_path(self):
+        from indexgap import sources
+        os.makedirs(os.path.join(self.dir, "x", "utm=1"))
+        path = os.path.join(self.dir, "x", "utm=1", "pages.csv")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(f"URL\n{SITE}/a\n")
+        self.assertEqual(sources.parse_spec(path), ("", path))
+        self.assertEqual(sources.parse_spec(f"google={path}"), ("google", path))
+
+
+class TestTables(Fixture):
+    def xlsx(self, name, sheets):
+        """sheets: {имя листа: [[(ссылка ячейки, значение), …], …]}"""
+        path = os.path.join(self.dir, name)
+        ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        with zipfile.ZipFile(path, "w") as zf:
+            for i, rows in enumerate(sheets, 1):
+                body = "".join(
+                    "<row>" + "".join(f'<c r="{ref}" t="inlineStr"><is><t>{value}</t></is></c>'
+                                      for ref, value in row) + "</row>" for row in rows)
+                zf.writestr(f"xl/worksheets/sheet{i}.xml",
+                            f"<worksheet {ns}><sheetData>{body}</sheetData></worksheet>")
+        return path
+
+    def test_xlsx_sparse_row_keeps_columns_aligned(self):
+        """Excel не пишет пустые ячейки: без чтения ссылки `D3` строка съезжает влево."""
+        path = self.xlsx("kw.xlsx", [[
+            [("A1", "Keyword"), ("B1", "Previous position"), ("C1", "Position"), ("D1", "URL")],
+            [("A2", "visa"), ("B2", "5"), ("C2", "3"), ("D2", f"{SITE}/a")],
+            [("A3", "rent"), ("C3", "7"), ("D3", f"{SITE}/b")],
+            [("A4", "flat"), ("C4", "9"), ("D4", f"{SITE}/c")],
+        ]])
+        self.assertEqual(doctor.read_indexed(path)["urls"],
+                         [f"{SITE}/a", f"{SITE}/b", f"{SITE}/c"])
+
+    def test_xlsx_picks_the_sheet_with_addresses(self):
+        path = self.xlsx("gsc.xlsx", [
+            [[("A1", "Top queries"), ("B1", "Clicks")], [("A2", "visa"), ("B2", "3")]],
+            [[("A1", "Top pages"), ("B1", "Clicks")], [("A2", f"{SITE}/a"), ("B2", "3")]],
+        ])
+        self.assertEqual(doctor.read_indexed(path)["urls"], [f"{SITE}/a"])
+
+    def test_ga4_comment_preamble_is_skipped(self):
+        path = self.write("ga4.csv",
+                          "# ----------------------------------------\n# Pages and screens\n"
+                          "# 20260701-20260930\n# ----------------------------------------\n\n"
+                          "Page path and screen class,Views,Users\n/a/,10,5\n/b/,3,2\n")
+        self.assertEqual(doctor.read_indexed(path, site=SITE)["urls"], [f"{SITE}/a/", f"{SITE}/b/"])
+
+    def test_headerless_list_keeps_its_first_url(self):
+        path = self.write("indexed.txt", "/locations/berlin/\n/locations/munich/\n/pages/a/\n")
+        self.assertEqual(len(doctor.read_indexed(path, site=SITE)["urls"]), 3)
+
+    def test_a_cell_too_large_for_csv_is_an_error_with_words(self):
+        from indexgap import core
+        path = self.write("big.csv", 'URL,Note\n' + f'{SITE}/a,"' + "x" * 200_000 + '"\n')
+        try:
+            doctor.read_indexed(path)
+        except core.SourceError:
+            pass
+
+    def test_citation_counts_with_thin_spaces(self):
+        path = self.write("AIPerformance_Pages.csv",
+                          f'"Page","Citations"\r\n"{SITE}/a","1\u00a0866"\r\n"{SITE}/b","1\u202f200"\r\n')
+        self.assertEqual(doctor.read_citations(path), {f"{SITE}/a": 1866, f"{SITE}/b": 1200})
+
+
 if __name__ == "__main__":
     unittest.main()

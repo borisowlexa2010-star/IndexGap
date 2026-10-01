@@ -115,7 +115,8 @@ TOOLS = {
 
     # аналитика
     "ga4":           {"kind": ANALYTICS, "title": "Google Analytics 4",
-                      "file": ("ga4", "analytics", "googleanalytics"),
+                      "file": ("ga4", "analytics", "googleanalytics", "google-analytics",
+                               "google_analytics"),
                       "header": ("page path", "landing page", "sessions",
                                  "views", "путь к странице", "сеансы")},
     "matomo":        {"kind": ANALYTICS, "title": "Matomo",
@@ -243,28 +244,61 @@ def _read_xlsx(path: str) -> list:
             sheets = sorted(n for n in names if _SHEET_RE.search(n))
             if not sheets:
                 raise SourceError(tr("{a0}: в книге нет ни одного листа.", a0=path))
-            root = core.parse_xml(_member(book, sheets[0], path))
-            rows = []
-            for row in root.iter(_XML_NS + "row"):
-                values = []
-                for cell in row.iter(_XML_NS + "c"):
-                    kind = cell.get("t")
-                    if kind == "inlineStr":
-                        node = cell.find(_XML_NS + "is")
-                        text = "".join(t.text or "" for t in node.iter(_XML_NS + "t")) \
-                            if node is not None else ""
-                    else:
-                        node = cell.find(_XML_NS + "v")
-                        text = node.text if node is not None and node.text else ""
-                        if kind == "s" and text.isdigit():
-                            index = int(text)
-                            text = shared[index] if index < len(shared) else ""
-                    values.append(text)
-                rows.append(values)
-            return rows
+            # В книге бывает несколько листов, и адреса не обязательно на
+            # первом: у выгрузки Search Console первым идёт лист запросов.
+            # Берётся тот, где адресов больше, — как и в архиве с CSV.
+            best, best_score = None, -1
+            for sheet in sheets:
+                rows = _sheet_rows(core.parse_xml(_member(book, sheet, path)), shared)
+                score = _url_score(rows)
+                if score > best_score:
+                    best, best_score = rows, score
+            return best
     except zipfile.BadZipFile:
         raise SourceError(
             tr("{a0}: файл начинается как zip-архив, но не открывается ни как xlsx, ни как книга Excel. Если это архив выгрузки — распакуй его и передай файл изнутри; если книга — пересохрани её или отдай CSV.", a0=path))
+
+
+def _column_of(ref: str) -> int:
+    """`D3` → 3: номер столбца из ссылки ячейки, с нуля. -1, если ссылки нет."""
+    letters = "".join(ch for ch in (ref or "") if ch.isalpha()).upper()
+    if not letters:
+        return -1
+    index = 0
+    for ch in letters:
+        index = index * 26 + (ord(ch) - ord("A") + 1)
+    return index - 1
+
+
+def _sheet_rows(root, shared: list) -> list:
+    """
+    Строки листа. Значение ставится в свой столбец по ссылке ячейки (`r="D3"`).
+
+    Excel, openpyxl и xlsxwriter пустые ячейки не пишут вовсе. Читай их подряд —
+    строка с пропуском съезжает влево, адрес попадает в чужой столбец, и
+    страница молча выпадает из выгрузки.
+    """
+    rows = []
+    for row in root.iter(_XML_NS + "row"):
+        values = []
+        for cell in row.iter(_XML_NS + "c"):
+            kind = cell.get("t")
+            if kind == "inlineStr":
+                node = cell.find(_XML_NS + "is")
+                text = "".join(t.text or "" for t in node.iter(_XML_NS + "t")) \
+                    if node is not None else ""
+            else:
+                node = cell.find(_XML_NS + "v")
+                text = node.text if node is not None and node.text else ""
+                if kind == "s" and text.isdigit():
+                    index = int(text)
+                    text = shared[index] if index < len(shared) else ""
+            column = _column_of(cell.get("r"))
+            if column > len(values) and column < 16384:
+                values.extend([""] * (column - len(values)))
+            values.append(text)
+        rows.append(values)
+    return rows
 
 
 def _read_lines(text: str) -> list:
@@ -368,6 +402,15 @@ def read_table(path: str) -> tuple:
 
 def _rows_from_text(text: str) -> list:
     """Текст таблицы → строки. Отдельно, потому что нужен и внутри архива."""
+    # GA4 начинает CSV с шапки из строк `# …` и пустой строки. Судить о том,
+    # таблица это или список, по первой физической строке нельзя: шапка
+    # превращала выгрузку в список из одной ячейки на строку.
+    lines = text.splitlines(keepends=True)
+    start = 0
+    while start < len(lines) and (not lines[start].strip()
+                                  or lines[start].lstrip().startswith("#")):
+        start += 1
+    text = "".join(lines[start:])
     first = text.splitlines()[0] if text.strip() else ""
     if not any(ch in first for ch in ",;\t|"):
         return _read_lines(text)
@@ -376,7 +419,13 @@ def _rows_from_text(text: str) -> list:
         dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t|")
     except csv.Error:
         dialect = csv.excel
-    return list(csv.reader(io.StringIO(text, newline=""), dialect))
+    # Предел модуля csv — 131 072 символа на ячейку. Ячейка длиннее (текст
+    # страницы в выгрузке краулера) роняла команду трейсбеком.
+    csv.field_size_limit(core.MAX_INPUT_BYTES)
+    try:
+        return list(csv.reader(io.StringIO(text, newline=""), dialect))
+    except csv.Error as exc:
+        raise SourceError(tr("таблица не читается ({a0})", a0=exc))
 
 
 def _url_score(rows: list) -> int:
@@ -510,10 +559,9 @@ def identify(path: str, header: list) -> tuple:
     if tool:
         return tool, kind, True
 
-    name = os.path.basename(path).lower()
-    for tool, meta in TOOLS.items():
-        if any(hint in name for hint in meta["file"]):
-            return tool, meta["kind"], True
+    named = _tool_in_name(path)
+    if named:
+        return named, TOOLS[named]["kind"], True
 
     scores = {}
     for tool, meta in TOOLS.items():
@@ -523,7 +571,11 @@ def identify(path: str, header: list) -> tuple:
         hints = tuple(h for h in meta["header"] if h not in GENERIC_HEADERS)
         if not hints:
             continue
-        score = sum(1 for h in lowered if any(hint in h for hint in hints))
+        # Признак голосует один раз, сколько бы столбцов его ни содержало:
+        # в выгрузке Ahrefs три столбца со словом position («Previous
+        # position», «Current position», «Position change»), и три голоса
+        # делали её Search Console.
+        score = sum(1 for hint in hints if any(hint in h for h in lowered))
         # Точное совпадение редкого заголовка весит больше общего вхождения.
         score += sum(1 for hint in hints if hint in lowered)
         if score:
@@ -534,6 +586,41 @@ def identify(path: str, header: list) -> tuple:
     if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
         return "", "", False
     return ranked[0][0], TOOLS[ranked[0][0]]["kind"], False
+
+
+# Домен сайта в начале имени: так называют файлы Search Console, Ahrefs и
+# Semrush. В нём случайно находились имена инструментов.
+_LEADING_DOMAIN = re.compile(r"^(?:[a-z0-9-]+\.)+[a-z]{2,}(?=[-_ .])")
+
+
+def _tool_in_name(path: str) -> str:
+    """
+    Инструмент, названный в имени файла целым словом, — или пустая строка.
+
+    Раньше искалась подстрока, и находилась она в имени сайта: `bing` в
+    `plumbing-pros.com` и `climbing.shop`, `gsc` в `dogscare.com`. Теперь
+    домен в начале имени отбрасывается, а совпадение должно быть словом.
+    Из нескольких берётся то, что стоит раньше, а при равенстве — длиннее:
+    `yandex-webmaster` — это Яндекс, `google-analytics` — аналитика.
+    """
+    name = os.path.splitext(os.path.basename(path).lower())[0]
+    name = _LEADING_DOMAIN.sub("", name)
+    best = None
+    for tool, meta in TOOLS.items():
+        for hint in meta["file"]:
+            found = re.search(r"(?<![a-z0-9а-яё])" + re.escape(hint) + r"(?![a-z0-9а-яё])", name)
+            if found:
+                rank = (found.start(), -len(hint))
+                if best is None or rank < best[0]:
+                    best = (rank, tool)
+    return best[1] if best else ""
+
+
+def nearest_tool(name: str) -> str:
+    """Самое похожее известное имя источника — для подсказки при опечатке."""
+    import difflib
+    close = difflib.get_close_matches((name or "").lower(), list(TOOLS) + ["gsc"], n=1, cutoff=0.6)
+    return close[0] if close else ""
 
 
 def kind_of(name: str) -> str:
@@ -553,6 +640,10 @@ def parse_spec(spec: str) -> tuple:
     `ahrefs=pages.xlsx`      -> ("ahrefs", "pages.xlsx")
     `exports/bing.csv`       -> ("", "exports/bing.csv") — определим сами
     """
+    # Путь, который существует, — путь, даже если в нём есть знак равенства:
+    # `x/utm=1/pages.csv` читался как метка `x/utm` и файл `1/pages.csv`.
+    if os.path.exists(spec):
+        return "", spec.strip()
     if "=" in spec:
         name, _, path = spec.partition("=")
         name = name.strip().lower()
