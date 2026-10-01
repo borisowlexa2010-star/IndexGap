@@ -91,5 +91,128 @@ class TestNotPages(Fixture):
         self.assertEqual(self.sitemap(stubbed), ["/", "/a/"])
 
 
+class Cli(Fixture):
+    def run_cli(self, argv, cwd=None):
+        import contextlib, io
+        from indexgap import cli
+        out = io.StringIO()
+        here = os.getcwd()
+        os.chdir(cwd or here)
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                try:
+                    code = cli.main(argv)
+                except SystemExit as exc:
+                    code = exc.code
+        finally:
+            os.chdir(here)
+        return code, out.getvalue()
+
+    def project(self):
+        self.pages({"indexgap.json": '{"site": "https://example.com", "pages": "./content"}',
+                    "content/index.md": md("Главная"), "content/a.md": md("Страница")})
+        return self.root
+
+
+class TestSitemapCommand(Cli):
+    def test_a_foreign_sitemap_is_not_overwritten(self):
+        """Все остальные команды записи по умолчанию ничего не пишут; `sitemap`
+        молча заменял sitemap.xml, который написал не он."""
+        root = self.project()
+        mine = os.path.join(root, "content", "sitemap.xml")
+        with open(mine, "w", encoding="utf-8") as fh:
+            fh.write("<urlset><url><loc>https://example.com/hand-written.html</loc></url></urlset>")
+        code, out = self.run_cli(["sitemap"], cwd=root)
+        self.assertEqual(code, 2)
+        self.assertIn("hand-written", open(mine, encoding="utf-8").read())
+        self.assertIn("--force", out)
+        code, _ = self.run_cli(["sitemap", "--force"], cwd=root)
+        self.assertEqual(code, 0)
+        self.assertNotIn("hand-written", open(mine, encoding="utf-8").read())
+        # Свой файл переписывается без вопросов.
+        self.assertEqual(self.run_cli(["sitemap"], cwd=root)[0], 0)
+
+    def test_fresh_checkout_keeps_lastmod_and_queue(self):
+        """Манифест лежит рядом с indexgap.json и не прячется от git: сборка в CI
+        начинает с чистого каталога, и без манифеста каждая страница была бы
+        «новой» при каждом деплое."""
+        root = self.project()
+        self.assertEqual(self.run_cli(["sitemap"], cwd=root)[0], 0)
+        self.assertTrue(os.path.isfile(os.path.join(root, ".indexgap-manifest.json")))
+        self.assertFalse(os.path.exists(os.path.join(root, "content", ".indexgap-manifest.json")))
+        from indexgap import install
+        self.assertNotIn(".indexgap-manifest.json", install.GITIGNORE_LINES)
+
+    def test_a_missing_manifest_is_said_out_loud(self):
+        root = self.project()
+        _, out = self.run_cli(["sitemap"], cwd=root)
+        self.assertIn("первый прогон", out)
+        _, again = self.run_cli(["sitemap"], cwd=root)
+        self.assertNotIn("первый прогон", again)
+
+    def test_send_without_a_manifest_needs_a_word(self):
+        from unittest import mock
+        root = self.project()
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("сеть")), \
+                mock.patch("urllib.request.OpenerDirector.open", side_effect=AssertionError("сеть")):
+            code, out = self.run_cli(["notify", "--key", "k" * 32, "--send", "--offline"], cwd=root)
+        self.assertEqual(code, 2)
+        self.assertIn("--first", out)
+
+    def test_an_old_manifest_beside_the_pages_is_still_found(self):
+        root = self.project()
+        old = os.path.join(root, "content", ".indexgap-manifest.json")
+        with open(old, "w", encoding="utf-8") as fh:
+            fh.write('{"_shards": ["sitemap.xml"]}')
+        self.assertEqual(self.run_cli(["sitemap"], cwd=root)[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(root, ".indexgap-manifest.json")))
+
+
+class TestFlatUrls(Fixture):
+    def test_sitemap_uses_declared_html_url_for_flat_files(self):
+        """`/about/` для `about.html` — 404 на GitHub Pages, S3 и обычном nginx."""
+        pages = self.pages({
+            "index.html": html("Главная", ["about.html"]),
+            "about.html": html("О нас", ["index.html"]).replace(
+                "<head>", '<head><link rel="canonical" href="https://example.com/about.html">'),
+            "team.html": html("Команда", ["index.html"]),
+        })
+        self.assertEqual(self.sitemap(pages), ["/", "/about.html", "/team/"])
+        self.assertEqual([i for i in checks.run_all(pages, SITE + "/")["issues"]
+                          if i[2] == "canonical-elsewhere"], [])
+
+
+class TestIndexNowAnswers(unittest.TestCase):
+    def submit(self, status=200, location=None):
+        import urllib.error
+        from unittest import mock
+
+        class Opener:
+            def open(self, request, timeout=None):
+                if status >= 300:
+                    raise urllib.error.HTTPError(request.full_url, status, "x",
+                                                 {"Location": location or ""}, None)
+                response = mock.MagicMock()
+                response.status = status
+                response.__enter__.return_value = response
+                return response
+
+        with mock.patch("urllib.request.build_opener", lambda *a: Opener()), \
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError("редирект пройден")):
+            return publish.submit_indexnow([SITE + "/a/"], SITE, "k" * 32, dry_run=False)
+
+    def test_redirected_post_is_not_acceptance(self):
+        outcome = self.submit(302, "https://elsewhere.example/")
+        self.assertEqual(outcome["accepted"], [])
+
+    def test_202_is_accepted_and_called_pending(self):
+        outcome = self.submit(202)
+        self.assertEqual(outcome["accepted"], [SITE + "/a/"])
+        self.assertTrue(outcome.get("pending"))
+
+    def test_http_403_marks_nothing(self):
+        self.assertEqual(self.submit(403)["accepted"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

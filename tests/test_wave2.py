@@ -191,7 +191,7 @@ class TestHalfDoneFixes(Fixture):
         saved = publish.INDEXNOW_BATCH
         publish.INDEXNOW_BATCH = 1
         try:
-            with mock.patch("urllib.request.urlopen", fake_urlopen):
+            with mock.patch.object(publish, "_open", fake_urlopen):
                 out = publish.submit_indexnow([f"{SITE}/a/", f"{SITE}/b/", f"{SITE}/c/"],
                                               SITE, "abcdef1234567890", dry_run=False)
         finally:

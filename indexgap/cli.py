@@ -480,13 +480,46 @@ def cmd_brief(args):
     return 0
 
 
+def _manifest_path(args, config_path: str = "") -> str:
+    """
+    Где лежит манифест.
+
+    Названный флагом — там, где назван. Уже существующий рядом со страницами —
+    остаётся там: так было раньше, и состояние терять нельзя. Иначе — рядом с
+    indexgap.json, в корне проекта: каталог со страницами генератор перед
+    сборкой стирает, а вместе с ним стиралась и вся история.
+    """
+    if getattr(args, "manifest", None):
+        return args.manifest
+    legacy = os.path.join(args.root, MANIFEST)
+    if os.path.isfile(legacy) or not config_path:
+        return legacy
+    return os.path.join(os.path.dirname(config_path), MANIFEST)
+
+
+def _first_run_note(manifest_path: str) -> None:
+    print(tr("  ! манифеста нет — первый прогон: всё считается новым, у всех страниц "
+             "сегодняшний lastmod."))
+    print(tr("    Он записан в {a0}. Закоммить его: без него в CI так будет при "
+             "каждой сборке.", a0=manifest_path))
+
+
 def cmd_sitemap(args):
-    apply_project_defaults(args)
+    config_path = apply_project_defaults(args)
     pages = _load(args)
-    manifest_path = os.path.join(args.root, MANIFEST)
+    manifest_path = _manifest_path(args, config_path)
+    first_run = not os.path.isfile(manifest_path)
     manifest = load_manifest(manifest_path)
     if manifest.pop("_broken", False):
         print(tr("  ! манифест был повреждён и прочитан как пустой — у всех страниц будет сегодняшний lastmod"))
+    foreign = publish.foreign_sitemap(args.out_dir or args.root, manifest)
+    if foreign and not args.force:
+        raise SourceError(tr(
+            "{a0} уже существует, и написал его не indexgap. Заменять без спроса не "
+            "стал.\n    Если заменить нужно — добавь --force; если нет — укажи другой "
+            "каталог через --out-dir.", a0=foreign))
+    if first_run:
+        _first_run_note(manifest_path)
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
                                    public_prefix=args.public_prefix)
@@ -504,10 +537,19 @@ def cmd_sitemap(args):
 
 
 def cmd_notify(args):
-    apply_project_defaults(args)
+    config_path = apply_project_defaults(args)
     pages = _load(args)
     key = publish.check_key(args.key)
-    manifest_path = os.path.join(args.root, MANIFEST)
+    manifest_path = _manifest_path(args, config_path)
+    first_run = not os.path.isfile(manifest_path)
+    if first_run and args.send and not args.first:
+        raise SourceError(tr(
+            "Манифеста {a0} нет, поэтому новыми считаются все страницы, и --send "
+            "отправил бы сайт целиком.\n    Если это и есть первая отправка — добавь "
+            "--first. Если манифест потерялся (чистая сборка в CI) — верни его: "
+            "повторно слать весь сайт при каждом деплое нельзя.", a0=manifest_path))
+    if first_run:
+        _first_run_note(manifest_path)
     manifest = load_manifest(manifest_path)
     if manifest.pop("_broken", False):
         print(tr("  ! манифест повреждён и прочитан как пустой — очередь считается с нуля."))
@@ -555,7 +597,8 @@ def cmd_notify(args):
         save_manifest(manifest_path,
                       publish.mark_notified(manifest, pages, accepted))
     if len(accepted) == len(urls):
-        print(tr("Отправлено, очередь очищена."))
+        print(tr("Принято, ключ ещё проверяется (202). Очередь очищена.")
+              if outcome.get("pending") else tr("Отправлено, очередь очищена."))
         return 0
     print(tr("Принято {a0} из {a1}. Принятые отмечены и повторно не поедут; остальные останутся в очереди.", a0=len(accepted), a1=len(urls)))
     return 1
@@ -1142,6 +1185,9 @@ def build_parser():
     p = sub.add_parser("sitemap", help=tr("собрать sitemap с шардингом и честным lastmod"))
     common(p)
     p.add_argument("--out-dir", help=tr("куда писать; по умолчанию рядом со страницами"))
+    p.add_argument("--force", action="store_true",
+                   help=tr("заменить sitemap.xml, даже если его написал не indexgap"))
+    p.add_argument("--manifest", help=tr("путь к манифесту; по умолчанию рядом с indexgap.json"))
     p.add_argument("--public-prefix", default="",
                    help=tr("путь, по которому файлы будут доступны на сайте, если --out-dir не корень публикации"))
     p.set_defaults(func=cmd_sitemap)
@@ -1156,6 +1202,9 @@ def build_parser():
     p.add_argument("--write-key", action="store_true", help=tr("создать файл ключа"))
     p.add_argument("--send", action="store_true",
                    help=tr("действительно отправить; без него — пробный прогон"))
+    p.add_argument("--first", action="store_true",
+                   help=tr("первая отправка: манифеста ещё нет, и уйти должен весь сайт"))
+    p.add_argument("--manifest", help=tr("путь к манифесту; по умолчанию рядом с indexgap.json"))
     p.add_argument("--offline", action="store_true",
                    help=tr("не ходить за реестром участников, взять встроенный список"))
     p.set_defaults(func=cmd_notify)

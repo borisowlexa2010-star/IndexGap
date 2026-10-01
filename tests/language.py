@@ -12,6 +12,8 @@
 
 import os
 
+import nonetwork  # noqa: F401  — запрещает тестам выход в сеть
+
 os.environ["INDEXGAP_LANG"] = "ru"
 
 from indexgap import i18n  # noqa: E402

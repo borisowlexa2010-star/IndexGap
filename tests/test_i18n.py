@@ -25,6 +25,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import nonetwork  # noqa: F401  — запрещает тестам выход в сеть
 from indexgap import cli, i18n, settings, generate, sources
 from indexgap.locale import en
 

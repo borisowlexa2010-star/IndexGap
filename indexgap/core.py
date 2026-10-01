@@ -990,6 +990,15 @@ def load_page(path: str, root: str, base_url: str) -> Page:
     base_for_links = urljoin(location, base_href) if base_href else location
     if page.canonical:
         page.canonical = urljoin(base_for_links, page.canonical)
+        # Адрес страницы — тот, который она сама объявляет, если это она же:
+        # `about.html` с canonical на `/about.html` отдаётся именно так, а
+        # `/about/` на GitHub Pages, S3 и обычном nginx — это 404, и раньше
+        # в sitemap уезжал он.
+        own = urlsplit(page.canonical)
+        if (url_key(page.canonical) == page.key and not own.query
+                and own.path != urlsplit(page.url).path):
+            site_parts = urlsplit(page.url)
+            page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own.path, "", ""))
     seen = set()
     for href in hrefs:
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):

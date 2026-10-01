@@ -2,6 +2,32 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    "    Он записан в {a0}. Закоммить его: без него в CI так будет при каждой сборке.":
+        "    It is written to {a0}. Commit it: without it CI will do this on every build.",
+    "  ! манифеста нет — первый прогон: всё считается новым, у всех страниц сегодняшний lastmod.":
+        "  ! there is no manifest — a first run: everything counts as new and every "
+        "page gets today's lastmod.",
+    "{a0} уже существует, и написал его не indexgap. Заменять без спроса не стал.\n    Если заменить нужно — добавь --force; если нет — укажи другой каталог через --out-dir.":
+        "{a0} already exists and indexgap did not write it. It was not replaced "
+        "without asking.\n    To replace it, add --force; otherwise choose another "
+        "directory with --out-dir.",
+    "Манифеста {a0} нет, поэтому новыми считаются все страницы, и --send отправил бы сайт целиком.\n    Если это и есть первая отправка — добавь --first. Если манифест потерялся (чистая сборка в CI) — верни его: повторно слать весь сайт при каждом деплое нельзя.":
+        "There is no manifest at {a0}, so every page counts as new and --send would "
+        "submit the whole site.\n    If this really is the first submission, add "
+        "--first. If the manifest was lost (a clean build in CI), restore it: the "
+        "whole site must not be resubmitted on every deploy.",
+    "Принято, ключ ещё проверяется (202). Очередь очищена.":
+        "Accepted, key validation pending (202). The queue is clear.",
+    "заменить sitemap.xml, даже если его написал не indexgap":
+        "replace sitemap.xml even if indexgap did not write it",
+    "первая отправка: манифеста ещё нет, и уйти должен весь сайт":
+        "first submission: there is no manifest yet and the whole site should go",
+    "принято, ключ ещё проверяется — убедись, что файл ключа открывается по своему адресу":
+        "accepted, key validation pending — make sure the key file opens at its address",
+    "путь к манифесту; по умолчанию рядом с indexgap.json":
+        "path to the manifest; next to indexgap.json by default",
+    "сервер перенаправил запрос — ничего не отправлено":
+        "the server redirected the request — nothing was submitted",
     "\n! Адрес сайта определить не удалось.":
         "\n! Could not determine the site address.",
     "\n! Каталог со страницами найти не удалось.":
