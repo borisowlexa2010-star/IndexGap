@@ -23,12 +23,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections import Counter, defaultdict, deque
 
 from . import hreflang
-from .core import EMPTY_MOUNT, NOT_LIVE, drop_spans, is_dense
+from .core import EMPTY_MOUNT, NOT_LIVE, SourceError, drop_spans, is_dense
 from .core import url_key
 from .publish import indexable
 from .settings import display_width, text_volume
@@ -935,9 +936,55 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
     return kept
 
 
+def validate_config(cfg: dict) -> list:
+    """
+    Пороги, вписанные руками: либо действуют, либо названы.
+
+    Ключ с опечаткой раньше молча не действовал, число строкой роняло прогон
+    трейсбеком, а `near_duplicate: 80` вместо `0.8` тихо выключало находку.
+    Возвращает заметки о незнакомых ключах; на невозможные значения отвечает
+    ошибкой со словами.
+    """
+    import difflib
+    notes = []
+    for key, value in (cfg or {}).items():
+        if key.startswith("_"):
+            continue
+        if key not in CONFIG:
+            close = difflib.get_close_matches(key, list(CONFIG), n=1, cutoff=0.7)
+            notes.append(tr("настройка «{a0}» мне не знакома и не действует", a0=key)
+                         + (tr(" — возможно, имелось в виду «{a0}»", a0=close[0]) if close else ""))
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SourceError(tr("настройка «{a0}» должна быть числом, а в конфиге стоит {a1}",
+                                 a0=key, a1=json.dumps(value, ensure_ascii=False)))
+    merged = {**CONFIG, **{k: v for k, v in (cfg or {}).items() if k in CONFIG}}
+
+    def need(ok, key, rule):
+        if not ok:
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=key, a1=merged[key], a2=rule))
+
+    for key in ("near_duplicate", "similar", "boilerplate_share", "unique_share_min",
+                "slot_share", "slot_floor"):
+        need(0 < merged[key] <= 1, key, tr("нужна доля от 0 до 1 — например 0.8, а не 80"))
+    need(merged["similar"] <= merged["near_duplicate"], "similar",
+         tr("порог «похожих» не может быть выше порога почти-дублей"))
+    for key in ("shingle_size", "minhash_perms", "lsh_bands", "thin_words",
+                "boilerplate_min_pages", "max_click_depth", "title_min", "description_min"):
+        need(merged[key] >= 1, key, tr("нужно целое число не меньше 1"))
+    need(merged["lsh_bands"] <= merged["minhash_perms"], "lsh_bands",
+         tr("полос не может быть больше, чем перестановок (minhash_perms)"))
+    need(merged["title_min"] < merged["title_max"], "title_max",
+         tr("верхняя граница должна быть больше нижней"))
+    need(merged["description_min"] < merged["description_max"], "description_max",
+         tr("верхняя граница должна быть больше нижней"))
+    return notes
+
+
 def run_all(pages: list, home_url: str = None, cfg: dict = None,
             language: str = "") -> dict:
     """Единая точка входа: всё, что считается локально, без сети."""
+    unknown = validate_config(cfg)
     cfg = {**CONFIG, **(cfg or {})}
     graph = link_graph(pages, home_url)
     words = trimmed_words(pages)
@@ -952,7 +999,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     regional = {tuple(sorted(pair)) for pair in multi["regional_pairs"]}
     issues = technical_issues(pages, cfg, language, shells=shells)
     issues += issues_hreflang
-    notes = list(dupes["notes"]) + list(multi["notes"])
+    notes = list(dupes["notes"]) + list(multi["notes"]) + unknown
     for url in sorted(shells):
         issues.append(("critical", url, "js-shell",
                        tr("в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют")))

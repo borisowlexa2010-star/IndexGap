@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import Counter, defaultdict
 
 from . import aeo, checks, content, doctor, freshness, profiles, report, settings
@@ -91,6 +92,15 @@ def read_portfolio(path: str) -> list:
         ]
         out.append(resolved)
     return out
+
+
+def report_name(name: str) -> str:
+    """
+    Имя файла отчёта из имени проекта. Имя приходит из чужого JSON, а файл
+    пишется в каталог отчётов: `../../escaped` писал за его пределами.
+    """
+    safe = re.sub(r"[^\w.-]+", "-", str(name or ""), flags=re.UNICODE).strip(".-")
+    return safe or "project"
 
 
 def run_one(spec: dict, quiet: bool = False) -> dict:

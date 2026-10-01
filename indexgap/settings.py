@@ -21,6 +21,7 @@ import json
 import os
 import re
 from collections import Counter
+from .core import SourceError
 from .i18n import tr
 
 CONFIG_NAMES = ("indexgap.json", ".indexgap.json")
@@ -86,9 +87,11 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
         with open(path, "r", encoding="utf-8-sig") as fh:
             user = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(tr("Не удалось прочитать {a0}: {a1}", a0=path, a1=exc))
+        # SourceError, а не SystemExit: её ловит и команда, и портфель. Битый
+        # конфиг одного проекта обрывал прогон всех остальных.
+        raise SourceError(tr("Не удалось прочитать {a0}: {a1}", a0=path, a1=exc))
     if not isinstance(user, dict):
-        raise SystemExit(tr("{a0}: ожидался объект верхнего уровня.", a0=path))
+        raise SourceError(tr("{a0}: ожидался объект верхнего уровня.", a0=path))
     config.update(user)
     config["_path"] = path
     return config

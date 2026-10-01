@@ -1010,7 +1010,8 @@ def cmd_portfolio(args):
     results = []
     for spec in specs:
         if not spec.get("out") and args.reports:
-            spec["out"] = os.path.join(args.reports, f"{spec['name']}.html")
+            spec["out"] = os.path.join(args.reports,
+                                       portfolio.report_name(spec["name"]) + ".html")
         result = portfolio.run_one(spec)
         results.append(result)
         if result["error"]:

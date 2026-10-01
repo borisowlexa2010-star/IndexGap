@@ -6,15 +6,28 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   unittest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    # Windows пока только наблюдается: пакет обещает работать везде, но на
+    # Windows набор ещё ни разу не запускался. Красный результат там — список
+    # дел, а не причина не выпускать.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         # 3.9 is the floor the package promises; 3.14 is the ceiling it must
         # not break on. 3.11 sits in the middle so a break has a bisect point.
         python-version: ["3.9", "3.11", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,6 +36,7 @@ jobs:
       - name: Run the suite
         run: python -m unittest discover -s tests -v
       - name: Check the CLI starts and every command is reachable
+        shell: bash
         run: |
           python -m indexgap --help
           for cmd in init plan check brief sitemap notify portfolio profiles doctor cite; do
@@ -46,10 +60,12 @@ jobs:
           python tools/build_docs.py
       - name: It must match what is committed
         run: |
-          if ! git diff --quiet; then
+          # `git status`, а не `git diff`: новый сгенерированный файл, который
+          # забыли добавить, diff не видит вовсе.
+          if [ -n "$(git status --porcelain)" ]; then
             echo "::error::Сгенерированное разошлось с кодом. Запусти локально:"
             echo "::error::  python3 tools/sync_plugin.py && python3 tools/build_docs.py"
-            git diff --stat
+            git status --short
             exit 1
           fi
           echo "docs/ и skills/ соответствуют коду"
