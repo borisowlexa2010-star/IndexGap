@@ -28,7 +28,7 @@ import re
 from collections import Counter, defaultdict, deque
 
 from . import hreflang
-from .core import drop_spans, is_dense
+from .core import EMPTY_MOUNT, NOT_LIVE, drop_spans, is_dense
 from .core import url_key
 from .publish import indexable
 from .settings import display_width, text_volume
@@ -371,8 +371,6 @@ _REFRESH = re.compile(r"http-equiv\s*=\s*[\"']?refresh", re.I)
 _REFRESH_CONTENT = re.compile(
     r"content\s*=\s*[\"']\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?([^\"'\s>]+)", re.I)
 # Где «редирект» — не редирект: его показывают, выключили или держат про запас.
-_NOT_LIVE = (("<!--", "-->"), ("<noscript", "</noscript>"), ("<pre", "</pre>"),
-             ("<code", "</code>"), ("<textarea", "</textarea>"))
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 
 
@@ -417,7 +415,7 @@ def _redirect_target(page) -> str:
                and bool(_REFRESH.search(raw)))
     if not by_script and not by_meta:
         return ""
-    live = drop_spans(raw, _NOT_LIVE)
+    live = drop_spans(raw, NOT_LIVE)
     if by_meta:
         for tag in _META_TAG.findall(live):
             if not _REFRESH.search(tag):
@@ -566,11 +564,6 @@ def _length_bounds(cfg: dict, language: str = "") -> dict:
 _AMP_RE = re.compile(r"<html[^>]*\s(amp|⚡)[\s=>]", re.I)
 
 
-_EMPTY_MOUNT = re.compile(
-    r"<div[^>]*\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?[^>]*>\s*</div>",
-    re.I)
-
-
 def is_shell(page, cfg: dict = None) -> bool:
     """
     Страница, которую рисует JavaScript: в исходном HTML текста нет.
@@ -598,7 +591,7 @@ def is_shell(page, cfg: dict = None) -> bool:
     scripts = blocks.get("script", 0)
     # И наоборот: сборка Vite — пустой узел и один модульный скрипт. Порог
     # «три скрипта» её не видел.
-    if volume < 5 and (scripts >= 1 or _EMPTY_MOUNT.search(page.raw or "")):
+    if volume < 5 and (scripts >= 1 or EMPTY_MOUNT.search(page.raw or "")):
         return scripts >= 1
     return scripts >= cfg["shell_scripts"]
 

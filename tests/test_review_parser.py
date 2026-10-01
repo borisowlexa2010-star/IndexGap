@@ -197,5 +197,60 @@ class TestEncoding(Site):
         self.assertEqual(pages[0].title, "Главная — страница")
 
 
+class TestSourceIsNotKept(Site):
+    """
+    Исходник страницы держался в памяти целиком: на каталоге из 4 273 страниц
+    по 400 КБ это 3,4 ГБ из 4,4. Проверкам от него нужны считаные теги —
+    их и стоит хранить.
+    """
+
+    FILLER = "<div class=\"card\"><span>ячейка таблицы</span></div>" * 4000
+
+    def one(self, html):
+        return self.site({"index.html": html})[0][0]
+
+    def test_a_large_page_keeps_a_small_source(self):
+        page = self.one(f"<html lang=\"ru\"><head><title>Большая страница</title></head><body>"
+                        f"<main><p>{BODY}</p>{self.FILLER}</main></body></html>")
+        self.assertGreater(len(self.FILLER), 200_000)
+        self.assertLess(len(page.raw), 2_000)
+        self.assertIn("ячейка", page.text)
+
+    def test_what_the_checks_read_from_the_source_survives(self):
+        from indexgap import aeo, checks, content, freshness
+        stub = self.one('<html><head><title>x</title><meta http-equiv="refresh" '
+                        f'content="0; url=/new/"></head><body>{self.FILLER}</body></html>')
+        self.assertEqual(checks.redirect_target(stub), SITE + "/new/")
+
+        next_stub = self.one('<html><head><title>x</title></head><body><script>self.__next_f.push('
+                             '[1,"NEXT_REDIRECT;replace;/en;307;"])</script></body></html>')
+        self.assertEqual(checks.redirect_target(next_stub), SITE + "/en")
+
+        hidden = self.one('<html><head><title>Страница</title><noscript><meta http-equiv="refresh" '
+                          f'content="0; url=/nojs/"></noscript></head><body><main><p>{BODY}</p>'
+                          f"{self.FILLER}</main></body></html>")
+        self.assertEqual(checks.redirect_target(hidden), "")
+
+        amp = self.one(f"<html amp lang=\"ru\"><head><title>AMP</title>{'<script></script>' * 3}"
+                       "</head><body><p>коротко</p></body></html>")
+        self.assertFalse(checks.is_shell(amp))
+
+        shell = self.one('<html><head><title>App</title></head><body><div id="root"></div>'
+                         '<script type="module" src="/a.js"></script></body></html>')
+        self.assertTrue(checks.is_shell(shell))
+
+        dated = self.one(f'<html><head><title>Дата</title></head><body><main><p>{BODY}</p>'
+                         f'<time datetime="2026-03-02">2 марта</time>{self.FILLER}</main></body></html>')
+        self.assertEqual([i[2] for i in aeo.check_provenance(dated)], ["no-author"])
+
+        todo = self.one(f"<html><head><title>Черновик</title></head><body><main><p>{BODY}</p>"
+                        f"<p>TODO: дописать раздел</p>{self.FILLER}</main></body></html>")
+        self.assertEqual([i[2] for i in content.check_brief([todo]) if i[2] == "brief-left"],
+                         ["brief-left"])
+        code = self.one(f"<html><head><title>Код</title></head><body><main><p>{BODY}</p>"
+                        f"<pre>// TODO: refactor</pre>{self.FILLER}</main></body></html>")
+        self.assertEqual([i[2] for i in content.check_brief([code]) if i[2] == "brief-left"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

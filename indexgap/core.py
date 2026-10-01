@@ -893,6 +893,58 @@ def drop_spans(text: str, spans) -> str:
     return "".join(out)
 
 
+# Следы недописанной страницы и то, где их искать не нужно.
+BRIEF_MARKERS = ("БРИФ ДЛЯ АГЕНТА", "BRIEF FOR THE AGENT", "<!-- TODO", "TODO:")
+NOT_PROSE = (("<script", "</script>"), ("<style", "</style>"), ("<pre", "</pre>"),
+             ("<code", "</code>"))
+# Где разметка — не разметка: её показывают, выключили или держат про запас.
+NOT_LIVE = (("<!--", "-->"), ("<noscript", "</noscript>"), ("<pre", "</pre>"),
+            ("<code", "</code>"), ("<textarea", "</textarea>"))
+EMPTY_MOUNT = re.compile(
+    r"<div[^<>]{0,300}\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?"
+    r"[^<>]{0,300}>\s*</div>", re.I)
+_HTML_OPEN = re.compile(r"<html\b[^<>]{0,2000}>", re.I)
+_REFRESH_META = re.compile(r"<meta\b[^<>]{0,2000}>", re.I)
+_TIME_TAG = re.compile(r"<time\b[^<>]{0,500}>", re.I)
+_NEXT_SCRIPT = re.compile(r"NEXT_REDIRECT[^<]{0,300}")
+
+
+def essence(raw: str) -> str:
+    """
+    То немногое, что проверки читают из исходника страницы.
+
+    Исходник держался в памяти целиком: на каталоге из 4 273 страниц по 400 КБ
+    это 3,4 ГБ из 4,4. Проверкам от него нужны открывающий <html> (AMP),
+    мета-переадресация и команда редиректа Next.js, теги <time>, пустой узел
+    под приложение и следы недописанной страницы. Всё остальное уже разобрано
+    в поля страницы.
+
+    Переадресация берётся только из живой разметки: тег внутри <noscript> или
+    комментария здесь не сохраняется — иначе, вырванный из окружения, он
+    выглядел бы настоящим.
+    """
+    if len(raw) < 4096:
+        return raw
+    parts = []
+    opener = _HTML_OPEN.search(raw)
+    if opener:
+        parts.append(opener.group(0))
+    lowered_hint = "http-equiv" in raw or "HTTP-EQUIV" in raw or "Http-Equiv" in raw
+    if lowered_hint or "NEXT_REDIRECT" in raw:
+        live = drop_spans(raw, NOT_LIVE)
+        if lowered_hint:
+            parts += [m for m in _REFRESH_META.findall(live) if "equiv" in m.lower()]
+        parts += [f"<script>{m}</script>" for m in _NEXT_SCRIPT.findall(live)]
+    parts += _TIME_TAG.findall(raw)
+    mount = EMPTY_MOUNT.search(raw)
+    if mount:
+        parts.append(mount.group(0))
+    if any(marker in raw for marker in BRIEF_MARKERS):
+        prose = drop_spans(raw, NOT_PROSE)
+        parts += [marker for marker in BRIEF_MARKERS if marker in prose]
+    return "\n".join(parts)
+
+
 def _strip_markdown(md: str) -> str:
     md = _strip_fences(md)
     md = re.sub(r"`[^`\n]{0,2000}`", " ", md)
@@ -1169,6 +1221,8 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                 continue
             if REPORT_MARK in (page.raw or "")[:400]:
                 continue
+            if not path.lower().endswith((".md", ".markdown")):
+                page.raw = essence(page.raw)
             loaded.append(page)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как

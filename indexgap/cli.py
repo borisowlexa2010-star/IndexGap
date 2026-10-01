@@ -270,13 +270,15 @@ def check_json_path(path: str) -> str:
         head = ""
     if f'"{JSON_MARK}"' in head or os.path.basename(path).startswith("indexgap-"):
         return path
-    sibling = os.path.splitext(path)[0] + ".html"
-    try:
-        with open(sibling, "r", encoding="utf-8", errors="ignore") as fh:
-            if REPORT_MARK in fh.read(4096):
-                return path
-    except OSError:
-        pass
+    # Отчёт рядом может зваться и без расширения: `--out report`.
+    stem = os.path.splitext(path)[0]
+    for sibling in (stem + ".html", stem + ".htm", stem):
+        try:
+            with open(sibling, "r", encoding="utf-8", errors="ignore") as fh:
+                if REPORT_MARK in fh.read(4096):
+                    return path
+        except OSError:
+            continue
     raise SourceError(tr(
         "{a0} уже существует и это не данные отчёта indexgap.\n    Перезаписывать "
         "чужой файл я не буду — укажи другое имя через --out.", a0=path))
