@@ -360,6 +360,23 @@ def write(briefs: list, out_dir: str, limit: int = 0) -> dict:
         skipped = len(pages) - limit
         pages = pages[:limit]
 
+    # Наряды прошлого прогона, которых в этом нет, убираются: задание на
+    # страницу, которую уже удалили или починили, — устаревшее задание.
+    # Убирается только то, что несёт метку наряда; чужие файлы не трогаются.
+    keep = {os.path.normpath(os.path.join(root, b["name"])) for b in shared + pages}
+    for base, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.normpath(os.path.join(base, name))
+            if path in keep or not name.endswith(".md"):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                    mine = fh.read(len(HEADER) + 8).lstrip().startswith(HEADER)
+                if mine:
+                    os.remove(path)
+            except OSError:
+                pass
+
     written = []
     for brief in shared + pages:
         path = os.path.join(root, brief["name"])

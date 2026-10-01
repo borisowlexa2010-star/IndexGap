@@ -39,6 +39,16 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
+      # Собранное обязано нести номер из тега и ставиться: версия берётся из
+      # пакета при сборке, и проверить это можно только на готовом колесе.
+      - name: The wheel carries the tag's version and installs
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ls dist/
+          ls dist/indexgap-"$tag"-py3-none-any.whl
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install --quiet dist/indexgap-"$tag"-py3-none-any.whl
+          /tmp/wheel-check/bin/indexgap --version | grep -F "$tag"
       - uses: actions/upload-artifact@v4
         with:
           name: dist

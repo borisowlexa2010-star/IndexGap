@@ -1,0 +1,11 @@
+# В архив исходников тесты кладутся целиком, вместе с общими модулями:
+# без tests/language.py и tests/nonetwork.py из распакованного архива
+# запускалась только десятая часть набора.
+include LICENSE CHANGELOG.md README.md README.ru.md
+recursive-include tests *.py
+recursive-include examples *
+recursive-include indexgap/skills *.md
+# Тест обёртки плагина сверяет её с генератором — оба нужны рядом с тестами.
+recursive-include tools *.py
+recursive-include skills *.md
+recursive-include .claude-plugin *

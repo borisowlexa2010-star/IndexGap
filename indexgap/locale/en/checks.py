@@ -2,6 +2,19 @@
 """checks, sources, profiles — English."""
 
 MESSAGES = {
+    "верхняя граница должна быть больше нижней": "the upper bound must be above the lower one",
+    "настройка «{a0}» = {a1}: {a2}": "setting “{a0}” = {a1}: {a2}",
+    "настройка «{a0}» должна быть числом, а в конфиге стоит {a1}":
+        "setting “{a0}” must be a number, but the config has {a1}",
+    "настройка «{a0}» мне не знакома и не действует":
+        "setting “{a0}” is not one I know and has no effect",
+    "нужна доля от 0 до 1 — например 0.8, а не 80":
+        "a share between 0 and 1 is needed — 0.8, for instance, not 80",
+    "нужно целое число не меньше 1": "a whole number of at least 1 is needed",
+    "полос не может быть больше, чем перестановок (minhash_perms)":
+        "there cannot be more bands than permutations (minhash_perms)",
+    "порог «похожих» не может быть выше порога почти-дублей":
+        "the “similar” threshold cannot be above the near-duplicate one",
     "у {a0} страниц(ы) на языках, где страниц меньше {a1}, — на такой выборке вердикт был бы случайным":
         "for {a0} page(s) in languages with fewer than {a1} pages — on such a "
         "sample the verdict would be chance",
