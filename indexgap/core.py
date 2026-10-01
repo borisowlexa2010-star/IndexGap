@@ -233,6 +233,13 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
     return normalize_url(url, directory=True)
 
 
+def _file_url(path: str, root: str, base_url: str) -> str:
+    """Адрес самого файла, с именем и расширением: от него считаются ссылки."""
+    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    rel = "/".join(quote(seg, safe="~-._") for seg in rel.split("/"))
+    return urljoin(base_url.rstrip("/") + "/", rel)
+
+
 def check_site_url(site: str) -> str:
     """
     Адрес сайта нужен целиком, со схемой. `example.com` молча даёт URL вида
@@ -365,6 +372,11 @@ class _Extractor(HTMLParser):
         # подпись автора, оглавление. Текст их остаётся в странице, но абзацем
         # не становится.
         self._aside_stack = []
+        # Открытые элементы по именам. Глубина — длина этого стека, а не счётчик
+        # «открыл минус закрыл»: <img> и <br> не закрываются вовсе, <p> и <li>
+        # закрывать не обязательно, и счётчик уезжал на единицу с каждым таким
+        # тегом — подвал попадал в текст страницы и в её хэш.
+        self._open = []
 
     # -- служебное ------------------------------------------------------------
 
@@ -378,15 +390,45 @@ class _Extractor(HTMLParser):
         # Абзацы собираются только внутри основного блока: иначе первым абзацем
         # страницы оказывался пункт меню, и проверка прямого ответа выносила
         # вердикт по хлебным крошкам.
-        if (self._in_main or not self._saw_main) and not self._aside_stack:
-            self._para_buf.append((text, self._in_main))
+        if self._in_main or not self._saw_main:
+            self._para_buf.append((text, self._in_main, bool(self._aside_stack)))
         self._glue = True
 
     def _flush_paragraph(self):
         buf, self._para_buf = self._para_buf, []
-        text = re.sub(r"\s+", " ", " ".join(t for t, _ in buf)).strip()
+        text = re.sub(r"\s+", " ", " ".join(t for t, _, _ in buf)).strip()
         if text:
-            self._paragraphs.append((text, any(m for _, m in buf)))
+            self._paragraphs.append((text, any(m for _, m, _ in buf),
+                                     any(a for _, _, a in buf)))
+
+    def _close_to(self, index: int):
+        """Закрывает всё открытое выше `index` и то, что на этом держалось."""
+        del self._open[index:]
+        self._depth = len(self._open)
+        while self._main_stack and self._main_stack[-1][1] > self._depth:
+            self._main_stack.pop()
+        if self._aside_stack and self._aside_stack[-1] > self._depth:
+            self._flush_paragraph()
+            while self._aside_stack and self._aside_stack[-1] > self._depth:
+                self._aside_stack.pop()
+
+    def _imply_end(self, tag: str):
+        """
+        Необязательные закрывающие теги: новый <p> закрывает открытый <p>,
+        новый <li> — предыдущий <li>. Минификаторы их и не пишут. Без этого
+        незакрытый `<p class="byline">` оставался открытым до конца родителя
+        и уносил с собой все абзацы после себя.
+        """
+        closes = _IMPLIED_END.get(tag)
+        if not closes:
+            return
+        for index in range(len(self._open) - 1, -1, -1):
+            name = self._open[index]
+            if name in closes:
+                self._close_to(index)
+                return
+            if name not in INLINE_TAGS and name not in ("a", "span"):
+                return
 
     # -- разбор ---------------------------------------------------------------
 
@@ -410,7 +452,10 @@ class _Extractor(HTMLParser):
         if tag not in INLINE_TAGS:
             self._glue = False
 
-        self._depth += 1
+        if tag not in VOID_TAGS:
+            self._imply_end(tag)
+            self._open.append(tag)
+            self._depth = len(self._open)
         if tag not in VOID_TAGS and (tag in MAIN_TAGS
                                      or a.get("role", "").lower() == "main"):
             self._main_stack.append((tag, self._depth))
@@ -470,15 +515,15 @@ class _Extractor(HTMLParser):
                 self._anchor_buf = ""
 
     def handle_startendtag(self, tag, attrs):
+        # `<path/>` внутри пропускаемого <svg> ничего не открывал: starttag
+        # вышел раньше, чем дошёл до стека. Закрывать за него нечего — раньше
+        # он закрывал <main>, и текст после иконки пропадал со страницы.
+        skipping = bool(self._skip_depth)
         self.handle_starttag(tag, attrs)
-        if tag in SKIP_TAGS and self._skip_depth:
-            self._skip_depth -= 1
-        elif tag not in SKIP_TAGS:
-            self._depth = max(0, self._depth - 1)
-            if self._main_stack and self._main_stack[-1][1] > self._depth:
-                self._main_stack.pop()
-            while self._aside_stack and self._aside_stack[-1] > self._depth:
-                self._aside_stack.pop()
+        if tag in SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif not skipping and tag not in VOID_TAGS and self._open:
+            self._close_to(len(self._open) - 1)
 
     def handle_endtag(self, tag):
         if tag == "script" and self._in_ld:
@@ -492,15 +537,15 @@ class _Extractor(HTMLParser):
             return
         if self._skip_depth:
             return
-        # Закрытие любого тега снимает основной блок, открытый на этой глубине —
-        # неважно, какой тег его открыл: <main>, <article> или <div role="main">.
-        self._depth = max(0, self._depth - 1)
-        while self._main_stack and self._main_stack[-1][1] > self._depth:
-            self._main_stack.pop()
-        if self._aside_stack and self._aside_stack[-1] > self._depth:
-            self._flush_paragraph()
-            while self._aside_stack and self._aside_stack[-1] > self._depth:
-                self._aside_stack.pop()
+        if tag in VOID_TAGS:
+            return
+        # Закрывается ближайший открытый элемент с этим именем и всё, что
+        # осталось незакрытым внутри него. Закрывающий тег без пары не значит
+        # ничего — как и в браузере.
+        for index in range(len(self._open) - 1, -1, -1):
+            if self._open[index] == tag:
+                self._close_to(index)
+                break
         if tag not in INLINE_TAGS:
             self._glue = False
         if tag == "title":
@@ -571,25 +616,54 @@ class _Extractor(HTMLParser):
     @property
     def paragraphs(self) -> list:
         self._flush_paragraph()
-        if self._saw_main:
-            inside = [text for text, in_main in self._paragraphs if in_main]
-            if inside:
-                return inside
-        return [text for text, _ in self._paragraphs]
+        found = self._paragraphs
+        if self._saw_main and any(in_main for _, in_main, _ in found):
+            found = [p for p in found if p[1]]
+        # Служебные блоки не абзацы — но если кроме них на странице ничего
+        # нет, это не служебный блок, а обёртка: кое-где в <nav> завёрнут весь
+        # текст. Ноль абзацев на полной странице хуже, чем крошки первым.
+        body = [text for text, _, aside in found if not aside]
+        return body or [text for text, _, _ in found]
 
 
 # Служебные блоки внутри основного текста. На eventiq.io крошки, подпись и
 # оглавление стоят в <main> до ответа, и первым абзацем 35 страниц из 39
 # становилось «Home / Attendee Retention».
-_ASIDE_CLASS = re.compile(
-    r"(?:^|[\s_-])(?:breadcrumbs?|byline|toc|table-of-contents|post-meta|article-meta)(?:$|[\s_-])",
-    re.I)
+#
+# Имя сверяется с целым классом или с его хвостом (`article-byline`), но не
+# с началом и не с серединой: `has-toc` на <body>, `with-breadcrumbs` на
+# <article> и `toc-content article-body` на обёртке — это страницы, у которых
+# есть оглавление, а не оглавление.
+_ASIDE_NAMES = ("breadcrumb", "breadcrumbs", "byline", "toc",
+                "table-of-contents", "post-meta", "article-meta")
+_ASIDE_NOT = ("has", "with", "without", "no", "is", "show", "hide")
+_ASIDE_NEVER = {"html", "body", "main", "article"}
+
+# Какой открытый элемент закрывает новый тег, если закрывающего не написали.
+_BLOCKS = ("address", "article", "aside", "blockquote", "details", "div", "dl",
+           "fieldset", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",
+           "h6", "header", "main", "nav", "ol", "p", "pre", "section", "table",
+           "ul")
+_IMPLIED_END = {name: {"p"} for name in _BLOCKS}
+_IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
+                     "tr": {"tr", "td", "th"}, "td": {"td", "th"},
+                     "th": {"td", "th"}, "option": {"option"}})
 
 
 def _is_aside(tag: str, attrs: dict) -> bool:
     if tag == "nav" or attrs.get("role", "").lower() == "navigation":
         return True
-    return bool(_ASIDE_CLASS.search(attrs.get("class", "")))
+    if tag in _ASIDE_NEVER:
+        return False
+    for token in attrs.get("class", "").lower().split():
+        for name in _ASIDE_NAMES:
+            if token == name:
+                return True
+            if token.endswith(name) and token[-len(name) - 1] in "-_":
+                head = re.split(r"[-_]+", token[:-len(name)].strip("-_"))
+                if not set(head) & set(_ASIDE_NOT):
+                    return True
+    return False
 
 
 def _clean(text: str) -> str:
@@ -777,14 +851,27 @@ def load_page(path: str, root: str, base_url: str) -> Page:
     # Canonical приводится к абсолютному виду тем же базовым адресом, что
     # и ссылки. Относительный `<base href>` раньше оставлял canonical
     # относительным, и самоссылающийся canonical объявлялся «чужим».
-    base_for_links = urljoin(url, base_href) if base_href else url
+    #
+    # Относительная ссылка считается от места, где лежит файл, а не от адреса,
+    # под которым страницу удобно сравнивать: `contact.html` на `about.html` —
+    # это `/contact.html`, а не `/about/contact.html`. Иначе плоский сайт
+    # (Sphinx, mdBook, MkDocs) получал сироту на каждой такой ссылке.
+    location = _file_url(path, root, base_url)
+    markdown = path.lower().endswith((".md", ".markdown"))
+    base_for_links = urljoin(location, base_href) if base_href else location
     if page.canonical:
         page.canonical = urljoin(base_for_links, page.canonical)
     seen = set()
     for href in hrefs:
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
             continue
-        absolute, _ = urldefrag(urljoin(base_for_links, href))
+        base = base_for_links
+        # В Markdown живут две привычки. MkDocs и GitHub ссылаются на соседний
+        # файл — `[b](b.md)`; Hugo и Jekyll пишут ссылку от адреса, по которому
+        # страница выйдет, — `[b](../b/)`. Различает их расширение в ссылке.
+        if markdown and not base_href and not _EXT_RE.search(urlsplit(href).path):
+            base = url
+        absolute, _ = urldefrag(urljoin(base, href))
         netloc = urlparse(absolute).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]
