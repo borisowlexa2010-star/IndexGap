@@ -443,6 +443,53 @@ def _read_zip_tables(path: str) -> list:
     return best
 
 
+# Строка «Issue» в Metadata.csv: так Search Console подписывает выгрузку
+# одной причины из отчёта «Индексирование страниц». Есть она только у причин,
+# по которым страница НЕ в индексе.
+_ISSUE_KEYS = {"issue", "reason", "проблема", "причина", "problem", "problème",
+               "problema", "grund", "motivo", "問題"}
+
+
+def zip_issue(path: str) -> str:
+    """
+    Причина, по которой страницы из архива не в индексе, — или пустая строка.
+
+    Архив «Crawled - currently not indexed» внешне не отличается от архива
+    проиндексированных страниц: тот же Table.csv с адресами. Отличает их одна
+    строка в соседнем Metadata.csv, и без неё список отвергнутых страниц
+    читался как доказательство индекса.
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                if name.endswith("/") or "__MACOSX" in name:
+                    continue
+                if not name.lower().endswith((".csv", ".tsv", ".txt")):
+                    continue
+                if archive.getinfo(name).file_size > 64 * 1024:
+                    continue
+                try:
+                    text = archive.read(name).decode("utf-8-sig", "replace")
+                except Exception:
+                    continue
+                for row in _rows_from_text(text):
+                    if (len(row) >= 2 and str(row[0]).strip().lower() in _ISSUE_KEYS
+                            and str(row[1]).strip()):
+                        return str(row[1]).strip()
+    except (zipfile.BadZipFile, OSError):
+        return ""
+    return ""
+
+
+def signature_of(header: list) -> tuple:
+    """(имя, вид) по столбцу-подписи — или пустые строки, если подписи нет."""
+    lowered = {str(h or "").strip().lower() for h in (header or [])}
+    for tool, meta in TOOLS.items():
+        if any(sig in lowered for sig in meta.get("signature", ())):
+            return tool, meta["kind"]
+    return "", ""
+
+
 # ── чей это файл ──────────────────────────────────────────────────────────────
 
 def identify(path: str, header: list) -> tuple:
@@ -459,9 +506,9 @@ def identify(path: str, header: list) -> tuple:
     # Столбец-подпись: есть только у одного инструмента, поэтому решает
     # уверенно и раньше имени файла. `bing-pages.csv` стал неоднозначен —
     # у Bing два экспорта, а столбца `citations` у панели индекса нет.
-    for tool, meta in TOOLS.items():
-        if any(sig in lowered for sig in meta.get("signature", ())):
-            return tool, meta["kind"], True
+    tool, kind = signature_of(header)
+    if tool:
+        return tool, kind, True
 
     name = os.path.basename(path).lower()
     for tool, meta in TOOLS.items():

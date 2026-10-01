@@ -34,6 +34,7 @@ import csv
 import io
 import os
 import re
+from collections import Counter
 import urllib.error
 import urllib.request
 from xml.etree import ElementTree
@@ -371,7 +372,7 @@ def read_indexed_header(csv_path: str) -> list:
     return rows[0] if rows else []
 
 
-def read_indexed(csv_path: str, site: str = "") -> dict:
+def read_indexed(csv_path: str, site: str = "", index_status: bool = False) -> dict:
     """
     Выгрузка чего угодно, где есть адреса страниц: панель вебмастера, Ahrefs,
     Semrush, Screaming Frog, GA4, Matomo, просто список.
@@ -388,24 +389,29 @@ def read_indexed(csv_path: str, site: str = "") -> dict:
     if not rows:
         raise SourceError(tr("{a0}: файл пустой.", a0=csv_path))
 
-    found = sources.guess_column(rows[0], URL_COLUMN_HINTS)
-    col = found if found >= 0 else None
-    start = 1
-    if col is None:
-        col = next((i for i, c in enumerate(rows[0])
-                    if str(c).startswith(("http://", "https://", "/"))), None)
-        start = 0
+    col, start = _url_column(rows)
     if col is None:
         raise SourceError(
             tr("{a0}: не нашёл колонку с адресами страниц.\n    Заголовки файла: ", a0=csv_path) + ", ".join(str(c) for c in rows[0][:8]) + tr("\n    Нужен экспорт, где есть столбец с адресами (в Search Console — «Страницы», не «Запросы»)."))
 
+    # Статус читается только у панели вебмастера: `status: ok` в произвольном
+    # списке — чьё угодно поле, а не слово поисковика.
+    status_col = _status_column(rows, start) if index_status else None
     base = (site or "").rstrip("/")
-    out, seen, relative, skipped = [], set(), 0, 0
+    out, seen, relative, skipped, excluded = [], set(), 0, 0, {}
     for row in rows[start:]:
         if col >= len(row):
             continue
         value = str(row[col]).strip().strip('"')
         if not value:
+            continue
+        status = (str(row[status_col]).strip()
+                  if status_col is not None and status_col < len(row) else "")
+        if status_col is not None and not _is_indexed_status(status):
+            if value.startswith("/") and base:
+                value = base + value
+            if value.startswith(("http://", "https://")):
+                excluded[value] = status or tr("статус не указан")
             continue
         if value.startswith("/"):
             relative += 1
@@ -424,12 +430,89 @@ def read_indexed(csv_path: str, site: str = "") -> dict:
         notes.append(tr("{a0}: {a1} адресов были относительными путями — достроены до {a2}/…", a0=os.path.basename(csv_path), a1=relative, a2=base))
     if skipped:
         notes.append(tr("{a0}: {a1} строк содержат пути вида /guide/… без домена, а --site не задан — они пропущены. Передай --site, чтобы их учесть.", a0=os.path.basename(csv_path), a1=skipped))
-    if not out:
+    if not out and not excluded:
         raise SourceError(
             tr("{a0}: колонка «{a1}» нашлась, но ни одного адреса в ней нет.", a0=csv_path, a1=rows[0][col] if col < len(rows[0]) else col)
             + (tr("\n    В файле только относительные пути — передай --site.")
                if relative else ""))
-    return {"urls": out, "encoding": encoding, "notes": notes}
+    return {"urls": out, "encoding": encoding, "notes": notes, "excluded": excluded}
+
+
+def _looks_like_address(value) -> bool:
+    return str(value or "").strip().strip('"').startswith(("http://", "https://", "/"))
+
+
+def _url_column(rows: list) -> tuple:
+    """
+    (номер столбца с адресами, с какой строки начинаются данные).
+
+    Столбец выбирается по содержимому, а заголовок только разрешает спор.
+    Search Console переводит заголовок на язык панели («Die häufigsten
+    Seiten», «上位のページ»), и поиск по словам отвергал немецкую, испанскую
+    и японскую выгрузки, а у Plausible выбирал `pageviews`, потому что в нём
+    есть слово page.
+    """
+    sample = rows[1:51] or rows[:1]
+    width = max((len(r) for r in rows[:51]), default=0)
+    counts = [sum(1 for r in sample if i < len(r) and _looks_like_address(r[i]))
+              for i in range(width)]
+    best = max(counts, default=0)
+    hinted = sources.guess_column(rows[0], URL_COLUMN_HINTS)
+    if best == 0:
+        # Данных нет или в них нет адресов — остаётся только заголовок.
+        if hinted >= 0 and not _looks_like_address(rows[0][hinted]):
+            return hinted, 1
+        col = next((i for i, c in enumerate(rows[0]) if _looks_like_address(c)), None)
+        return col, 0
+    col = counts.index(best)
+    if hinted >= 0 and hinted < width and counts[hinted] * 2 >= best:
+        col = hinted
+    # Первая строка — заголовок, только если в выбранном столбце у неё не адрес:
+    # список без заголовка, начинавшийся с `/locations/berlin/`, терял первую
+    # страницу, потому что в ней есть слово loc.
+    start = 0 if col < len(rows[0]) and _looks_like_address(rows[0][col]) else 1
+    return col, start
+
+
+# Столбцы, где поисковик сам говорит, в индексе ли страница.
+_STATUS_HEADERS = ("coverage state", "coverage", "verdict", "index status",
+                   "indexing status", "indexing state", "status", "статус",
+                   "состояние", "состояние индексации")
+_INDEXED = re.compile(
+    r"(?<!not )(?<!не )\b(indexed|в поиске|в индексе|проиндексирован\w*|pass|valid)\b",
+    re.I)
+_NOT_INDEXED = re.compile(
+    r"not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
+    r"не в индексе|currently not|blocked|заблокир|duplicate|дубл|малоцен|"
+    r"redirect|редирект|soft 404|not found|не найден|noindex|error|ошибк|fail",
+    re.I)
+
+
+def _status_column(rows: list, start: int):
+    """Номер столбца со статусом индексации — или None, если такого нет."""
+    if start == 0 or not rows:
+        return None
+    for i, cell in enumerate(rows[0]):
+        if str(cell or "").strip().lower() not in _STATUS_HEADERS:
+            continue
+        values = [str(r[i]).strip() for r in rows[1:51] if i < len(r) and str(r[i]).strip()]
+        # «Status: 200» — код ответа сервера, а не слово поисковика.
+        if values and not all(v.isdigit() for v in values):
+            return i
+    return None
+
+
+def _is_indexed_status(status: str) -> bool:
+    """
+    В индексе ли страница, по слову самого поисковика.
+
+    «Submitted» из журнала отправки, «URL is unknown to Google», «Исключена:
+    дубль» — всё это строки с адресом, и раньше каждая засчитывалась как
+    страница в индексе. Засчитывается только то, что сказано прямо.
+    """
+    if not status or _NOT_INDEXED.search(status):
+        return False
+    return bool(_INDEXED.search(status))
 
 
 def read_citations(csv_path: str, site: str = "") -> dict:
@@ -496,12 +579,20 @@ def read_sources(specs: list, site: str = "") -> dict:
     индексом) и `by_source` (всё подряд, включая краулеры и сторонние сервисы).
     """
     out, extra, notes, unlabeled, kinds, cited = {}, {}, [], set(), {}, {}
-    impressions = set()
+    impressions, excluded = set(), {}
     for spec in specs or ():
         name, path = sources.parse_spec(spec)
         header = read_indexed_header(path)
         if name:
             kind = sources.kind_of(name)
+            # Подпись в самом файле сильнее метки, которую ему дали: выгрузка
+            # цитирований под именем `bing=` читалась как индекс Bing.
+            signed, signed_kind = sources.signature_of(header)
+            if signed and signed_kind != kind:
+                notes.append(tr(
+                    "{a0}: помечен как «{a1}», но по столбцам это {a2} — прочитан как {a2}",
+                    a0=os.path.basename(path), a1=name, a2=tr(sources.KIND_TITLE[signed_kind])))
+                name, kind = signed, signed_kind
         else:
             guessed, kind, confident = sources.identify(path, header)
             name = guessed or os.path.splitext(os.path.basename(path))[0].lower()
@@ -519,11 +610,30 @@ def read_sources(specs: list, site: str = "") -> dict:
             continue
         # «Эффективность» из Search Console — отчёт о показах: страница в индексе
         # без показов в него не попадает. Узнаётся по столбцу показов.
-        if kind == sources.INDEX and _has_impressions(header):
+        if kind == sources.INDEX and _has_impressions(header, path):
             impressions.add(name)
-        result = read_indexed(path, site)
+        result = read_indexed(path, site, index_status=kind == sources.INDEX)
         notes += result.get("notes", [])
         urls = set(result["urls"])
+        if kind == sources.INDEX:
+            dropped = dict(result.get("excluded") or {})
+            issue = sources.zip_issue(path)
+            if issue:
+                # Архив одной причины из «Индексирования страниц»: всё, что
+                # в нём есть, поисковик индексировать отказался.
+                dropped.update({url: issue for url in urls})
+                urls = set()
+            if dropped:
+                excluded.setdefault(name, {}).update(dropped)
+                reasons = Counter(dropped.values()).most_common(3)
+                notes.append(tr(
+                    "{a0}: {a1} адрес(ов) поисковик сам называет не проиндексированными "
+                    "({a2}) — в шаг «в индексе» они не засчитаны",
+                    a0=os.path.basename(path), a1=len(dropped),
+                    a2="; ".join(f"{reason} — {n}" for reason, n in reasons)))
+            if not urls:
+                kinds[name] = kind
+                continue
         kinds[name] = kind
         target = out if kind == sources.INDEX else extra
         if name in target:
@@ -537,13 +647,30 @@ def read_sources(specs: list, site: str = "") -> dict:
             tr("панели вебмастера среди выгрузок нет. Воронка построена на том, что есть, но подпись шага это учитывает: ")
             + "; ".join(sources.describe(list(extra))) + ".")
     return {"by_engine": out, "by_source": extra, "kinds": kinds, "cited": cited,
-            "impressions": sorted(impressions),
+            "impressions": sorted(impressions), "excluded": excluded,
             "notes": notes, "unlabeled": sorted(unlabeled)}
 
 
-def _has_impressions(header) -> bool:
-    lowered = {str(h or "").strip().lower() for h in header or ()}
-    return bool(lowered & {"impressions", "показы", "impr", "показов"})
+_IMPRESSION_WORDS = ("impression", "impr", "показ", "impresion", "impress",
+                     "affichage", "wyświetl", "vertoning", "gösterim", "visning",
+                     "表示回数", "展示", "曝光", "노출", "การแสดงผล")
+
+
+def _has_impressions(header, path: str = "") -> bool:
+    """
+    Отчёт о показах, а не об индексе.
+
+    Узнаётся по устройству, а не по точному слову: в режиме сравнения периодов
+    столбец зовётся «Last 28 days Impressions», в японской панели — «表示回数»,
+    и оба раза страницы без показов назывались непроиндексированными. CTR
+    считается только от показов и на всех языках пишется одинаково.
+    """
+    cells = [str(h or "").strip().lower() for h in header or ()]
+    if any(word in cell for cell in cells for word in _IMPRESSION_WORDS):
+        return True
+    if any(cell == "ctr" or cell.endswith(" ctr") or cell.startswith("ctr ") for cell in cells):
+        return True
+    return "performance-on-search" in os.path.basename(path or "").lower()
 
 
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,

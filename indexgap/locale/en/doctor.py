@@ -2,6 +2,12 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "{a0}: {a1} адрес(ов) поисковик сам называет не проиндексированными ({a2}) — в шаг «в индексе» они не засчитаны":
+        "{a0}: the search engine itself reports {a1} address(es) as not indexed "
+        "({a2}) — they are not counted in the index step",
+    "{a0}: помечен как «{a1}», но по столбцам это {a2} — прочитан как {a2}":
+        "{a0}: labelled “{a1}”, but its columns say {a2} — read as {a2}",
+    "статус не указан": "no status given",
     "{a0} — не обычный файл":
         "{a0} is not a regular file",
     "{a0}: «{a1}» внутри архива больше {a2} МБ — читать не стал":
