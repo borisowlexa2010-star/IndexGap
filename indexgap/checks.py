@@ -259,27 +259,49 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
 # Корень сайта на Next.js — часто не страница, а заглушка: RSC-поток с командой
 # NEXT_REDIRECT на /en. Классический вариант того же — meta refresh.
 _NEXT_REDIRECT = re.compile(r"NEXT_REDIRECT;(?:replace|push);([^;\"\\\s]+);30[1278]")
-_META_REFRESH = (
-    re.compile(r"<meta[^>]+http-equiv=[\"']?refresh[\"']?[^>]*content=[\"']"
-               r"[^\"']*?url\s*=\s*['\"]?([^\"'\s>]+)", re.I),
-    re.compile(r"<meta[^>]+content=[\"'][^\"']*?url\s*=\s*['\"]?([^\"'\s>]+)"
-               r"[^>]*http-equiv=[\"']?refresh", re.I),
-)
+_META_TAG = re.compile(r"<meta\b[^>]{0,2000}>", re.I)
+_REFRESH = re.compile(r"http-equiv\s*=\s*[\"']?refresh", re.I)
+_REFRESH_CONTENT = re.compile(
+    r"content\s*=\s*[\"']\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?([^\"'\s>]+)", re.I)
+# Где «редирект» — не редирект: его показывают, выключили или держат про запас.
+_NOT_LIVE = re.compile(
+    r"<!--.*?-->|<noscript\b.*?</noscript>|<pre\b.*?</pre>|<code\b.*?</code>|"
+    r"<textarea\b.*?</textarea>", re.I | re.S)
+_SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 
 
 def redirect_target(page) -> str:
-    """Куда страница перебрасывает, если это заглушка-редирект; иначе пусто."""
+    """
+    Куда страница перебрасывает, если это заглушка-редирект; иначе пусто.
+
+    Заглушка не проверяется как страница, поэтому ошибиться здесь дорого:
+    у настоящей страницы молча пропадут все находки. Раньше хватало строки
+    в исходнике — и заглушкой становилась статья про Next.js с примером
+    в <code>, страница с <noscript>-переадресацией для браузеров без скриптов
+    и страница, которая сама себя обновляет раз в пять минут.
+
+    Редиректом считается meta refresh с нулевой задержкой, стоящий в живой
+    разметке, и `NEXT_REDIRECT` внутри <script> на странице без текста.
+    """
     from urllib.parse import urljoin
     raw = getattr(page, "raw", "") or ""
-    found = _NEXT_REDIRECT.search(raw)
-    if not found:
-        for pattern in _META_REFRESH:
-            found = pattern.search(raw)
-            if found:
-                break
-    if not found:
+    if "refresh" not in raw.lower() and "NEXT_REDIRECT" not in raw:
         return ""
-    return urljoin(page.url, found.group(1).strip())
+    if str(getattr(page, "path", "")).lower().endswith((".md", ".markdown")):
+        return ""
+    live = _NOT_LIVE.sub(" ", raw)
+    for tag in _META_TAG.findall(live):
+        if not _REFRESH.search(tag):
+            continue
+        found = _REFRESH_CONTENT.search(tag)
+        if found and float(found.group(1)) <= 1:
+            return urljoin(page.url, found.group(2).strip())
+    if "NEXT_REDIRECT" in live and len((getattr(page, "text", "") or "").split()) < 30:
+        for script in _SCRIPT.findall(live):
+            found = _NEXT_REDIRECT.search(script)
+            if found:
+                return urljoin(page.url, found.group(1).strip())
+    return ""
 
 
 def link_graph(pages: list, home_url: str = None) -> dict:
