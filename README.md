@@ -102,6 +102,13 @@ indexgap cite --domain example.com --prompt "best visa service for Singapore"
                                     # do AI answers cite you? (your own API keys)
 ```
 
+`sitemap` and `notify` keep their state in `.indexgap-manifest.json`, next to
+`indexgap.json`: when each page last changed and what has been submitted.
+**Commit it.** Without it a clean CI checkout sees every page as new — today's
+`lastmod` everywhere — and `notify --send` refuses to submit the whole site
+unless you say `--first`. On a 4,273-page Next.js build a full `check` takes
+about 40 seconds and under 1 GB of memory (Apple M1 Max).
+
 Output is English by default, Russian with `--lang ru` (or `INDEXGAP_LANG`, or
 your system locale). That includes the HTML report, every finding description,
 `--help`, and the skills `indexgap init` installs into your project.
@@ -390,7 +397,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-462 scenarios. Each one is a reproduced defect: from three waves of adversarial
+558 scenarios. Each one is a reproduced defect: from three waves of adversarial
 review (the latest by ten independent reviewers, each on its own area), from
 runs against live sites, plus the behaviour of profiles, portfolio and project
 installation. The rule: a finding without a test comes back.
