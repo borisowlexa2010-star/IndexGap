@@ -191,7 +191,9 @@ def _where(page, root: str) -> str:
     path = getattr(page, "path", "") or ""
     if root and path:
         try:
-            return os.path.relpath(path, root)
+            # Прямые слэши на любой системе: наряд читают и люди, и агенты, и
+            # путь в нём должен совпадать с тем, что лежит в репозитории.
+            return os.path.relpath(path, root).replace(os.sep, "/")
         except ValueError:                     # разные диски в Windows
             return path
     return path
