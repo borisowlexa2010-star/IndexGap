@@ -62,13 +62,15 @@ LOOKS_LIKE_A_COUNTRY = {
     "uk": ("en-GB", N_("«uk» — это украинский язык, а не Великобритания")),
     "gb": ("en-GB", N_("«gb» — это страна, а не язык: перед ней нужен язык")),
     "us": ("en-US", N_("«us» — это страна, а не язык: перед ней нужен язык")),
-    "eu": ("", N_("«eu» — не язык и не страна по ISO 3166-1")),
     "cn": ("zh-CN", N_("«cn» — это страна, а не язык: перед ней нужен язык")),
     "jp": ("ja", N_("«jp» — это страна, код языка — «ja»")),
     "br": ("pt-BR", N_("«br» — это бретонский язык, а не Бразилия")),
     "in": ("hi", N_("«in» — устаревший код индонезийского, а не Индия")),
     "ua": ("uk", N_("«ua» — это страна, код украинского языка — «uk»")),
 }
+
+# То, что пишут вместо страны. Великобритания — GB; UK в ISO 3166-1 нет.
+NOT_A_REGION = {"UK": "GB", "EN": "", "EU": "", "LATAM": "419"}
 
 _TAG_RE = re.compile(r"^([A-Za-z]{2,3})(?:-([A-Za-z]{4}))?(?:-([A-Za-z]{2}|\d{3}))?$")
 
@@ -135,6 +137,11 @@ def check_tag(code: str) -> str:
                           if instead else "")
     if language not in LANGUAGES:
         return tr("«{a0}» не является кодом языка по ISO 639-1", a0=language)
+    region = (match.group(3) or "").upper()
+    if region in NOT_A_REGION:
+        return tr("«{a0}» — не код страны по ISO 3166-1", a0=region) + (
+            tr(" — вероятно, имелось в виду `{a0}`", a0=f"{language}-{NOT_A_REGION[region]}")
+            if NOT_A_REGION[region] else "")
     return ""
 
 
@@ -258,6 +265,12 @@ def check(pages: list, cfg: dict = None) -> dict:
                                   a0=other)))
                 continue
             back = targets.get(target.key)
+            # Цель без единой альтернативы — самая частая односторонняя связь,
+            # и как раз она раньше пропускалась: проверка шла, только если у
+            # цели был хоть какой-то hreflang. Закрытая цель сообщается ниже,
+            # своей находкой, и дважды о ней не говорится.
+            if back is None and indexable(target):
+                back = set()
             if back is not None and page.key not in back:
                 issues.append(("critical", page.url, "hreflang-no-return",
                                tr("страница ссылается на {a0}, а та не ссылается "
@@ -328,12 +341,22 @@ def check(pages: list, cfg: dict = None) -> dict:
                         "чей язык не совпал ни с одним объявленным."))
 
     # Региональные пары: один язык, разные регионы — законно похожи.
+    # Регион берётся из кода, которым страница объявляет в кластере саму себя,
+    # а не из `<html lang>`: тот у `/us/` и `/uk/` обычно одинаковый `en`,
+    # Google его не читает, и верно размеченные версии объявлялись дублями.
+    def own_code(p):
+        for code, href in declared.get(p.key, ()):
+            if href and url_key(href) == p.key and code.strip().lower() != "x-default":
+                return code.strip()
+        return p.lang or ""
+
     for page in pages:
         for other_key in sorted(targets.get(page.key, ())):
             other = known.get(other_key)
             if other is None or other.key <= page.key:
                 continue
-            if _same_language(page.lang, other.lang) and page.lang != other.lang:
+            mine, theirs = own_code(page), own_code(other)
+            if _same_language(mine, theirs) and mine.lower() != theirs.lower():
                 regional_pairs.append((page.url, other.url))
 
     if regional_pairs:

@@ -2,6 +2,9 @@
 """hreflang и всё, что про многоязычность, — English."""
 
 MESSAGES = {
+    "«{a0}» — не код страны по ISO 3166-1":
+        "“{a0}” is not an ISO 3166-1 country code",
+    "основной": "default",
     # ── коды ──────────────────────────────────────────────────────────────────
     "пустой код": "empty code",
     " — вероятно, имелось в виду `{a0}`": " — you probably meant `{a0}`",
@@ -16,8 +19,6 @@ MESSAGES = {
         "“gb” is a country, not a language: it needs a language in front of it",
     "«us» — это страна, а не язык: перед ней нужен язык":
         "“us” is a country, not a language: it needs a language in front of it",
-    "«eu» — не язык и не страна по ISO 3166-1":
-        "“eu” is neither a language nor an ISO 3166-1 country",
     "«cn» — это страна, а не язык: перед ней нужен язык":
         "“cn” is a country, not a language: it needs a language in front of it",
     "«jp» — это страна, код языка — «ja»":
