@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://demo.example/</loc></url>
+  <url><loc>https://demo.example/about/</loc></url>
+  <url><loc>https://demo.example/rent/berlin/</loc></url>
+  <url><loc>https://demo.example/rent/munich/</loc></url>
+  <url><loc>https://demo.example/rent/hamburg/</loc></url>
+  <url><loc>https://demo.example/rent/cologne/</loc></url>
+  <url><loc>https://demo.example/rent/frankfurt/</loc></url>
+  <url><loc>https://demo.example/rent/stuttgart/</loc></url>
+</urlset>

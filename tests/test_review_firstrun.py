@@ -131,5 +131,40 @@ class TestConsole(Fixture):
         self.assertIn("thin", out)
 
 
+class TestDemoSite(Fixture):
+    """
+    Пример в `examples/demo-site` — первое, что запускает новый человек. Он
+    обязан давать ровно то, что обещает README: по одной находке каждого
+    вида, без шума. Тест держит пример честным при каждой правке проверок.
+    """
+
+    DEMO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "examples", "demo-site")
+
+    def test_the_demo_shows_one_of_each(self):
+        import json
+        out = os.path.join(self.dir, "demo.html")
+        code, _ = self.run_cli(["check", self.DEMO, "--site", "https://demo.example",
+                                "--dataset", os.path.join(self.DEMO, "cities.csv"),
+                                "--sitemap", os.path.join(self.DEMO, "sitemap.xml"),
+                                "--robots", os.path.join(self.DEMO, "robots.txt"),
+                                "--out", out])
+        self.assertEqual(code, 0)
+        data = json.load(open(out[:-5] + ".json", encoding="utf-8"))
+        found = sorted((i["code"], i["url"].replace("https://demo.example", ""))
+                       for i in data["issues"] if i["level"] != "info")
+        self.assertEqual(found, [
+            ("ai-crawler-blocked", "robots.txt"),
+            ("near-duplicate", "/rent/frankfurt/"),
+            ("near-duplicate", "/rent/stuttgart/"),
+            ("noindex", "/rent/cologne/"),
+            ("orphan", "/rent/leipzig/"),
+            ("thin", "/rent/dresden/"),
+            ("unsupported-number", "/rent/hamburg/"),
+        ])
+        steps = [(s["count"]) for s in data["funnel"]["steps"]]
+        self.assertEqual(steps, [10, 9, 7])
+
+
 if __name__ == "__main__":
     unittest.main()
