@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter, defaultdict
+from .core import _strip_fences, drop_spans
 from .i18n import tr
 
 CONFIG = {
@@ -456,9 +457,8 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
 
 
 BRIEF_MARKERS = ("БРИФ ДЛЯ АГЕНТА", "BRIEF FOR THE AGENT", "<!-- TODO", "TODO:")
-_NOT_PROSE = re.compile(
-    r"<script\b.*?</script>|<style\b.*?</style>|<pre\b.*?</pre>|<code\b.*?</code>|"
-    r"^```.*?^```", re.I | re.S | re.M)
+_NOT_PROSE = (("<script", "</script>"), ("<style", "</style>"), ("<pre", "</pre>"),
+              ("<code", "</code>"))
 
 # Иероглиф несёт примерно столько же, сколько слово: «中文» — это «на китайском»,
 # и по длине его мерить нельзя. На живом сайте виз переключатель языков и ссылки
@@ -513,7 +513,7 @@ def check_brief(pages: list, cfg: dict = None) -> list:
     for page in sorted(pages, key=lambda p: p.url):
         # `TODO:` в скрипте или в примере кода — заметка разработчика, а не
         # недописанная страница.
-        raw = _NOT_PROSE.sub(" ", page.raw or "")
+        raw = _strip_fences(drop_spans(page.raw or "", _NOT_PROSE))
         if any(marker in raw for marker in BRIEF_MARKERS):
             issues.append(("critical", page.url, "brief-left",
                            tr("в файле остался блок брифа или TODO — страница не дописана")))
