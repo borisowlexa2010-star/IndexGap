@@ -46,10 +46,25 @@ CONFIG = {
 PREAMBLE = (
     "в этой статье", "в данной статье", "в этом материале", "мы рассмотрим",
     "давайте разберёмся", "давайте разберемся", "сегодня мы", "как известно",
-    "ни для кого не секрет", "в современном мире", "прежде чем",
-    "in this article", "in this post", "we will explore", "let's dive",
-    "let us explore", "as we all know", "in today's world",
+    "ни для кого не секрет", "в современном мире",
+    "in this article", "in this post", "in this blog post", "in this guide",
+    "we will explore", "let's dive", "let's explore", "let us explore",
+    "as we all know", "in today's", "welcome to",
 )
+
+
+def _is_preamble(lowered: str) -> bool:
+    """
+    Начинается ли абзац с разгона. Фраза должна кончиться на границе слова:
+    «in this post-pandemic market…» — не «in this post».
+    """
+    for phrase in PREAMBLE:
+        if lowered.startswith(phrase):
+            rest = lowered[len(phrase):len(phrase) + 1]
+            if not rest or not (rest.isalnum() or rest == "-"):
+                return True
+    return False
+
 
 # В ar/fa/ur используется U+061F: без него восемь вопросных заголовков
 # выглядели как ноль. Это тот же вопросный знак, а не исключение из порога.
@@ -139,13 +154,20 @@ def read_robots(path: str) -> dict:
 
 # `/`, `/*` и `/$` запрещают весь сайт. Строгое сравнение с «/» пропускало
 # полный запрет, записанный вторым способом.
-_BLOCK_ALL = {"/", "/*", "/$", "/*$"}
+# `/$` сюда не входит: это ровно главная страница, а не весь сайт. Раньше
+# `Allow: /$` считалось разрешением всего и гасило находку о полном запрете.
+_BLOCK_ALL = {"/", "/*", "/*$"}
 
 
 def _blocks_everything(entry: dict) -> bool:
     disallow = {d.strip() for d in (entry.get("disallow") or [])}
     allow = {a.strip() for a in (entry.get("allow") or [])}
     return bool(disallow & _BLOCK_ALL) and not (allow & _BLOCK_ALL)
+
+
+# Поисковики, у которых бывает своя группа правил в robots.txt.
+_SEARCH_ENGINES = ("googlebot", "bingbot", "yandex", "yandexbot", "duckduckbot",
+                   "baiduspider", "slurp", "applebot")
 
 
 def check_robots(robots: dict) -> list:
@@ -163,8 +185,17 @@ def check_robots(robots: dict) -> list:
     rules = robots.get("rules") or {}
     star = rules.get("*") or {}
     if _blocks_everything(star):
-        issues.append(("critical", "robots.txt", "robots-blocks-all",
-                       tr("Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком")))
+        # Своя группа сильнее общей: `Googlebot` с `Allow: /` сайт видит, что
+        # бы ни стояло под звёздочкой.
+        allowed = sorted(a for a in _SEARCH_ENGINES
+                         if a in rules and not _blocks_everything(rules[a]))
+        if allowed:
+            issues.append(("warning", "robots.txt", "robots-blocks-all",
+                           tr("Disallow: / для всех агентов, кроме {a0} — остальные поисковики "
+                              "и ИИ-поиск сайт не видят", a0=", ".join(allowed))))
+        else:
+            issues.append(("critical", "robots.txt", "robots-blocks-all",
+                           tr("Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком")))
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
         if entry and _blocks_everything(entry):
@@ -197,8 +228,9 @@ def check_answer(page, cfg: dict = None) -> list:
                  tr("не нашёл ни одного абзаца — цитировать нечего"))]
     first = paragraphs[0]
     issues = []
-    lowered = first.lower().lstrip("«\"'— -")
-    if lowered.startswith(PREAMBLE):
+    # Типографский апостроф — тот же апостроф: «Let’s dive» не узнавалось.
+    lowered = first.lower().lstrip("«\"'— -").replace("’", "'").replace("‘", "'")
+    if _is_preamble(lowered):
         issues.append(("warning", page.url, "answer-preamble",
                        tr("первый абзац начинается с разгона «{a0}…» — ИИ-поиск цитирует ответ, а не вступление", a0=first[:40])))
     elif len(first) < cfg["answer_min"]:
@@ -283,7 +315,11 @@ def check_jsonld(page) -> list:
                 issues.append(("info", page.url, "jsonld-no-type",
                                tr("в блоке JSON-LD нет @type")))
             if "faqpage" in _ld_types(item):
-                haystack = (page.text or "").lower()
+                # Вопрос ищется во всём видимом тексте и после приведения обеих
+                # сторон к одному виду: вёрстка ставит «’» вместо «'», тире
+                # вместо дефиса, а в разметке лежит `&amp;`. Каждое такое
+                # расхождение давало находку с угрозой ручных санкций.
+                haystack = _plain((page.text or "") + " " + (getattr(page, "chrome", "") or ""))
                 missing = []
                 entities = item.get("mainEntity") or []
                 if isinstance(entities, dict):
@@ -292,12 +328,24 @@ def check_jsonld(page) -> list:
                     if not isinstance(entity, dict):
                         continue
                     question = str(entity.get("name") or "").strip()
-                    if question and question.lower()[:40] not in haystack:
+                    if question and _plain(question)[:40] not in haystack:
                         missing.append(question)
                 if missing:
                     issues.append(("warning", page.url, "jsonld-faq-invisible",
                                    tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
     return issues
+
+
+_TYPOGRAPHY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "«": '"', "»": '"',
+                             "–": "-", "—": "-", "‑": "-", "…": "...", "\u00a0": " "})
+
+
+def _plain(text: str) -> str:
+    """Текст для сравнения: без сущностей, типографики и лишних пробелов."""
+    import html
+    import unicodedata
+    text = unicodedata.normalize("NFKC", html.unescape(html.unescape(text or "")))
+    return re.sub(r"\s+", " ", text.translate(_TYPOGRAPHY)).strip().lower()
 
 
 def _ld_items(data) -> list:
@@ -346,7 +394,9 @@ def check_provenance(page) -> list:
         for item in _ld_items(data):
             keys = {str(k).lower() for k in item}
             has_date = has_date or bool(keys & set(DATE_KEYS))
-            has_author = has_author or "author" in keys
+            # Издатель — тоже «кто за этим стоит»; находка так и называется:
+            # «автор или организация».
+            has_author = has_author or bool(keys & {"author", "publisher", "creator"})
     if not has_date and re.search(r"<time[^>]+datetime=", page.raw or "", re.I):
         has_date = True
     if not has_date:

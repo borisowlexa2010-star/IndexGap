@@ -567,6 +567,11 @@ def _length_bounds(cfg: dict, language: str = "") -> dict:
 _AMP_RE = re.compile(r"<html[^>]*\s(amp|⚡)[\s=>]", re.I)
 
 
+_EMPTY_MOUNT = re.compile(
+    r"<div[^>]*\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?[^>]*>\s*</div>",
+    re.I)
+
+
 def is_shell(page, cfg: dict = None) -> bool:
     """
     Страница, которую рисует JavaScript: в исходном HTML текста нет.
@@ -584,10 +589,19 @@ def is_shell(page, cfg: dict = None) -> bool:
     # рантайм — это те самые три скрипта.
     if _AMP_RE.search(page.raw or ""):
         return False
-    if page.word_count >= 25 and (page.chrome or blocks.get("p")):
+    # Объём меряется по письменности и по всему тексту, в каком бы теге он ни
+    # стоял. Раньше требовался <p>: страница контактов из адреса и списка —
+    # тридцать слов и три скрипта аналитики — объявлялась оболочкой, как и
+    # статья на китайском, где «слов» по пробелам выходило десять.
+    volume = text_volume(page)
+    if volume >= 25:
         return False
-    return (page.word_count < cfg["shell_words"]
-            and blocks.get("script", 0) >= cfg["shell_scripts"])
+    scripts = blocks.get("script", 0)
+    # И наоборот: сборка Vite — пустой узел и один модульный скрипт. Порог
+    # «три скрипта» её не видел.
+    if volume < 5 and (scripts >= 1 or _EMPTY_MOUNT.search(page.raw or "")):
+        return scripts >= 1
+    return scripts >= cfg["shell_scripts"]
 
 
 # Находки, которые на пустой оболочке ничего не значат: их источник — текст
