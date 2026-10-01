@@ -375,9 +375,10 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-301 scenarios. Each one is a reproduced defect found by two waves of adversarial
-review and one run against six live sites, plus the behaviour of profiles,
-portfolio and project installation. The rule: a finding without a test comes back.
+462 scenarios. Each one is a reproduced defect: from three waves of adversarial
+review (the latest by ten independent reviewers, each on its own area), from
+runs against live sites, plus the behaviour of profiles, portfolio and project
+installation. The rule: a finding without a test comes back.
 
 ## Calibrated on live sites, not fixtures
 
