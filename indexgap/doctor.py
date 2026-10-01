@@ -172,7 +172,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
 
     tag = root.tag.rsplit("}", 1)[-1]
     if tag == "sitemapindex":
-        urls, errors = [], []
+        urls, errors, alternates = [], [], {}
         for sm in [e for e in root
                    if e.tag.rsplit("}", 1)[-1] == "sitemap"]:
             loc = next((c.text for c in sm
@@ -183,6 +183,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
             if child:
                 result = read_sitemap(child, _depth + 1, _seen)
                 urls.extend(result["urls"])
+                alternates.update(result.get("alternates") or {})
                 problem = result["error"]
             if problem and problem not in errors:
                 errors.append(problem)
@@ -190,17 +191,31 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
                 break
         if not urls and not errors:
             errors.append(tr("{a0}: индекс не дал ни одного адреса", a0=source))
-        return {"urls": urls, "error": "; ".join(errors[:5])}
+        return {"urls": urls, "error": "; ".join(errors[:5]), "alternates": alternates}
 
     # Только <url>/<loc>: у <image:loc> и <video:loc> то же имя, и 831
     # картинка каталога виз засчитывалась страницами sitemap.
-    urls = [el.text.strip() for url in root
-            if url.tag.rsplit("}", 1)[-1] == "url"
-            for el in url
-            if el.text and el.tag.rsplit("}", 1)[-1] == "loc"]
+    urls, alternates = [], {}
+    for url in root:
+        if url.tag.rsplit("}", 1)[-1] != "url":
+            continue
+        loc = next((el.text.strip() for el in url
+                    if el.text and el.tag.rsplit("}", 1)[-1] == "loc"), "")
+        if not loc:
+            continue
+        urls.append(loc)
+        # hreflang можно объявить и здесь, в `<xhtml:link>`: Google считает
+        # sitemap равноправным способом. Раньше эта разметка не читалась, и
+        # каждая переведённая страница получала «нет hreflang».
+        links = [(el.get("hreflang", "").strip(), el.get("href", "").strip())
+                 for el in url
+                 if el.tag.rsplit("}", 1)[-1] == "link" and el.get("hreflang")
+                 and "alternate" in (el.get("rel") or "").lower()]
+        if links:
+            alternates[loc] = links
     if not urls:
         return {"urls": [], "error": tr("{a0}: в файле нет ни одного <loc>", a0=source)}
-    return {"urls": urls, "error": ""}
+    return {"urls": urls, "error": "", "alternates": alternates}
 
 
 URL_COLUMN_HINTS = sources.URL_COLUMN_HINTS
@@ -216,7 +231,7 @@ def read_sitemaps(sources) -> dict:
     """
     if isinstance(sources, str):
         sources = [sources]
-    urls, seen, errors = [], set(), []
+    urls, seen, errors, alternates = [], set(), [], {}
     for source in sources or ():
         result = read_sitemap(source)
         if result.get("error"):
@@ -225,7 +240,27 @@ def read_sitemaps(sources) -> dict:
             if url not in seen:
                 seen.add(url)
                 urls.append(url)
-    return {"urls": urls, "errors": errors}
+        alternates.update(result.get("alternates") or {})
+    return {"urls": urls, "errors": errors, "alternates": alternates}
+
+
+def apply_sitemap_alternates(pages: list, alternates: dict) -> int:
+    """
+    Отдаёт страницам hreflang, объявленный в sitemap. Возвращает, скольким.
+
+    Разметка в самой странице сильнее: sitemap дополняет только те страницы,
+    у которых своей нет.
+    """
+    by_key = {url_key(loc): links for loc, links in (alternates or {}).items()}
+    given = 0
+    for page in pages:
+        if getattr(page, "alternates", None):
+            continue
+        links = by_key.get(page.key)
+        if links:
+            page.alternates = list(links)
+            given += 1
+    return given
 
 
 def undeclared_sitemaps(robots_path: str, given) -> list:

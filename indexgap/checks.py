@@ -779,6 +779,14 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
 
     kept = [i for i in issues if not echo(i)]
     removed = len(issues) - len(kept)
+    # Открытые страницы, которые всё ещё называют запаркованные переводы в своём
+    # hreflang. Их находки тоже сворачиваются — но сказать о них нужно: правка
+    # там, на открытых страницах, а не на закрытых.
+    naming = {i[1] for i in issues if echo(i) and i[1] not in parked
+              and i[2] in ("hreflang-target-blocked", "hreflang-no-return")}
+    known_keys = {p.key for p in pages}
+    orphaned = sum(1 for p in pages if p.url in parked
+                   and url_key(p.canonical) not in known_keys)
 
     by_lang = Counter(lang for lang, _ in parked.values())
     source = Counter(to for _, to in parked.values()).most_common(1)[0][0]
@@ -798,6 +806,14 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
             "{a0} из них всё ещё объявляют hreflang: он называет их равноправными "
             "версиями, а canonical — дублями, и поисковик выберет сам.",
             a0=with_hreflang)
+    if naming:
+        message += " " + tr(
+            "{a0} открыт(ых) страниц всё ещё называют их в своём hreflang — "
+            "убрать нужно и оттуда.", a0=len(naming))
+    if orphaned:
+        message += " " + tr(
+            "У {a0} из них canonical ведёт на страницу, которой среди файлов нет.",
+            a0=orphaned)
     kept.append(("critical", "hreflang", "translations-parked", message))
     notes.append(tr(
         "запаркованные переводы: {a0} страниц(ы) сведены в одну находку, "

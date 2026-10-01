@@ -172,7 +172,20 @@ def is_multilingual(pages: list) -> bool:
     langs = {(p.lang or "").split("-")[0].lower() for p in pages if p.lang}
     if len(langs) >= 2:
         return True
-    return sum(1 for p in pages if read_alternates(p)) >= max(2, len(pages) // 20)
+    # Любая объявленная разметка стоит проверки, сколько бы страниц её ни несло:
+    # порог в 5% пропускал сломанный кластер на четырёх страницах из ста.
+    if sum(1 for p in pages if read_alternates(p)) >= 2:
+        return True
+    # Худший случай: версии на трёх языках, `lang="en"` зашит в шаблон, а
+    # hreflang нет вовсе. По атрибутам сайт одноязычный — выдаёт его только
+    # адрес: один и тот же путь под разными языковыми префиксами.
+    from .checks import _locale_split
+    seen = {}
+    for p in pages:
+        host, lang, rest = _locale_split(p.url)
+        if lang:
+            seen.setdefault((host, rest), set()).add(lang)
+    return sum(1 for langs_here in seen.values() if len(langs_here) >= 2) >= 2
 
 
 def check(pages: list, cfg: dict = None) -> dict:
@@ -321,6 +334,9 @@ def check(pages: list, cfg: dict = None) -> dict:
             by_rest[(host, rest)].append((lang, page))
     lonely = 0
     for page in empty:
+        # В исходник на Markdown <link> не поставить — его добавит шаблон.
+        if str(getattr(page, "path", "")).lower().endswith((".md", ".markdown")):
+            continue
         host, lang, rest = _locale_split(page.url)
         others = [p.url for l, p in by_rest[(host, rest)] if l != lang]
         if not others:
