@@ -392,15 +392,26 @@ def _print_first_things(issues):
     from collections import Counter
     from .repair import SITE_LEVEL
     counts = Counter(code for level, _, code, _ in issues if level == "critical")
+    warned = Counter(code for level, _, code, _ in issues if level == "warning")
+    if warned:
+        # Число предупреждений без названий ничего не говорит.
+        print(tr("Внимание по видам: {a0}", a0=", ".join(
+            f"{code} {n}" for code, n in warned.most_common(4))
+            + (tr(" и ещё {a0}", a0=len(warned) - 4) if len(warned) > 4 else "")))
     if not counts:
         return
     site = sorted((c for c in counts if c in SITE_LEVEL),
                   key=lambda c: checks.CODE_WEIGHT.get(c, 99))
     rest = [c for c, _ in counts.most_common() if c not in SITE_LEVEL]
+    import textwrap
     print(tr("Чинить в этом порядке:"))
     for code in (site + rest)[:3]:
         label = tr("сайт") if code in SITE_LEVEL else str(counts[code])
-        print(f"  {label:>5}  {code} — {report._help(code)[:80]}")
+        print(f"  {label:>5}  {code}")
+        # Совет печатается целиком и по ширине терминала: обрезанный на
+        # восьмидесятом символе, он кончался ровно перед тем, что делать.
+        for line in textwrap.wrap(report._help(code), width=68):
+            print(f"         {line}")
 
 
 def _guess_robots(args):
@@ -798,8 +809,8 @@ def cmd_init(args):
 
     print(tr("Проект: {a0}\n", a0=result['root']))
     print(tr("Что понято про проект:"))
-    print(tr("  страницы   {a0}", a0=d['content'])
-          + (tr("   (угадано — проверь)") if d["content_guessed"] else ""))
+    print(tr("  страницы   {a0}", a0=d['content'] or tr('НЕ НАЙДЕНЫ'))
+          + (tr("   (угадано — проверь)") if d["content"] and d["content_guessed"] else ""))
     print(tr("  сайт       {a0}", a0=d['site'] or tr('НЕ НАЙДЕН — впиши в indexgap.json'))
           + (tr("   (угадано — проверь)") if d["site"] and d["site_guessed"] else ""))
     print(tr("  тип        {a0}   ({a1})", a0=d['profile'], a1=d['profile_why']))
@@ -822,8 +833,15 @@ def cmd_init(args):
     if not result["agents"]:
         print(tr("Если работаешь в Codex — добавь блок в AGENTS.md: `indexgap init --agents`"))
 
-    if not d["site"]:
-        print(tr("\n! Адрес сайта определить не удалось. Впиши его в indexgap.json полем `site`, иначе проверять нечего."))
+    if not d["site"] or not d["content"]:
+        # Тупик закрывается готовой командой, а не советом «впиши куда-нибудь».
+        if not d["content"]:
+            print(tr("\n! Каталог со страницами найти не удалось."))
+        if not d["site"]:
+            print(tr("\n! Адрес сайта определить не удалось."))
+        print(tr("  Назови их сам:"))
+        print("  indexgap init --site " + (d["site"].rstrip("/") or "https://example.com")
+              + " --content " + (d["content"] or tr("<каталог со страницами>")) + " --force")
         return 1
 
     print(tr("\nСледующая команда:"))
@@ -1042,6 +1060,8 @@ def preset_language(argv=None):
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="indexgap", description=tr("Контроль качества programmatic-конвейера"))
+    from . import __version__
+    ap.add_argument("--version", action="version", version=f"indexgap {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p):
