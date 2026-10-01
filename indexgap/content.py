@@ -47,16 +47,33 @@ CONFIG = {
 # Число: либо разряды через пробел (18 000), либо целое с дробной частью.
 # Жадное `[\d\s.,]*` съедало точки, запятые и переводы строк, и «* 44 / * 55 руб»
 # давало критичную находку про несуществующее «4455 руб».
-NUMBER = r"\d{1,3}(?:[  \u00a0]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?"
+#
+# Разряды с запятой и точкой идут первыми и целиком: `1,299.99` и немецкое
+# `1.299,99` — одно число. Без них выражение брало `1,299`, а остаток `.99`
+# склеивался со следующим куском, и цена, дословно стоящая в данных,
+# объявлялась выдуманной «299.99 USD».
+NUMBER = (r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d+)?|"
+          r"\d{1,3}(?:[  \u00a0]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
 
-PERCENT = re.compile(r"(" + NUMBER + r")\s*%")
+# Число не начинается с середины другого: перед ним не цифра и не разделитель.
+NOT_INSIDE = r"(?<![\d.,])"
+
+PERCENT = re.compile(NOT_INSIDE + r"(" + NUMBER + r")\s*%")
+
+# Цена, записанная по-английски: валюта перед числом. Такие числа не искались
+# вовсе, и единственная настоящая выдумка на странице — `$95` при `$60`
+# в данных — была единственным, о чём проверка молчала.
+CURRENCY_CODES = ("USD|EUR|GBP|JPY|CNY|INR|AUD|CAD|CHF|SGD|AED|RUB|BRL|MXN|KRW|TRY|"
+                  "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH")
+PREFIX_PRICE = re.compile(
+    r"(?<![\w.,])([$€£¥₹₽]|(?:" + CURRENCY_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
 
 # Общее «число + слово»: ловит «12 лет», «25 тонн», «3500 заказов» —
 # то, чего нет в списке единиц проекта, но что всё равно является фактом.
 # Отрицательный просмотр назад отсекает «топ-10», «айфон-15», «ГОСТ-12»:
 # число, приклеенное к слову дефисом, — часть названия, а не мера.
 GENERIC_FACT = re.compile(
-    r"(?<![^\W\d_]-)(?<!\d)(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|[^\\W\\d_]{1,14}|[%°$€£₽¥₹])", re.U)
+    r"(?<![^\W\d_]-)" + NOT_INSIDE + "(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|[^\\W\\d_]{1,14}|[%°$€£₽¥₹])", re.U)
 
 # Слова, которые после числа не делают его фактом: это нумерация и служебное.
 NON_UNITS = {
@@ -91,7 +108,7 @@ def build_fact_pattern(units: list):
     if not units:
         return None
     alternatives = "|".join(re.escape(u) for u in units)
-    return re.compile(r"(" + NUMBER + r")[  \u00a0]?(?:" + alternatives +
+    return re.compile(NOT_INSIDE + r"(" + NUMBER + r")[  \u00a0]?(?:" + alternatives +
                       r")(?![^\W\d_])", re.I | re.U)
 
 
@@ -149,6 +166,10 @@ def _numbers_in(text: str, fact_pattern) -> dict:
             number = _norm_number(match.group(1))
             if number:
                 found[number] = match.group(0)[len(match.group(1)):].strip()
+    for match in PREFIX_PRICE.finditer(text or ""):
+        number = _norm_number(match.group(2))
+        if number:
+            found.setdefault(number, match.group(1).strip())
     return found
 
 
@@ -162,27 +183,43 @@ def _generic_numbers_in(text: str) -> dict:
         number = _norm_number(match.group(1))
         if not number:
             continue
-        # Год в тексте — не факт строки: «в 2026 году», «с 1998 г.»
-        try:
-            if 1900 <= float(number) <= 2100 and float(number) == int(float(number)) \
-                    and len(number) == 4:
-                continue
-        except ValueError:
-            pass
+        # Год в тексте — не факт строки: «в 2026 году», «с 1998 г.» Годом
+        # считается только голое четырёхзначное число: `1,900` с разделителем
+        # разрядов — это тысяча девятьсот чего-то, а не год.
+        if re.fullmatch(r"\d{4}", match.group(1)) and 1900 <= int(number) <= 2100:
+            continue
         found.setdefault(number, match.group(2).strip())
     return found
 
 
 # Число в данных строки: не приклеенное к буквам, чтобы артикул «A-90-15»
 # не выдавал индульгенцию выдуманной цифре 90.
-ROW_NUMBER = re.compile(r"(?<![\w\-])(" + NUMBER + r")(?![\w\-])")
+#
+# Дефис сам по себе числу не мешает: `3-5 days` — это и 3, и 5, а `2026-03-15`
+# — три числа. Мешает буква в той же цепочке через дефис. Раньше любой дефис
+# рядом выбрасывал число, и диапазон из данных не поддерживал собственные края.
+ROW_NUMBER = re.compile(r"(?<![\w.,])(" + NUMBER + r")(?!\w)")
+_CHAIN = re.compile(r"[\w\-–—]*")
+_CHAIN_BACK = re.compile(r"[\w\-–—]*$")
+
+
+def _numbers_of(value) -> list:
+    """Числа из одного значения строки — кроме тех, что сидят в артикуле."""
+    text, out = str(value), []
+    for match in ROW_NUMBER.finditer(text):
+        chain = (_CHAIN_BACK.search(text[:match.start()]).group(0)
+                 + _CHAIN.match(text, match.end()).group(0))
+        if re.search(r"[^\W\d_]", chain):
+            continue
+        out.append(match.group(1))
+    return out
 
 
 def _row_numbers(row: dict) -> set:
     out = set()
     for value in (row or {}).values():
-        for match in ROW_NUMBER.finditer(str(value)):
-            number = _norm_number(match.group(1))
+        for raw in _numbers_of(value):
+            number = _norm_number(raw)
             if number:
                 out.add(number)
     return out
@@ -205,8 +242,8 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
     per_column = defaultdict(Counter)
     for row in rows:
         for column, value in (row or {}).items():
-            for match in ROW_NUMBER.finditer(str(value)):
-                number = _norm_number(match.group(1))
+            for raw in _numbers_of(value):
+                number = _norm_number(raw)
                 if number:
                     per_column[column][number] += 1
     threshold = max(2, int(len(rows) * share))
