@@ -47,6 +47,20 @@ distributions. If you do not have it: `python3 -m pip install --user pipx`.
 To work from the `main` branch instead: `git clone` the repository and
 `pip install -e .`
 
+**See it work before pointing it at your own site.** The repository carries a
+ten-page demo with one of each common failure planted in it:
+
+```bash
+git clone https://github.com/borisowlexa2010-star/IndexGap && cd IndexGap/examples/demo-site
+indexgap check . --site https://demo.example \
+  --dataset cities.csv --sitemap sitemap.xml --robots robots.txt
+```
+
+It reports a price that is not in the data (`$1,900` where the row says
+`$1,600`), two pages that are 89% the same text, a page no link leads to, a
+page closed with `noindex`, a thin page, an AI search crawler blocked in
+robots.txt — and a funnel of 10 generated, 9 indexable, 7 in the sitemap.
+
 Then, once per project:
 
 ```bash
@@ -84,7 +98,8 @@ indexgap notify --key <your-key>    # tell IndexNow what actually changed
 indexgap doctor --sitemap ./public/sitemap.xml --indexed gsc.csv
 indexgap portfolio projects.json    # every site you own, in one run
 indexgap profiles                   # what the content-type presets change
-indexgap cite --domain example.com  # do AI answers cite you? (your own API keys)
+indexgap cite --domain example.com --prompt "best visa service for Singapore"
+                                    # do AI answers cite you? (your own API keys)
 ```
 
 Output is English by default, Russian with `--lang ru` (or `INDEXGAP_LANG`, or
@@ -111,7 +126,7 @@ produce two competing pages, and it is cheaper never to create the second.
 
 | Check | Why it matters |
 |---|---|
-| **Numbers absent from your data** | prices, terms and counts are verified against the source row. A number that appears nowhere in the dataset is never forgiven, no matter how many pages repeat it |
+| **Numbers absent from your data** | prices, terms and counts are verified against the source row. A price, or a number with one of your project's units, that is not in the data is a critical finding; a number with any other word ("12 years", "3,500 orders") is listed for you to check by eye. Neither is forgiven for being repeated on many pages |
 | Identical heading skeletons | different words, same structure — a stamping tell |
 | Identical opening sentences | the second tell |
 | Leftover brief, `status: draft` | unfinished pages never reach the sitemap or the IndexNow queue |

@@ -333,6 +333,15 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
     return {"matched": matched, "ambiguous": sorted(set(ambiguous))}
 
 
+def _shown(number: str, unit: str) -> str:
+    """Число с единицей так, как его пишут: `$1900`, а не `1900 $`."""
+    if unit and unit in "$€£¥₹₽":
+        return f"{unit}{number}"
+    if unit and unit.upper() in CURRENCY_CODES.split("|"):
+        return f"{unit} {number}"
+    return f"{number} {unit}".strip()
+
+
 def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                 fact_units: list = None) -> list:
     """
@@ -368,7 +377,7 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             issues.append((
                 "critical", page.url, "unsupported-number",
                 tr("в тексте есть числа, которых нет в данных: ")
-                + ", ".join(f"{n} {u}".strip() for n, u in
+                + ", ".join(_shown(n, u) for n, u in
                             sorted(unknown_strong.items())[:6])
                 + (tr(" и ещё") if len(unknown_strong) > 6 else "")))
         if unknown_weak:

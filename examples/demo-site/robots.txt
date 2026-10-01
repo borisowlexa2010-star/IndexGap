@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+Sitemap: https://demo.example/sitemap.xml
