@@ -214,5 +214,31 @@ class TestIndexNowAnswers(unittest.TestCase):
         self.assertEqual(self.submit(403)["accepted"], [])
 
 
+class TestManifestSurvivesAnAddressForm(Fixture):
+    def test_an_entry_under_the_old_form_of_the_address_is_still_the_page(self):
+        """Адрес страницы стал таким, каким его объявляет canonical. Манифест,
+        записанный прежней версией, хранит его со слэшем — и без сверки по
+        ключу каждая страница после обновления считалась бы новой: сегодняшний
+        `lastmod` и повторная отправка всего сайта."""
+        pages = self.pages({
+            "index.html": html("Главная", ["/a"]),
+            "a/index.html": html("Страница").replace(
+                "<head>", '<head><link rel="canonical" href="https://example.com/a">'),
+        })
+        page = next(p for p in pages if p.url.endswith("/a"))
+        old = {SITE + "/a/": {"hash": page.content_hash, "lastmod": "2026-01-15",
+                              "notified": page.content_hash},
+               SITE + "/": {"hash": pages[0].content_hash, "lastmod": "2026-01-10",
+                            "notified": pages[0].content_hash}}
+        out = tempfile.mkdtemp(prefix="indexgap-out-")
+        self.addCleanup(shutil.rmtree, out, True)
+        result = publish.build_sitemap(pages, out, SITE, manifest=old, today="2026-10-01")
+        text = open(os.path.join(out, "sitemap.xml"), encoding="utf-8").read()
+        self.assertIn("<loc>https://example.com/a</loc><lastmod>2026-01-15</lastmod>", text)
+        self.assertNotIn(SITE + "/a/", result["manifest"])
+        diff = publish.diff_changed(pages, old)
+        self.assertEqual((diff["new"], diff["changed"], diff["removed"]), ([], [], []))
+
+
 if __name__ == "__main__":
     unittest.main()
