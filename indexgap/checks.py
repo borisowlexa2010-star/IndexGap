@@ -28,6 +28,7 @@ import re
 from collections import Counter, defaultdict, deque
 
 from . import hreflang
+from .core import is_dense  # noqa: E402
 from .core import url_key
 from .publish import indexable
 from .settings import display_width, text_volume
@@ -44,6 +45,11 @@ CONFIG = {
     "thin_words": 250,          # меньше слов — тонкая страница
     "boilerplate_share": 0.90,  # биграмма в этой доле страниц считается шаблонной
     "boilerplate_min_pages": 8, # меньше — статистики нет, вердикта не будет
+    # Подставленные значения шаблона: пара страниц считается одним текстом,
+    # если различающихся слов у каждой не больше этого числа или этой доли.
+    "slot_words": 6,
+    "slot_share": 0.04,
+    "slot_floor": 0.30,         # ниже этого сходства пару не перепроверяем
     "unique_share_min": 0.25,   # доля неповторяющегося текста ниже — тревога
     "max_click_depth": 3,       # глубже — почти не индексируется
     "shell_words": 100,         # меньше слов при N скриптах — пустой JS-каркас
@@ -75,15 +81,38 @@ def _shingles(words: list, k: int) -> set:
 
 
 def _minhash(shingles: set, perms: int) -> tuple:
-    """Классический minhash на семействе (a*x + b) mod prime."""
+    """
+    Minhash одной перестановкой: шингл попадает в одну из `perms` корзин, в
+    корзине держится минимум. Пустые корзины берут значение у соседней.
+
+    Классический вариант считал `perms` хэшей на каждый шингл — тридцать два
+    прохода по странице в чистом Python, десять секунд из семидесяти на большом
+    каталоге. Здесь проход один, а оценка сходства не хуже.
+    """
     if not shingles:
         return tuple([0] * perms)
-    values = list(shingles)
-    sig = []
-    for i in range(perms):
-        a = 0x9E3779B97F4A7C15 * (i + 1) & _MASK or 1
-        b = 0xBF58476D1CE4E5B9 * (i + 3) & _MASK
-        sig.append(min([(a * s + b) % _PRIME for s in values]))
+    empty = _PRIME
+    sig = [empty] * perms
+    for s in shingles:
+        h = (0x9E3779B97F4A7C15 * s + 0xBF58476D1CE4E5B9) & _MASK
+        slot = h % perms
+        value = h // perms
+        if value < sig[slot]:
+            sig[slot] = value
+    if empty in sig:
+        # Уплотнение: пустая корзина занимает значение ближайшей непустой
+        # справа, по кругу, со сдвигом на расстояние — иначе две короткие
+        # страницы совпадали бы по всем пустым корзинам сразу.
+        filled = [i for i, v in enumerate(sig) if v != empty]
+        if not filled:
+            return tuple([0] * perms)
+        for i in range(perms):
+            if sig[i] != empty:
+                continue
+            step = 1
+            while sig[(i + step) % perms] == empty or (i + step) % perms not in filled:
+                step += 1
+            sig[i] = sig[(i + step) % perms] + step * 0x9E3779B1
     return tuple(sig)
 
 
@@ -117,7 +146,10 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
     words = words or {p.url: p.words for p in pages}
     shingles = {}
     for p in pages:
-        sh = _shingles(words.get(p.url, []), k)
+        own = words.get(p.url, [])
+        # У иероглифики слово — один знак: пять знаков подряд совпадают у любых
+        # двух текстов на одну тему. Шингл берётся вдвое длиннее.
+        sh = _shingles(own, k * 2 if is_dense(own) else k)
         if sh:
             shingles[p.url] = sh
     urls = sorted(shingles)
@@ -172,10 +204,38 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         if not union:
             continue
         j = len(sa & sb) / union
+        if cfg["slot_floor"] <= j < cfg["near_duplicate"]:
+            j = max(j, _without_slots(words.get(a, []), words.get(b, []), k, cfg))
         if j >= cfg["similar"]:
             out.append((by_url[a], by_url[b], round(j, 3)))
     out.sort(key=lambda t: (-t[2], t[0].url, t[1].url))
     return {"pairs": out, "notes": notes, "method": method}
+
+
+def _without_slots(a: list, b: list, k: int, cfg: dict) -> float:
+    """
+    Сходство двух страниц, если не считать подставленных значений.
+
+    Шаблон «Аренда в городе {city}» даёт страницы, одинаковые на 95% слов, но
+    каждое вхождение города портит пять соседних шинглов — и сходство выходило
+    0,6: ниже порога, без единой находки. Пять тысяч страниц одного шаблона
+    получали «критичных: 0».
+
+    Подставленное значение узнаётся в паре: это слова, которые есть на одной
+    странице и которых нет на другой, при том что таких слов мало. Они
+    заменяются одной меткой, и сходство считается заново. Если страницы
+    различаются многими словами, это разный текст, и замены не происходит.
+    """
+    va, vb = set(a), set(b)
+    only_a, only_b = va - vb, vb - va
+    limit = max(cfg["slot_words"], int(min(len(va), len(vb)) * cfg["slot_share"]))
+    if not (only_a or only_b) or len(only_a) > limit or len(only_b) > limit:
+        return 0.0
+    k = k * 2 if is_dense(a) else k
+    sa = _shingles(["\x00" if w in only_a else w for w in a], k)
+    sb = _shingles(["\x00" if w in only_b else w for w in b], k)
+    union = len(sa | sb)
+    return len(sa & sb) / union if union else 0.0
 
 
 def trimmed_words(pages: list) -> dict:
@@ -189,26 +249,49 @@ def trimmed_words(pages: list) -> dict:
     префикс и суффикс — то есть та же шапка и тот же подвал.
     """
     plain = [p for p in pages if not p.chrome]
-    words = {p.url: p.words for p in pages}
-    if len(plain) < 3 or len(plain) == len(pages):
+    words = {p.url: list(p.words) for p in pages}
+    # Раньше обрезка не делалась вовсе, если <main> нет ни у одной страницы, —
+    # то есть ровно на тех сайтах, где шапка и подвал сидят в тексте каждой
+    # страницы и сравниваются как её содержание.
+    if len(plain) < 3:
         return words
 
     lists = [words[p.url] for p in plain if words[p.url]]
     if not lists:
         return words
-    shortest = min(len(w) for w in lists)
+    lengths = sorted(len(w) for w in lists)
+    typical = lengths[len(lengths) // 10]          # не самая короткая: одна
+    need = max(2, math.ceil(len(lists) * 0.9))     # страница не решает за всех
 
-    prefix = 0
-    while prefix < shortest // 2 and len({w[prefix] for w in lists}) == 1:
-        prefix += 1
-    suffix = 0
-    while suffix < shortest // 2 - prefix and len({w[-1 - suffix] for w in lists}) == 1:
-        suffix += 1
-    if not prefix and not suffix:
+    def common(position):
+        # Слово общее, если стоит на этом месте у девяти страниц из десяти.
+        # Требование «у всех» обнуляла одна иначе свёрстанная страница.
+        counts = Counter(w[position] for w in lists if len(w) > abs(position) - (position < 0))
+        word, n = counts.most_common(1)[0] if counts else ("", 0)
+        return word if n >= need else None
+
+    head = []
+    while len(head) < typical // 2:
+        word = common(len(head))
+        if word is None:
+            break
+        head.append(word)
+    tail = []
+    while len(tail) < typical // 2 - len(head):
+        word = common(-1 - len(tail))
+        if word is None:
+            break
+        tail.append(word)
+    if not head and not tail:
         return words
+    tail.reverse()
     for p in plain:
         w = words[p.url]
-        words[p.url] = w[prefix:len(w) - suffix] if suffix else w[prefix:]
+        if head and w[:len(head)] == head:
+            w = w[len(head):]
+        if tail and w[-len(tail):] == tail:
+            w = w[:-len(tail)]
+        words[p.url] = w
     return words
 
 
@@ -235,25 +318,49 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
     def bigrams(seq):
         return [f"{seq[i]} {seq[i+1]}" for i in range(len(seq) - 1)]
 
-    df = Counter()
+    # Шаблон свой у каждого языка. Если считать фразы по всем страницам сразу,
+    # на сайте из двух языков ни одна не встретится «в 90% страниц» — и
+    # проверка молчала именно там, где шаблонов больше одного: шестьсот
+    # страниц одного шаблона давали шестьсот находок, дважды по триста — ноль.
+    cohorts = defaultdict(list)
     for p in pages:
-        df.update(set(bigrams(words.get(p.url, []))))
-    # Порог не может требовать «на всех страницах»: при девяти страницах
-    # ceil(9*0.9) давал ровно 9, шаблон переставал находиться, и добавление
-    # десятой страницы переворачивало вердикт с «всё чисто» на «10 критичных».
-    threshold = max(2, min(len(pages) - 1,
-                           math.ceil(len(pages) * cfg["boilerplate_share"])))
-    common = {g for g, c in df.items() if c >= threshold}
+        cohorts[_cohort(p)].append(p)
 
-    shares = {}
-    for p in pages:
-        grams = bigrams(words.get(p.url, []))
-        if not grams:
-            shares[p.url] = 0.0
+    shares, small = {}, 0
+    for members in cohorts.values():
+        if len(members) < cfg["boilerplate_min_pages"]:
+            small += len(members)
             continue
-        unique = sum(1 for g in grams if g not in common)
-        shares[p.url] = round(unique / len(grams), 3)
-    return {"shares": shares, "skipped": ""}
+        df = Counter()
+        for p in members:
+            df.update(set(bigrams(words.get(p.url, []))))
+        # Порог не может требовать «на всех страницах»: при девяти страницах
+        # ceil(9*0.9) давал ровно 9, шаблон переставал находиться, и добавление
+        # десятой страницы переворачивало вердикт с «всё чисто» на «10 критичных».
+        threshold = max(2, min(len(members) - 1,
+                               math.ceil(len(members) * cfg["boilerplate_share"])))
+        common = {g for g, c in df.items() if c >= threshold}
+        for p in members:
+            grams = bigrams(words.get(p.url, []))
+            if not grams:
+                shares[p.url] = 0.0
+                continue
+            unique = sum(1 for g in grams if g not in common)
+            shares[p.url] = round(unique / len(grams), 3)
+    skipped = ""
+    if small:
+        skipped = tr("у {a0} страниц(ы) на языках, где страниц меньше {a1}, — "
+                     "на такой выборке вердикт был бы случайным",
+                     a0=small, a1=cfg["boilerplate_min_pages"])
+    return {"shares": shares, "skipped": skipped}
+
+
+def _cohort(page) -> str:
+    """Группа, внутри которой шаблон общий: язык страницы, а нет его — префикс пути."""
+    lang = (getattr(page, "lang", "") or "").split("-")[0].lower()
+    if lang:
+        return lang
+    return _locale_split(page.url)[1]
 
 
 # Корень сайта на Next.js — часто не страница, а заглушка: RSC-поток с командой

@@ -161,6 +161,34 @@ def parse_xml(data):
         raise SourceError(tr("это не похоже на XML ({a0})", a0=exc))
 
 
+# Иероглифы и кана: слово — это знак, пробелов между словами нет.
+_CJK = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+# Знаки, которые входят в слово, но буквой не считаются: огласовки арабского и
+# иврита, матры и вирама индийских письменностей, соединители. `\w` их не
+# берёт, и «सिंगापुर» распадалось на четыре куска — счётчик слов на хинди и
+# бенгали завышался вдвое, а сравнение страниц шло по обломкам.
+_MARKS = ("\u0300-\u036f\u0591-\u05c7\u064b-\u065f\u0670\u06d6-\u06ed"
+          "\u0900-\u0963\u0966-\u0dff\u0f00-\u0fff\u200c\u200d")
+_TOKEN = re.compile(f"[{_CJK}]|(?:(?![{_CJK}])[\\w{_MARKS}])+", re.UNICODE)
+
+
+def tokenize(text: str) -> list:
+    """
+    Слова текста. Для письменностей с пробелами — слова целиком, вместе с
+    диакритикой; для иероглифики — по знаку: фраза без пробелов была одним
+    «словом», и две одинаковые китайские страницы не сравнивались вовсе.
+    """
+    return _TOKEN.findall((text or "").lower())
+
+
+def is_dense(words: list) -> bool:
+    """Преобладает ли в тексте иероглифика (слово — один знак)."""
+    if not words:
+        return False
+    sample = words[:400]
+    return sum(1 for w in sample if len(w) == 1 and "\u3040" <= w <= "\ufaff") * 2 > len(sample)
+
+
 @dataclass
 class Page:
     path: str                      # путь к файлу на диске
@@ -191,7 +219,13 @@ class Page:
 
     @property
     def words(self) -> list:
-        return re.findall(r"\w+", self.text.lower(), flags=re.UNICODE)
+        # Слова считаются один раз: за прогон их спрашивали десятки тысяч раз,
+        # и каждый раз текст разбирался заново. Новый текст — новый разбор.
+        cached = self.__dict__.get("_words")
+        if cached is None or cached[0] is not self.text:
+            cached = (self.text, tokenize(self.text))
+            self.__dict__["_words"] = cached
+        return cached[1]
 
     @property
     def word_count(self) -> int:
@@ -223,7 +257,11 @@ class Page:
         payload = "\x00".join([
             (self.title or "").strip(),
             (self.description or "").strip(),
-            " ".join(self.words),
+            # Хэш держится на прежнем, простом разборе слов. Разбор для
+            # сравнения страниц стал точнее, но менять вместе с ним хэш нельзя:
+            # обновление пакета сдвинуло бы `lastmod` у каждой страницы на
+            # хинди и китайском и отправило бы их в IndexNow заново.
+            " ".join(re.findall(r"\w+", (self.text or "").lower(), flags=re.UNICODE)),
         ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 

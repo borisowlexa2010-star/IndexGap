@@ -126,6 +126,25 @@ def _shard_loc(base_url: str, public_prefix: str, name: str) -> str:
     return "/".join(parts)
 
 
+def _rekeyed(manifest: dict, pages: list) -> dict:
+    """
+    Манифест, в котором записи стоят под нынешними адресами страниц.
+
+    Запись ищется по ключу адреса, а не по строке: `/a/` и `/a` — одна
+    страница. Форма адреса может смениться (страница стала объявлять canonical
+    без слэша, обновился пакет), и запись под прежней формой терять нельзя:
+    вместе с ней теряются `lastmod` и отметка об отправке.
+    """
+    manifest = dict(manifest or {})
+    current = {p.key: p.url for p in pages}
+    for url in [u for u in manifest if not u.startswith("_")]:
+        now = current.get(url_key(url))
+        if now and now != url:
+            entry = manifest.pop(url)
+            manifest.setdefault(now, entry)
+    return manifest
+
+
 def foreign_sitemap(out_dir: str, manifest: dict) -> str:
     """
     Путь к sitemap.xml, который написал не пакет, — или пустая строка.
@@ -156,7 +175,7 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
     команде notify и не должно исчезать при сборке sitemap.
     """
     today = today or date.today().isoformat()
-    manifest = dict(manifest or {})
+    manifest = _rekeyed(manifest, pages)
     included = sorted([p for p in pages if indexable(p)], key=lambda p: p.url)
 
     new_manifest = {k: dict(v) for k, v in manifest.items() if isinstance(v, dict)}
@@ -264,7 +283,7 @@ def diff_changed(pages: list, manifest: dict) -> dict:
     Сравнение идёт с полем `notified`, а не с `hash`: сборка sitemap обновляет
     `hash` и не должна при этом «съедать» очередь на отправку.
     """
-    manifest = manifest or {}
+    manifest = _rekeyed(manifest, pages)
     new, changed, unchanged = [], [], []
     for p in pages:
         if not indexable(p):
@@ -285,7 +304,7 @@ def diff_changed(pages: list, manifest: dict) -> dict:
 
 def mark_notified(manifest: dict, pages: list, urls: list) -> dict:
     """Отмечает успешно отправленные URL. Вызывается только после реальной отправки."""
-    manifest = dict(manifest or {})
+    manifest = _rekeyed(manifest, pages)
     by_url = {p.url: p for p in pages}
     for url in urls:
         page = by_url.get(url)

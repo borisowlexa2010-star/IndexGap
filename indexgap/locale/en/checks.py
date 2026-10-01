@@ -2,6 +2,9 @@
 """checks, sources, profiles — English."""
 
 MESSAGES = {
+    "у {a0} страниц(ы) на языках, где страниц меньше {a1}, — на такой выборке вердикт был бы случайным":
+        "for {a0} page(s) in languages with fewer than {a1} pages — on such a "
+        "sample the verdict would be chance",
     # ── checks ────────────────────────────────────────────────────────────────
     "Из сравнения дублей исключено {a0} страниц: noindex, canonical на другую страницу или черновик. Технические проверки этих страниц сохранены.":
         "Excluded {a0} pages from duplicate comparisons: noindex, a canonical "
