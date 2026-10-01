@@ -250,6 +250,14 @@ def url_key(url: str) -> str:
     if not path:
         path = "/"
     host = (parts.netloc or "").lower()
+    # Кириллический домен и его punycode — один хост: ссылка на
+    # `xn--e1afmkfd.xn--p1ai` с сайта `пример.рф` считалась внешней.
+    if not host.isascii():
+        try:
+            name, sep, port = host.partition(":")
+            host = name.encode("idna").decode("ascii") + sep + port
+        except UnicodeError:
+            pass
     # Порт по умолчанию — это тот же адрес: `example.com:443` и `example.com`
     # различались, и страница молча выпадала из sitemap по «чужому» canonical.
     for scheme, port in (("https", ":443"), ("http", ":80")):
@@ -891,9 +899,9 @@ def load_page(path: str, root: str, base_url: str) -> Page:
         notes.append(tr("файл прочитан как {a0}, а не UTF-8", a0=encoding))
 
     url = path_to_url(path, root, base_url)
-    host = urlparse(base_url).netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]
+    # Хост сравнивается в том же виде, что и адреса: без www, без порта по
+    # умолчанию, в punycode. Иначе `example.com:443/c/` — внешняя ссылка.
+    host = urlsplit(url_key(base_url)).netloc
 
     if path.lower().endswith((".md", ".markdown")):
         meta, body = {}, raw
@@ -987,10 +995,7 @@ def load_page(path: str, root: str, base_url: str) -> Page:
         if markdown and not base_href and not _EXT_RE.search(urlsplit(href).path):
             base = url
         absolute, _ = urldefrag(urljoin(base, href))
-        netloc = urlparse(absolute).netloc.lower()
-        if netloc.startswith("www."):
-            netloc = netloc[4:]
-        if netloc != host:
+        if urlsplit(url_key(absolute)).netloc != host:
             continue
         absolute = normalize_url(absolute)
         key = url_key(absolute)

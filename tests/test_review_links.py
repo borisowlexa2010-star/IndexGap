@@ -137,5 +137,62 @@ class TestRedirectStubs(Fixture):
         }), ["/", "/old/"])
 
 
+class TestUrlIdentity(Fixture):
+    def test_query_idn_and_default_port_links_resolve(self):
+        """`/a/?utm_source=nav` — ссылка на `/a/`: метка в адресе страницу не меняет."""
+        _, result = self.site({
+            "index.html": html("Главная", ["/a/?utm_source=nav", "/b/?ref=home#top",
+                                           "https://example.com:443/c/"]),
+            "a/index.html": html("А", ["/"]),
+            "b/index.html": html("Б", ["/"]),
+            "c/index.html": html("В", ["/"]),
+        })
+        self.assertEqual(self.codes(result, "orphan", "unreachable"), [])
+
+    def test_idn_host_and_its_punycode_are_one_site(self):
+        root = tempfile.mkdtemp(prefix="indexgap-idn-")
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel, text in {
+                "index.html": html("Главная", ["https://xn--e1afmkfd.xn--p1ai/a/"]),
+                "a/index.html": html("А", ["https://пример.рф/"])}.items():
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            with open(os.path.join(root, rel), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        pages = core.load_pages(root, "https://пример.рф")[0]
+        result = checks.run_all(pages, "https://пример.рф/")
+        self.assertEqual([i[2] for i in result["issues"] if i[2] in ("orphan", "unreachable")], [])
+
+    def test_links_through_redirect_stub_reach_target(self):
+        """Алиасы Hugo: страница-заглушка без единой <a>, но с переадресацией."""
+        def alias(to):
+            return (f'<html><head><title>{to}</title><meta http-equiv="refresh" '
+                    f'content="0; url={to}"></head></html>')
+        _, result = self.site({
+            "index.html": html("Главная", ["/old-docs/"]),
+            "old-docs/index.html": alias("/docs/"),
+            "docs/index.html": alias("/docs/intro/"),
+            "docs/intro/index.html": html("Введение", ["/docs/more/"]),
+            "docs/more/index.html": html("Дальше", ["/"]),
+        })
+        self.assertEqual(self.codes(result, "orphan", "unreachable"), [])
+
+
+class TestOneOrphanList(Fixture):
+    def test_orphan_count_is_the_same_everywhere(self):
+        closed = html("Закрытая").replace("<head>", '<head><meta name="robots" content="none">')
+        stub = ('<html><head><title>x</title><meta http-equiv="refresh" '
+                'content="0; url=/a/"></head></html>')
+        _, result = self.site({
+            "index.html": html("Главная", ["/a/"]),
+            "a/index.html": html("А", ["/"]),
+            "closed/index.html": closed,
+            "old/index.html": stub,
+            "lost/index.html": html("Потерянная", ["/"]),
+        })
+        found = [i[1].replace(SITE, "") for i in result["issues"] if i[2] == "orphan"]
+        self.assertEqual(found, ["/lost/"])
+        self.assertEqual([u.replace(SITE, "") for u in result["graph"]["orphans"]], found)
+
+
 if __name__ == "__main__":
     unittest.main()
