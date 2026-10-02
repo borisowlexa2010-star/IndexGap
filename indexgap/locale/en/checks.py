@@ -2,6 +2,12 @@
 """checks, sources, profiles — English."""
 
 MESSAGES = {
+    "{a0} страниц(ы) связаны с остальным сайтом только через hreflang: ссылок <a> на них с других языковых версий нет (так устроен переключатель языков в виде списка). Поисковик их находит, поэтому недостижимыми они не считаются; человеку без переключателя туда не попасть.":
+        "{a0} page(s) are joined to the rest of the site by hreflang alone: no <a> "
+        "link leads to them from other language versions (that is how a "
+        "drop-down language switcher works). A search engine finds them, so they "
+        "are not counted as unreachable; a person without the switcher cannot "
+        "get there.",
     "верхняя граница должна быть больше нижней": "the upper bound must be above the lower one",
     "настройка «{a0}» = {a1}: {a2}": "setting “{a0}” = {a1}: {a2}",
     "настройка «{a0}» должна быть числом, а в конфиге стоит {a1}":
@@ -19,11 +25,10 @@ MESSAGES = {
         "for {a0} page(s) in languages with fewer than {a1} pages — on such a "
         "sample the verdict would be chance",
     # ── checks ────────────────────────────────────────────────────────────────
-    "Из сравнения дублей исключено {a0} страниц: noindex, canonical на другую страницу или черновик. Технические проверки этих страниц сохранены.":
+    "Из сравнения дублей исключено {a0} страниц: noindex, canonical на другую страницу или черновик.":
         "Excluded {a0} pages from duplicate comparisons: noindex, a canonical "
-        "pointing elsewhere, or draft status. Technical checks on those pages "
-        "remain enabled.",
-    " и ещё {a0}": " and {a0} more",
+        "pointing elsewhere, or draft status.",
+" и ещё {a0}": " and {a0} more",
     "H1 на странице {a0}, нужен один": "{a0} H1 headings on the page, one is needed",
     "`{a0}` — на {a1} страницах из {a2} ({a3:.0%}). Это свойство шаблона, а не список страниц: чинится один раз в шаблоне и исчезает везде.":
         "`{a0}` — on {a1} pages out of {a2} ({a3:.0%}). That is a property of the "

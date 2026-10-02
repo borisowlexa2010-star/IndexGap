@@ -851,6 +851,39 @@ def _strip_fences(md: str) -> str:
     return "\n".join(out)
 
 
+_MD_REF_DEF = re.compile(
+    r"^[ \t]{0,3}\[([^\]\n]{1,300})\]:[ \t]*<?([^\s>]{1,2000})>?", re.M)
+_MD_REF_USE = re.compile(r"(?<!!)\[([^\]\n]{1,300})\](?:\[([^\]\n]{0,300})\])?(?![(:\[])")
+_MD_INLINE = re.compile(
+    r"(?<!!)\[([^\]\n]{0,1000})\]\(\s*<?((?:[^()\s<>]|\([^()\s]{0,500}\)){1,2000})>?")
+_MD_AUTO = re.compile(r"<(https?://[^\s<>]{1,2000})>")
+_MD_HTML_A = re.compile(r"<a\b[^<>]{0,1000}?\bhref\s*=\s*[\"']([^\"'<>]{1,2000})[\"']", re.I)
+
+
+def _md_links(body: str) -> list:
+    """
+    Ссылки из Markdown: (текст, адрес).
+
+    Не только `[текст](адрес)`. README больших проектов ссылается сносками —
+    `[C++][cpp]` и `[cpp]: cppguide.html` внизу; бывают автоссылки `<https://…>`
+    и обычный `<a href>`. Ничего из этого не читалось, и страницы,
+    перечисленные на главной, оказывались сиротами. Ссылка внутри `кода` —
+    пример, а не ссылка.
+    """
+    text = re.sub(r"`[^`\n]{0,2000}`", " ", body)
+    found = [(label, href) for label, href in _MD_INLINE.findall(text)]
+    refs = {name.strip().lower(): href for name, href in _MD_REF_DEF.findall(text)}
+    if refs:
+        plain = _MD_REF_DEF.sub("", text)
+        for label, ref in _MD_REF_USE.findall(plain):
+            href = refs.get((ref or label).strip().lower())
+            if href:
+                found.append((label, href))
+    found += [(href, href) for href in _MD_AUTO.findall(text)]
+    found += [("", href) for href in _MD_HTML_A.findall(text)]
+    return found
+
+
 def drop_spans(text: str, spans) -> str:
     """
     Вырезает куски между открывающей и закрывающей меткой: `<!--` … `-->`,
@@ -895,6 +928,9 @@ def drop_spans(text: str, spans) -> str:
 
 # Следы недописанной страницы и то, где их искать не нужно.
 BRIEF_MARKERS = ("БРИФ ДЛЯ АГЕНТА", "BRIEF FOR THE AGENT", "<!-- TODO", "TODO:")
+# Метки заготовки, которые ставит сам пакет. Голый `TODO:` — слабее: это может
+# быть и пометка автора, и текст о том, как писать такие пометки.
+OWN_BRIEF_MARKERS = BRIEF_MARKERS[:2]
 NOT_PROSE = (("<script", "</script>"), ("<style", "</style>"), ("<pre", "</pre>"),
              ("<code", "</code>"))
 # Где разметка — не разметка: её показывают, выключили или держат про запас.
@@ -1061,13 +1097,14 @@ def _parse_frontmatter(block: str) -> dict:
 
 # ── страница ──────────────────────────────────────────────────────────────────
 
-def load_page(path: str, root: str, base_url: str) -> Page:
+def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Page:
     raw, encoding = read_text(path)
     notes = []
     if not is_utf8(encoding):
         notes.append(tr("файл прочитан как {a0}, а не UTF-8", a0=encoding))
 
-    url = path_to_url(path, root, base_url)
+    url = path_to_url(os.path.join(os.path.dirname(path), "index.md") if as_index else path,
+                      root, base_url)
     # Хост сравнивается в том же виде, что и адреса: без www, без порта по
     # умолчанию, в punycode. Иначе `example.com:443/c/` — внешняя ссылка.
     host = urlsplit(url_key(base_url)).netloc
@@ -1086,12 +1123,17 @@ def load_page(path: str, root: str, base_url: str) -> Page:
             notes.append(tr("фронтматтер открыт, но не закрыт: строка `---` в конце блока"))
         elif raw.lstrip()[:3] == "---":
             notes.append(tr("фронтматтер не распознан"))
-        matches = MD_LINK.findall(_strip_fences(body))
+        matches = _md_links(_strip_fences(body))
         hrefs = [href for _, href in matches]
         md_anchors = [text.strip() for text, _ in matches]
         md_headings = [(len(h), _clean(t)) for h, t in MD_HEADING.findall(_strip_fences(body))]
         base_href = ""
         text = _strip_markdown(body)
+        # Без шапки заголовком страницы становится первый заголовок текста —
+        # так делает GitHub Pages. При шапке без title это не действует:
+        # там отсутствие title — находка.
+        if not m and not toml and md_headings and md_headings[0][0] == 1:
+            meta = {"title": md_headings[0][1]}
         page = Page(
             path=path, url=url,
             title=_clean(meta.get("title", "")),
@@ -1190,8 +1232,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
     и страницы с совпавшими URL. Раньше первый же битый симлинк ронял весь прогон,
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
-    pages, problems, by_key, loaded = [], [], {}, []
+    pages, problems, by_key, loaded, fragments = [], [], {}, [], []
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
+    # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
+    # а README.md становится главной, если своей главной в каталоге нет.
+    jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
     for dirpath, dirnames, filenames in os.walk(root):
         skip = set(ALWAYS_SKIP)
         if dirpath == root and source_repo:
@@ -1214,20 +1259,34 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             # генератор, и каждая получала «сироту» и «тонкую».
             if _ERROR_PAGE.search(os.path.relpath(path, root).replace(os.sep, "/")):
                 continue
+            readme_home = (jekyll and name.lower() == "readme.md"
+                           and not any(f.lower().startswith("index.") for f in filenames))
             try:
-                page = load_page(path, root, base_url)
+                page = load_page(path, root, base_url, as_index=readme_home)
             except SourceError as exc:
                 problems.append(str(exc))
                 continue
             if REPORT_MARK in (page.raw or "")[:400]:
                 continue
             if not path.lower().endswith((".md", ".markdown")):
+                # Кусок шаблона — не страница. В собранный сайт попадают
+                # `partials/nav.html`, `_static/webpack-macros.html`,
+                # `_includes/head.html`: без <html>, <head> и <title>. Каждый
+                # получал «сироту» и «нет title».
+                if _is_fragment(page.raw):
+                    fragments.append(path)
+                    continue
                 page.raw = essence(page.raw)
             loaded.append(page)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
-    loaded, raw_md = _drop_raw_markdown(loaded)
+    loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded)
+    if fragments:
+        problems.append(tr(
+            "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; "
+            "не проверялись: {a1}", a0=len(fragments),
+            a1=", ".join(os.path.relpath(p, root).replace(os.sep, "/") for p in fragments[:5])))
     for page in loaded:
         other = by_key.get(page.key)
         if other is None:
@@ -1261,6 +1320,23 @@ def _has_pages(path: str, exts) -> bool:
         if any(name.lower().endswith(exts) for name in filenames):
             return True
     return False
+
+
+_PAGE_SIGNS = ("<!doctype", "<html", "<head", "<body", "<title")
+
+
+def _is_fragment(raw: str) -> bool:
+    """
+    HTML без единого признака целого документа — заготовка шаблона. Как и файл
+    с командами шаблонизатора (`{% macro %}`) и без <title>: отрисованная
+    страница их не содержит.
+    """
+    head = (raw or "")[:20000].lower()
+    if not head.strip():
+        return False
+    if not any(sign in head for sign in _PAGE_SIGNS):
+        return True
+    return "<title" not in head and bool(re.search(r"\{%-?\s*\w+", head))
 
 
 _ERROR_PAGE = re.compile(

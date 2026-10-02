@@ -140,8 +140,7 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
     excluded = len(pages) - len(eligible)
     if excluded:
         notes.append(tr("Из сравнения дублей исключено {a0} страниц: noindex, "
-                        "canonical на другую страницу или черновик. "
-                        "Технические проверки этих страниц сохранены.", a0=excluded))
+                        "canonical на другую страницу или черновик.", a0=excluded))
     pages = eligible
 
     words = words or {p.url: p.words for p in pages}
@@ -445,6 +444,7 @@ def link_graph(pages: list, home_url: str = None) -> dict:
     by_key = {p.key: p.url for p in pages}
     inbound = defaultdict(set)
     outbound = {}
+    by_hreflang = defaultdict(set)
     unresolved = set()
     for p in pages:
         targets = set()
@@ -467,6 +467,14 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         outbound[p.url] = targets
         for t in targets:
             inbound[t].add(p.url)
+        # hreflang — объявленная связь между версиями страницы. В Astro
+        # Starlight переключатель языков — <select>, ссылок <a> между версиями
+        # нет вовсе, и одиннадцать переводов сайта Gin — 1 122 страницы —
+        # считались недостижимыми. Поисковик по hreflang их находит.
+        for _code, href in hreflang.read_alternates(p):
+            twin = by_key.get(url_key(href)) if href else None
+            if twin and twin != p.url:
+                by_hreflang[p.url].add(twin)
 
     home = by_key.get(url_key(home_url)) if home_url else None
     # Главная-заглушка: ссылок из неё нет, и без этого шага недостижимым
@@ -487,16 +495,27 @@ def link_graph(pages: list, home_url: str = None) -> dict:
     # когда главной среди страниц нет, и предупреждение не печаталось никогда.
     urls = sorted(by_key.values())
 
-    depth = {}
-    if home:
-        depth[home] = 0
-        queue = deque([home])
-        while queue:
-            cur = queue.popleft()
-            for nxt in sorted(outbound.get(cur, ())):
-                if nxt not in depth:
-                    depth[nxt] = depth[cur] + 1
-                    queue.append(nxt)
+    def walk(edges):
+        found = {}
+        if home:
+            found[home] = 0
+            queue = deque([home])
+            while queue:
+                cur = queue.popleft()
+                for nxt in sorted(edges(cur)):
+                    if nxt not in found:
+                        found[nxt] = found[cur] + 1
+                        queue.append(nxt)
+        return found
+
+    by_links = walk(lambda u: outbound.get(u, ()))
+    depth = walk(lambda u: set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+    # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
+    only_hreflang = sorted(set(depth) - set(by_links))
+    hreflang_inbound = defaultdict(set)
+    for source, twins in by_hreflang.items():
+        for twin in twins:
+            hreflang_inbound[twin].add(source)
 
     return {
         "home": home,
@@ -508,8 +527,9 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         "home_redirected_from": redirected_from,
         # Сама заглушка — не страница: на неё не должны вести ссылки, и из неё
         # никуда не нужно доходить.
+        "only_hreflang": only_hreflang,
         "orphans": sorted(u for u in urls if not inbound.get(u) and u != home
-                          and u != redirected_from),
+                          and u != redirected_from and not hreflang_inbound.get(u)),
         "dead_ends": sorted(u for u in urls if not outbound.get(u)),
         "unreachable": sorted(u for u in urls if u not in depth
                               and u != redirected_from) if home else [],
@@ -590,10 +610,18 @@ def is_shell(page, cfg: dict = None) -> bool:
     if volume >= 25:
         return False
     scripts = blocks.get("script", 0)
-    # И наоборот: сборка Vite — пустой узел и один модульный скрипт. Порог
-    # «три скрипта» её не видел.
-    if volume < 5 and (scripts >= 1 or EMPTY_MOUNT.search(page.raw or "")):
+    # Пустой узел под приложение — прямое свидетельство: сборка Vite — это он
+    # и один модульный скрипт. Порог «три скрипта» её не видел.
+    if EMPTY_MOUNT.search(page.raw or ""):
         return scripts >= 1
+    # Страница с заголовком или с отрисованным меню статична: она короткая, а
+    # не пустая. Раздел mdBook из одного заголовка, галерея Sphinx из картинок
+    # и заготовка «TO WRITE» объявлялись тем, что «рисует JavaScript», — это
+    # неправда, и чинить там нужно текст, а не рендеринг.
+    if getattr(page, "headings", None) or len((getattr(page, "chrome", "") or "").split()) >= 10:
+        return False
+    if volume < 5 and scripts >= 1:
+        return True
     return scripts >= cfg["shell_scripts"]
 
 
@@ -936,6 +964,28 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
     return kept
 
 
+# Что имеет смысл говорить о странице, закрытой от индекса: само закрытие и
+# то, что касается связей с другими страницами.
+KEEP_ON_CLOSED = {"noindex", "canonical-elsewhere", "nosnippet", "stale-closed",
+                  "translations-parked"}
+
+
+def drop_closed_noise(issues: list, pages: list) -> list:
+    """
+    Убирает находки о содержимом страниц, закрытых от индекса.
+
+    mdBook кладёт в каждый сайт `print.html` и `toc.html` с noindex, и обе
+    получали «нет title», «тонкая», «нет description». Закрытая страница в
+    выдаче не появится: её заголовок, объём и первый абзац никому не видны.
+    Остаются само закрытие и находки hreflang — они про связи, а не про текст.
+    """
+    closed = {p.url for p in pages if p.noindex}
+    if not closed:
+        return issues
+    return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED
+            or i[2].startswith("hreflang-")]
+
+
 def validate_config(cfg: dict) -> list:
     """
     Пороги, вписанные руками: либо действуют, либо названы.
@@ -991,6 +1041,10 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     boiler = boilerplate_profile(pages, cfg, words)
     dupes = find_near_duplicates(pages, cfg, words)
     shells = {p.url for p in pages if is_shell(p, cfg)}
+    # Страница из одного заголовка — тонкая, и об этом сказано. Сравнивать её с
+    # другой такой же и сообщать «100% дубль» и «0% уникального» — та же
+    # находка ещё дважды: сравнивать там нечего.
+    bare = shells | {p.url for p in pages if text_volume(p) < 25}
     multi = hreflang.check(pages, cfg)
     issues_hreflang = multi["issues"]
     # Пары «один язык, разные страны» законно похожи почти дословно.
@@ -1018,12 +1072,19 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             "недостижимость считаются от {a1}: из самой заглушки ссылок нет, "
             "и без этого весь сайт выглядел бы недостижимым.",
             a0=graph["home_redirected_from"], a1=graph["home"]))
+    if graph.get("only_hreflang"):
+        notes.append(tr(
+            "{a0} страниц(ы) связаны с остальным сайтом только через hreflang: ссылок "
+            "<a> на них с других языковых версий нет (так устроен переключатель "
+            "языков в виде списка). Поисковик их находит, поэтому недостижимыми они "
+            "не считаются; человеку без переключателя туда не попасть.",
+            a0=len(graph["only_hreflang"])))
     if graph["home_missing"]:
         notes.append(
             tr("главной страницы нет среди разобранных файлов, поэтому глубина клика и недостижимость не считались. Проверь --site и корень каталога."))
 
     for url, share in sorted(boiler["shares"].items()):
-        if share < cfg["unique_share_min"] and url not in shells:
+        if share < cfg["unique_share_min"] and url not in bare:
             issues.append(("critical", url, "low-uniqueness",
                            tr("только {a0:.0%} текста уникально — остальное шаблон", a0=share)))
     # Ссылки нужны странице, чтобы её нашли и проиндексировали. Закрытой от
@@ -1068,7 +1129,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                         "hreflang. Для них canonical — ошибка.",
                         a0=regional_shown))
     for url in sorted(partners):
-        if url in shells:
+        if url in bare:
             continue
         found = sorted(partners[url], reverse=True)
         best, other = found[0]
@@ -1085,8 +1146,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # страновых гайдов: «переписать 588 страниц» — приговор, «развести 62 темы»
     # — задача. Поэтому счёт групп говорится вслух.
     groups = _clusters([(a.url, b.url) for a, b, j in dupes["pairs"]
-                        if j >= cfg["near_duplicate"] and a.url not in shells
-                        and b.url not in shells
+                        if j >= cfg["near_duplicate"] and a.url not in bare
+                        and b.url not in bare
                         and tuple(sorted((a.url, b.url))) not in regional])
     if groups:
         biggest = max(len(g) for g in groups)
@@ -1097,7 +1158,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # Пока они оставались в `duplicates`, счётчик «похожих пар» показывал
     # сотни находок там, где находка ровно одна: пустой HTML.
     pairs = [(a, b, j) for a, b, j in dupes["pairs"]
-             if a.url not in shells and b.url not in shells]
+             if a.url not in bare and b.url not in bare]
 
     # Заглушка-редирект — не страница: человек и поисковик видят то, куда она
     # ведёт. На каталоге виз девять языковых `/connect` и корень давали 40
@@ -1111,6 +1172,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             "поисковик видит то, куда они ведут.", a0=len(stubs)))
 
     issues = _collapse_parked(issues, notes, pages, cfg)
+    issues = drop_closed_noise(issues, pages)
 
     return {
         "pages": pages,

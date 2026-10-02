@@ -386,7 +386,9 @@ class TestFalseAlarms(Fixture):
 
 class TestVolume(Fixture):
     def test_duplicates_are_counted_per_page_not_per_pair(self):
-        pages = [_FakePage(f"{SITE}/p{i}/", "совершенно одинаковый текст страницы здесь")
+        # Текста достаточно, чтобы было что сравнивать: страница из пяти слов —
+        # тонкая, и в сравнение дублей она больше не идёт.
+        pages = [_FakePage(f"{SITE}/p{i}/", "совершенно одинаковый текст страницы здесь " * 8)
                  for i in range(20)]
         result = checks.run_all(pages, home_url=f"{SITE}/p0/")
         near = [i for i in result["issues"] if i[2] == "near-duplicate"]

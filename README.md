@@ -397,7 +397,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-558 scenarios. Each one is a reproduced defect: from three waves of adversarial
+573 scenarios. Each one is a reproduced defect: from three waves of adversarial
 review (the latest by ten independent reviewers, each on its own area), from
 runs against live sites, plus the behaviour of profiles, portfolio and project
 installation. The rule: a finding without a test comes back.
@@ -421,6 +421,18 @@ tool in three ways:
   social link (`VK`), short in characters and perfectly informative. Anchor
   length is now measured in the right unit, and any code that hits ≥90% of pages
   is labelled as something to fix once in the template.
+
+**And on other people's sites.** The built sites of twelve open projects were
+then run through it — mdBook and `just` (mdBook), MkDocs and HTTPX (MkDocs),
+Zola, Jekyll, Immer (Docusaurus), Gin (Astro Starlight), NetworkX (Sphinx),
+isort, pre-commit, Google's style guides (GitHub Pages sources): 4,000 pages on
+eight generators. Not one crash, and five kinds of false alarm, each of which
+would repeat on every site built the same way: language versions joined only
+by hreflang called unreachable (1,122 pages on one site), a heading-only page
+called a JavaScript shell, template partials taken for pages, Markdown without
+front matter dropped from a GitHub Pages source, content findings on `noindex`
+service pages. Critical findings across the twelve went from 1,606 to 397, and
+the ones that remain were checked by hand.
 
 ---
 

@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.12.0 — 2026-10-02
+
+Until now the package had seen three sites of its author and examples written
+around known findings. This release comes from running it on the built sites
+of twelve open projects — eight generators, about 4,000 pages: mdBook, `just`,
+MkDocs, HTTPX, isort, Zola, Jekyll, Immer (Docusaurus), pre-commit, Gin (Astro
+Starlight), NetworkX (Sphinx) and Google's style guides (GitHub Pages
+sources). It did not crash on any of them. It was wrong in five ways, each of
+which would repeat on every site built with the same tool.
+
+* **Language versions joined by hreflang are reachable.** Astro Starlight's
+  language switcher is a `<select>`: there is no `<a>` between versions at
+  all. On gin-gonic.com that made 1,122 of 1,225 pages "unreachable" — every
+  translation. hreflang is a declared link, and a search engine follows it;
+  such pages are counted in a note instead.
+* **A short page is not a JavaScript shell.** A chapter page holding only its
+  heading, a gallery page of thumbnails, a "TO WRITE" stub were said to have
+  their text "drawn by JavaScript". They are static and short: a page with a
+  heading or a rendered menu is thin, not a shell. An empty mount node is
+  still one.
+* **Template fragments are not pages.** `overrides/partials/nav.html`,
+  `_static/webpack-macros.html`, `_includes/head-custom.html` ship inside
+  built sites; each was an orphan with no title. A file with no `<html>`,
+  `<head>` or `<title>`, or with template tags and no title, is skipped and
+  named.
+* **A GitHub Pages source is read as GitHub Pages builds it.** With
+  `_config.yml` present, Markdown without front matter is a page, `README.md`
+  is the home page when the directory has no index, and the first heading is
+  the title. Reference-style links (`[C++][cpp]` with `[cpp]: cppguide.html`
+  below), autolinks and inline `<a href>` are followed; a link inside inline
+  code is not.
+* **A page closed to indexing is not judged as content.** mdBook puts a
+  `noindex` `print.html` and `toc.html` into every site; both got "no title",
+  "thin", "no description". Only the closure itself and hreflang findings are
+  kept for such pages.
+
+Also from the run:
+
+* `TODO:` in the visible text is a warning, not a critical finding: a style
+  guide that explains TODO comments was "unfinished". The package's own brief
+  markers stay critical.
+* Pages too short to compare (under 25 words) are left out of duplicate and
+  uniqueness checks — they are already reported as thin.
+* Briefs show file paths with forward slashes on every system: the one failure
+  of the first Windows run of the suite. Windows and macOS are required CI
+  jobs now.
+
+Across the twelve sites critical findings went from 1,606 to 397. What remains
+was checked by hand and stands: docs published twice under two versions,
+release notes served under eleven language addresses without being
+translated, a root page that declares an hreflang cluster it is not part of.
+
+573 tests on 3.9, 3.12 and 3.14.
+
 ## 1.11.0 — 2026-10-01
 
 The second wave of the ten-reviewer audit: the findings rated high. Where a

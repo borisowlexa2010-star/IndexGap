@@ -35,7 +35,7 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter, defaultdict
-from .core import BRIEF_MARKERS, NOT_PROSE, _strip_fences, drop_spans
+from .core import BRIEF_MARKERS, NOT_PROSE, OWN_BRIEF_MARKERS, _strip_fences, drop_spans
 from .i18n import tr
 
 CONFIG = {
@@ -511,9 +511,15 @@ def check_brief(pages: list, cfg: dict = None) -> list:
         # `TODO:` в скрипте или в примере кода — заметка разработчика, а не
         # недописанная страница.
         raw = _strip_fences(drop_spans(page.raw or "", NOT_PROSE))
-        if any(marker in raw for marker in BRIEF_MARKERS):
+        if any(marker in raw for marker in OWN_BRIEF_MARKERS):
             issues.append(("critical", page.url, "brief-left",
                            tr("в файле остался блок брифа или TODO — страница не дописана")))
+        elif any(marker in raw for marker in BRIEF_MARKERS):
+            # Руководство по стилю, описывающее комментарии `TODO:`, получало
+            # «страница не дописана» критичной находкой.
+            issues.append(("warning", page.url, "brief-left",
+                           tr("в тексте страницы есть «TODO» — если это пометка автора, "
+                              "а не предмет текста, страница не дописана")))
         status = (page.meta.get("status") or "").lower()
         if status in ("draft", "черновик", "todo"):
             issues.append(("critical", page.url, "still-draft",

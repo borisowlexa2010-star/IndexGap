@@ -372,7 +372,8 @@ def _analyse(args):
         aeo_result = aeo.run(pages, robots_path, cfg=project.get("aeo"))
         analysis["issues"] += aeo_result["issues"]
 
-    analysis["issues"] = checks.sort_issues(analysis["issues"])
+    analysis["issues"] = checks.sort_issues(
+        checks.drop_closed_noise(analysis["issues"], pages))
     return {"pages": pages, "rows": rows, "project": project,
             "analysis": analysis, "notes": notes,
             "template_notes": checks.template_wide(analysis["issues"],
