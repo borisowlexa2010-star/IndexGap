@@ -2,6 +2,9 @@
 """core, freshness, publish, portfolio, engines, install — English."""
 
 MESSAGES = {
+    "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; не проверялись: {a1}":
+        "{a0} HTML file(s) are template fragments with no <html> or <title>, not "
+        "pages; not checked: {a1}",
     "каталог {a0}/ пропущен как сборочный. Если проверять нужно собранный сайт — передай его каталог явно.":
         "the {a0}/ directory was skipped as build output. If the built site is "
         "what you want checked, pass that directory explicitly.",

@@ -2,6 +2,9 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    "в тексте страницы есть «TODO» — если это пометка автора, а не предмет текста, страница не дописана":
+        "the page text contains “TODO” — if it is the author's note rather than "
+        "the subject of the text, the page is unfinished",
     "{a0} — это каталог, а нужен файл.": "{a0} is a directory, a file is needed.",
     "{a0} уже существует и это не данные отчёта indexgap.\n    Перезаписывать чужой файл я не буду — укажи другое имя через --out.":
         "{a0} already exists and is not indexgap report data.\n    I will not "

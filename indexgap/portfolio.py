@@ -176,7 +176,8 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
                 funnel = doctor.funnel(pages, sm["urls"], None)
                 result["funnel"] = funnel["steps"]
 
-        analysis["issues"] = checks.sort_issues(analysis["issues"])
+        analysis["issues"] = checks.sort_issues(
+            checks.drop_closed_noise(analysis["issues"], pages))
         result["issues"] = analysis["issues"]
         result["counts"] = dict(Counter(i[0] for i in analysis["issues"]))
         result["orphans"] = len(analysis["graph"]["orphans"])
