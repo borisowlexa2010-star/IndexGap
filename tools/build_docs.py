@@ -306,6 +306,8 @@ WHY = {
    "deliberate — the point is that it should be a decision, taken knowingly, "
    "rather than a line inherited from a template.",
 
+ "robots-blocks-page":
+   "A page in the build that robots.txt does not let Googlebot crawl. The rules are matched the way Google matches them: the agent's own group beats `*`, the longest matching rule wins, `Allow` wins a tie, `*` and `$` work. Such a page cannot be read, so its text, canonical and even its noindex are invisible \u2014 it can still be indexed as a bare URL from links. Pages already closed with noindex and a whole-site block (reported once as `robots-blocks-all`) are not repeated here.",
  "robots-blocks-all":
    "Disallow: / for every agent closes the entire site to every search engine. "
    "It is almost always a staging file that was deployed to production."
@@ -381,7 +383,7 @@ FAMILIES = [
 
  ("robots", "robots.txt",
   "Site-level findings: one file, one fix, reported once rather than per page.",
-  ["robots-blocks-all", "robots-no-sitemap", "robots-unreadable", "no-robots"]),
+  ["robots-blocks-all", "robots-blocks-page", "robots-no-sitemap", "robots-unreadable", "no-robots"]),
 
  ("freshness", "Freshness",
   "Pages whose usefulness has an expiry date, still open for indexing after it "

@@ -181,6 +181,9 @@ MESSAGES = {
     "robots.txt не найден — это не ошибка, но и не контроль: передай путь через --robots, чтобы проверить":
         "robots.txt was not found — not an error, but not a check either: pass its "
         "path with --robots to have it checked",
+    "robots.txt не пускает поисковик на страницу (правило «Disallow: {a0}») — текст он не прочитает, ссылки и sitemap ведут сюда зря":
+        "robots.txt does not let the search engine into the page (rule “Disallow: {a0}”) — "
+        "it will not read the text; the links and the sitemap lead here for nothing",
     "robots.txt не прочитан: {a0}": "robots.txt was not read: {a0}",
     "{a0} абзац(ев) длиннее {a1} символов — такой блок трудно процитировать целиком":
         "{a0} paragraph(s) longer than {a1} characters — a block like that is hard "

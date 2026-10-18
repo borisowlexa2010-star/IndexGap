@@ -167,6 +167,7 @@ CODE_HELP = {
     "jsonld-no-type": N_("В блоке JSON-LD нет @type."),
     "no-date": N_("Нет машиночитаемой даты."),
     "no-author": N_("Не указан автор или организация."),
+    "robots-blocks-page": N_("robots.txt не пускает поисковик на эту страницу: она есть в сборке и, скорее всего, в sitemap, но текст её прочитан не будет."),
     "robots-blocks-all": N_("robots.txt закрывает сайт целиком."),
     "ai-crawler-blocked": N_("В robots.txt закрыт краулер ИИ-поисковика."),
     "robots-no-sitemap": N_("В robots.txt нет строки Sitemap."),
