@@ -822,7 +822,7 @@ LEVEL_ORDER = {"critical": 0, "warning": 1, "info": 2}
 # потом косметика. Раньше сортировка шла по алфавиту кода, и главная находка
 # пакета оказывалась в самом низу списка.
 CODE_WEIGHT = {
-    "stale-event": 0, "translations-parked": 1, "unsupported-number": 1, "still-draft": 2, "brief-left": 3,
+    "stale-event": 0, "translations-parked": 1, "unsupported-number": 1, "still-draft": 2, "brief-left": 3, "unfilled-slot": 2, "llm-leftover": 3, "mojibake": 4,
     "noindex": 3, "nosnippet": 4, "canonical-elsewhere": 5,
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
     "hreflang-no-self": 5, "hreflang-no-return": 6,

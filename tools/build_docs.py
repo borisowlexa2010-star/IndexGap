@@ -92,6 +92,12 @@ WHY = {
    "engines index the unfinished version, and the finished one later competes "
    "with its own placeholder."
    " The mark is doing its job — it is the pipeline around it that ignored it. indexgap treats the draft flag as authoritative in both directions: a page carrying it is kept out of the sitemap and out of IndexNow, and is reported here so that the flag does not quietly hold a finished page back either.",
+ "unfilled-slot":
+   "The most programmatic of programmatic failures: a slot the generator did not fill. Unrendered template syntax (`{{city}}`, `{city}`, `${city}`, `%CITY%`, `{% %}`), values the code failed to produce (`undefined`, `NaN`, `null`, `None`, `[object Object]`) in the title, description, headings or JSON-LD, a bracketed dataset column name such as `[City]`, lorem ipsum — critical. An empty place in a title or heading (`Plumbers in , TX`, a title that opens with ` | Brand`) is a warning. Code blocks, scripts, TeX formulas and Markdown sources (where `{{ }}` is Hugo or Jekyll syntax) are not judged.",
+ "llm-leftover":
+   "A model's reply pasted in place of the text — a refusal, an \"As an AI language model\" or a \"Certainly! Here is\" preamble. A warning, because an article can quote such a phrase; on a generated page it almost never does.",
+ "mojibake":
+   "UTF-8 read as Latin-1 somewhere in the pipeline: `CafÃ©`, `Weâ€™re`, `Ð¿Ñ€Ð¸`. A warning that names the sample, so the step that lost the encoding can be found.",
  "brief-left":
    "A work order or TODO left in the published file is visible to every reader "
    "and to every crawler. It is also the clearest possible signal that the page "
@@ -335,7 +341,8 @@ FAMILIES = [
   "it. This is the part of the package that has no equivalent in a general site "
   "auditor, and the reason indexgap will not write page text for you: a "
   "generator that supplied the numbers could not then check them.",
-  ["unsupported-number", "check-by-eye", "source-note", "still-draft", "brief-left"]),
+  ["unsupported-number", "check-by-eye", "source-note", "still-draft", "brief-left",
+   "unfilled-slot", "llm-leftover", "mojibake"]),
 
  ("indexing", "Indexing and reachability",
   "Whether a page can be found, crawled and kept in the index at all. Nothing "

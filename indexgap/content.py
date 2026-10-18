@@ -32,10 +32,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections import Counter, defaultdict
-from .core import BRIEF_MARKERS, NOT_PROSE, OWN_BRIEF_MARKERS, _strip_fences, drop_spans
+from .core import (BRIEF_MARKERS, NOT_PROSE, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, _strip_fences,
+                   drop_spans, find_slots, visible_text)
 from .i18n import tr
 
 CONFIG = {
@@ -507,6 +509,89 @@ def _uninformative_length(anchor: str, cfg: dict) -> bool:
     return len(text) < cfg["min_anchor_chars"]
 
 
+_FIELD_LEFTOVER = re.compile(r"\b(?:undefined|NaN)\b|(?<=\S)\s+\b(?:null|None)\b")
+_EMPTY_SLOT = re.compile(
+    # «Plumbers in , TX»: пробел перед знаком — пустое место. «Where it comes
+    # from?» — законный предлог в конце фразы, пробела там нет.
+    r"\b(?:in|for|near|at|from|of|в|во|для|на|из|по)\s+[,.;:|)]"
+    r"|^\s*[|–—:,\-]\s|\(\s*\)|,\s+,")
+_LD_LEFTOVER = {"undefined", "NaN", "null", "None", "[object Object]"}
+
+
+def _ld_strings(node, depth=0):
+    if depth > 40:
+        return
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for value in node.values():
+            yield from _ld_strings(value, depth + 1)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _ld_strings(value, depth + 1)
+
+
+def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
+    """
+    Следы незаполненного шаблона: `{{city}}`, `%CITY%`, `undefined`, `NaN`,
+    `[object Object]`, «Plumbers in , TX», lorem ipsum, ответ модели вместо
+    текста, текст в чужой кодировке.
+
+    Видимый текст разбор собирает сам, без кода и скриптов (`core.find_slots`).
+    Здесь добавляются поля, которые генератор заполняет отдельно: title,
+    description, заголовки и JSON-LD. Слово в квадратных скобках — шов, только
+    если так называется колонка датасета: «[City]» при колонке `city`.
+    """
+    columns = {str(f).strip().lower() for f in fields or () if str(f).strip()}
+    issues = []
+    for page in sorted(pages, key=lambda p: p.url):
+        markdown = (page.path or "").lower().endswith((".md", ".markdown"))
+        slots = page.slots
+        if slots is None:
+            slots = find_slots(visible_text(page.raw) if not markdown else page.text,
+                               markdown=markdown)
+        critical, empty = [], []
+        llm = [s for k, s in slots if k == "llm"]
+        mojibake = [s for k, s in slots if k == "mojibake"]
+        for kind, sample in slots:
+            if kind in ("template", "leftover", "lorem"):
+                critical.append(sample)
+            elif kind == "bracket" and sample.strip("[]").strip().lower() in columns:
+                critical.append(sample)
+        fields_text = [page.title or "", page.description or ""] + [
+            t for level, t in (page.headings or []) if level <= 2]
+        for value in fields_text:
+            if not markdown:
+                critical += [m.group(0) for m in SLOT_TEMPLATE.finditer(value)]
+            critical += [m.group(0).strip() for m in _FIELD_LEFTOVER.finditer(value)]
+            if _EMPTY_SLOT.search(value):
+                empty.append(value.strip())
+        for block in page.jsonld or []:
+            try:
+                data = json.loads(block)
+            except (ValueError, RecursionError):
+                continue
+            for value in _ld_strings(data):
+                if value.strip() in _LD_LEFTOVER:
+                    critical.append(value.strip())
+                else:
+                    critical += [m.group(0) for m in SLOT_TEMPLATE.finditer(value)]
+        critical = list(dict.fromkeys(critical))
+        if critical or empty:
+            shown = ", ".join(f"«{s}»" for s in (critical or empty)[:3])
+            issues.append(("critical" if critical else "warning", page.url, "unfilled-slot",
+                           tr("незаполненные места шаблона: {a0}", a0=shown)))
+        if llm:
+            issues.append(("warning", page.url, "llm-leftover",
+                           tr("в тексте остался ответ модели, а не текст страницы: «{a0}»",
+                              a0=llm[0])))
+        if mojibake:
+            issues.append(("warning", page.url, "mojibake",
+                           tr("текст в неверной кодировке: «{a0}» — файл сохранён в одной "
+                              "кодировке, а прочитан в другой", a0=mojibake[0])))
+    return issues
+
+
 def check_brief(pages: list, cfg: dict = None) -> list:
     """Выполнен ли бриф: не остались ли следы заготовки и вменяемы ли анкоры."""
     cfg = {**CONFIG, **(cfg or {})}
@@ -562,6 +647,7 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
     seams = check_template_seams(pages, cfg)
     issues += seams["issues"]
     issues += check_brief(pages, cfg)
+    issues += check_slots(pages, fields=list(rows[0].keys()) if rows else (), cfg=cfg)
 
     notes = []
     if seams.get("skipped"):

@@ -158,6 +158,12 @@ MESSAGES = {
         "The link points at a page the build does not have: a 404 on the live "
         "site. Most often the template links to a data row that a filter kept out "
         "of generation. Remove the link from the template or bring the page back.",
+    "На странице осталось незаполненное место шаблона — `{{city}}`, `%CITY%`, `undefined`, `NaN`, пустое место в заголовке или lorem ipsum. Читатель и поисковик видят шов генератора. Чинится в данных или в шаблоне, а не на странице.":
+        "A template slot was left unfilled — `{{city}}`, `%CITY%`, `undefined`, `NaN`, an empty place in the title, or lorem ipsum. Readers and search engines see the generator's seam. It is fixed in the data or the template, not on the page.",
+    "В тексте остался ответ модели вместо текста страницы: «As an AI language model…», «Certainly! Here is…». Такую страницу видно сразу, и её нельзя публиковать.":
+        "The model's reply was left in place of the page text: “As an AI language model…”, “Certainly! Here is…”. Such a page is obvious at a glance and must not be published.",
+    "Часть текста прочитана не в той кодировке: «CafÃ©», «â€™». Обычно это данные, сохранённые в UTF-8 и прочитанные как Latin-1 где-то в конвейере.":
+        "Part of the text was read in the wrong encoding: “CafÃ©”, “â€™”. Usually it is data saved as UTF-8 and read as Latin-1 somewhere in the pipeline.",
     "На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела.":
         "No internal link points at this page. It is in the sitemap, but the "
         "crawler will not get there. Link to it from the section's hub pages.",
