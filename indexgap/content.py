@@ -541,8 +541,10 @@ _FIELD_LEFTOVER = re.compile(r"\b(?:undefined|NaN)\b|(?<=\S)\s+\b(?:null|None)\b
 _EMPTY_SLOT = re.compile(
     # «Plumbers in , TX»: пробел перед знаком — пустое место. «Where it comes
     # from?» — законный предлог в конце фразы, пробела там нет.
-    r"\b(?:in|for|near|at|from|of|в|во|для|на|из|по)\s+[,.;:|)]"
-    r"|^\s*[|–—:,\-]\s|\(\s*\)|,\s+,")
+    # Знак после пробела и перед пробелом или концом: «GraphQL for .NET» и
+    # «in .editorconfig» — не пустое место. `pick()` — вызов функции.
+    r"\b(?:in|for|near|at|from|of|в|во|для|на|из|по)\s+[,.;:|)](?=\s|$)"
+    r"|^\s*[|–—:,\-]\s|(?<![\w)])\(\s*\)|,\s+,")
 _LD_LEFTOVER = {"undefined", "NaN", "null", "None", "[object Object]"}
 
 
@@ -582,8 +584,13 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
         llm = [s for k, s in slots if k == "llm"]
         mojibake = [s for k, s in slots if k == "mojibake"]
         for kind, sample in slots:
-            if kind in ("template", "leftover", "lorem"):
+            if kind in ("template", "leftover"):
                 critical.append(sample)
+            elif kind == "lorem":
+                # Документация шаблонизаторов показывает lorem ipsum в примерах
+                # (hexo.io). На странице каталога это забытая заглушка — но
+                # видна она и так, а критичной находкой заслоняла бы остальное.
+                empty.append(sample)
             elif kind == "bracket" and sample.strip("[]").strip().lower() in columns:
                 critical.append(sample)
         fields_text = [page.title or "", page.description or ""] + [

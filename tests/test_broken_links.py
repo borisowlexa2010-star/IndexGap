@@ -117,3 +117,14 @@ class BrokenLinks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BareIndex(unittest.TestCase):
+    def test_a_bare_index_link_is_the_page(self):
+        # VitePress cleanUrls: href="/en-US/resource/index".
+        self.assertEqual(core.url_key(SITE + "/en-US/resource/index"),
+                         core.url_key(SITE + "/en-US/resource/"))
+        self.assertEqual(core.url_key(SITE + "/en-US/resource/index/"),
+                         core.url_key(SITE + "/en-US/resource/"))
+        self.assertEqual(core.url_key(SITE + "/index"), core.url_key(SITE + "/"))
+        self.assertNotEqual(core.url_key(SITE + "/reindex"), core.url_key(SITE + "/"))
