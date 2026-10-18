@@ -34,26 +34,29 @@ real. On 4,201 built pages of five other projects: 491 such blocks → 33, with
 the page text, word count, hash, counters and headings identical on every page
 and the first paragraph unchanged on every one.
 
-Seen on the same run and left as it is:
+Seen on the same run, and fixed as well:
 
-* `no-question-headings` counts the headings of the site template together with
-  the article's. On eventiq.io the footer columns ("Platform", "Blog") are on
-  86 pages, the call to action on 83, "Keep reading" on 82; the median page
-  gets 40% of its subheadings from the template. The share of questions is
-  lowered on every page and the verdict changes on 2 of the 12 pages where the
-  finding fires. Headings are collected for the whole document, and `no-h1`,
-  `many-h1` and the repeated-skeleton check read the same list — the fix is a
-  second list, not a filter.
-* `vague-anchor` judges "ROI" and "FAQ" by length (under four characters). The
-  list of short anchors that are fine holds language codes and social networks
-  only; an all-capitals abbreviation is a common menu label.
-* `<h5>`, `<h6>`, `<figcaption>`, `<blockquote>` and `<br><br>` do not end a
-  paragraph either. Of the 33 long blocks left on the other projects, 15 are
-  paragraphs and 18 are cards and form widgets built from `<div>` and `<span>`.
-* In Markdown, text placed right under a heading with no empty line between
-  them is not among the paragraphs; a numbered list is not counted as a list,
-  so `no-structure` can fire next to one; a table inside a blockquote is not
-  recognised.
+* **Headings of the site template are not the article's.** `no-question-headings`
+  counted the footer columns ("Platform", "Blog"), the related-reading box
+  ("Keep reading") and the call to action together with the article's own
+  subheadings: 23% of the median eventiq.io page's subheadings came from the
+  template. Headings inside `<aside>`, `<footer>` and `<nav>` (or the matching
+  ARIA roles) no longer count for it. `no-h1`, `many-h1` and the
+  repeated-skeleton check still read every heading on the page.
+* **An abbreviation is a label.** `vague-anchor` called "FAQ", "ROI", "API" and
+  "ЖКХ" uninformative because they are shorter than four characters. Two or
+  more capital letters are now read as an abbreviation; "here" and "тут" are
+  still reported.
+* **More places end a paragraph:** `<h5>` and `<h6>` (which are now headings
+  too), `<figcaption>`, `<blockquote>` and two `<br>` in a row. A single `<br>`
+  is still a line break inside the paragraph.
+* **Markdown:** text right under a heading, with no empty line between them, is
+  a paragraph; a numbered list counts as a list, so `no-structure` no longer
+  fires beside one; a table inside a blockquote is a table.
+* **`--out report.json` writes the data to `report.json` and the report to
+  `report.html`.** It used to write the HTML report into the `.json` file, and
+  the next run refused to overwrite it as "not indexgap report data". `--out`
+  has a help text now.
 
 ## 1.12.0 — 2026-10-02
 

@@ -500,6 +500,10 @@ def _uninformative_length(anchor: str, cfg: dict) -> bool:
         return False
     if any(not JUDGEABLE_LETTER.match(ch) for ch in letters):
         return False
+    # «FAQ», «ROI», «API», «ЖКХ»: аббревиатура заглавными — подпись пункта
+    # меню, а не «тут». Одна буква аббревиатурой не бывает.
+    if len(letters) >= 2 and "".join(letters).isupper():
+        return False
     return len(text) < cfg["min_anchor_chars"]
 
 

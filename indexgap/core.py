@@ -211,6 +211,7 @@ class Page:
     paragraphs: list = field(default_factory=list) # абзацы основного текста
     blocks: dict = field(default_factory=dict)     # счётчики li/table/img и т.п.
     alternates: list = None                        # hreflang: (код, href); None — не собирались
+    outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
 
     @property
     def key(self) -> str:
@@ -464,6 +465,12 @@ class _Extractor(HTMLParser):
         self.base = ""
         self.hrefs = []
         self.headings = []
+        # Те же заголовки без врезок, подвала и меню. `no-question-headings`
+        # считал колонки подвала и «Keep reading» заголовками статьи: на
+        # eventiq.io это 40% подзаголовков медианной страницы.
+        self.outline = []
+        self._chrome_stack = []
+        self._br_run = False       # последним в тексте был <br>, а после него — ничего
         self.anchors = []
         self.jsonld = []
         self.alternates = []       # (код hreflang как написан, href)
@@ -541,6 +548,8 @@ class _Extractor(HTMLParser):
         self._depth = len(self._open)
         while self._main_stack and self._main_stack[-1][1] > self._depth:
             self._main_stack.pop()
+        while self._chrome_stack and self._chrome_stack[-1] > self._depth:
+            self._chrome_stack.pop()
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -604,6 +613,19 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and _is_aside(tag, a):
             self._flush_paragraph()
             self._aside_stack.append(self._depth)
+        if tag not in VOID_TAGS and (tag in _CHROME_TAGS
+                                     or a.get("role", "").lower() in _CHROME_ROLES):
+            self._chrome_stack.append(self._depth)
+        # Два <br> подряд — граница абзаца: так верстают тексты, собранные
+        # из CMS без <p>. Один <br> — перенос строки внутри абзаца.
+        if tag == "br":
+            if self._br_run:
+                self._flush_paragraph()
+            self._br_run = True
+        else:
+            self._br_run = False
+        if tag in _OWN_BLOCKS:
+            self._flush_paragraph()
         # Границы абзаца, которых раньше не было. Таблица от подписи до
         # последней ячейки и весь <dl> были одним «абзацем»: на eventiq.io
         # `long-paragraph` стоял на 43 страницах из 87, а прозой из 55 блоков
@@ -673,7 +695,7 @@ class _Extractor(HTMLParser):
             # из шестидесяти восьми.
             if "alternate" in rel.split() and a.get("hreflang"):
                 self.alternates.append((a["hreflang"].strip(), a.get("href", "").strip()))
-        elif tag in ("h1", "h2", "h3", "h4"):
+        elif tag in _HEADING_TAGS:
             self._flush_paragraph()
             self._in_heading = int(tag[1])
             self._heading_buf = ""
@@ -721,10 +743,12 @@ class _Extractor(HTMLParser):
             self._glue = False
         if tag == "title":
             self._in_title = False
-        elif tag in ("h1", "h2", "h3", "h4") and self._in_heading:
+        elif tag in _HEADING_TAGS and self._in_heading:
             text = _clean(self._heading_buf)
             if text:
                 self.headings.append((self._in_heading, text))
+                if not self._chrome_stack:
+                    self.outline.append((self._in_heading, text))
             self._in_heading = 0
             # Заголовок не абзац: раньше он становился отдельным «абзацем»
             # и занимал место прямого ответа.
@@ -736,7 +760,7 @@ class _Extractor(HTMLParser):
             # Подпись таблицы — её заголовок. Абзацем она не бывает никогда:
             # иначе на странице без прозы прямой ответ искали бы в подписи.
             self._para_buf = []
-        elif tag in ("p", "div", "section", "li", "td", "th", "dl"):
+        elif tag in ("p", "div", "section", "li", "td", "th", "dl") or tag in _OWN_BLOCKS:
             self._flush_paragraph()
 
     def handle_data(self, data):
@@ -755,6 +779,7 @@ class _Extractor(HTMLParser):
         if not data.strip():
             self._glue = False
             return
+        self._br_run = False
         # Пробел до или после куска означает границу слова.
         lead = data[:1].isspace()
         text = data.strip()
@@ -823,6 +848,13 @@ _ASIDE_NEVER = {"html", "body", "main", "article"}
 # Чем является блок текста: абзацем, данными (таблица, код) или служебным.
 _PROSE, _DATA, _SERVICE = 0, 1, 2
 _DATA_TAGS = {"table", "pre"}
+# Шаблон вокруг статьи: врезки, подвал, меню. Их заголовки — не разделы текста.
+_CHROME_TAGS = {"aside", "footer", "nav"}
+_CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
+_HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+# Блоки, которые абзац заканчивают и сами им становятся: подпись к рисунку
+# склеивалась с текстом до и после, цитата — тоже.
+_OWN_BLOCKS = {"figcaption", "blockquote"}
 _TABLE_PARTS = {"caption", "thead", "tbody", "tfoot", "tr", "td", "th"}
 
 # Какой открытый элемент закрывает новый тег, если закрывающего не написали.
@@ -1049,6 +1081,24 @@ def _strip_markdown(md: str) -> str:
 
 
 _MD_LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|(\d{1,9})[.)])[ \t]+")
+_MD_QUOTE = re.compile(r"^(?:[ \t]{0,3}>)+[ \t]?")
+_MD_HEADING_LINE = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]|$)")
+
+
+def _md_list_items(body: str) -> int:
+    """
+    Пункты списков, нумерованных тоже. Нумерованный список начинается с
+    единицы, как в CommonMark: «2019. год» посреди абзаца пунктом не считается.
+    """
+    count = 0
+    for block in re.split(r"\n[ \t]*\n", body):
+        listed = False
+        for line in block.split("\n"):
+            mark = _MD_LIST_ITEM.match(_MD_QUOTE.sub("", line))
+            if mark and (listed or mark.group(1) in (None, "1")):
+                count += 1
+                listed = True
+    return count
 
 
 def _md_table_rule(line: str) -> bool:
@@ -1087,10 +1137,13 @@ def _md_blocks(body: str) -> tuple:
     """Блоки прозы и отдельно ячейки таблиц: (абзацы и пункты, ячейки)."""
     prose, cells = [], []
     for block in re.split(r"\n[ \t]*\n", body):
-        block = block.strip()
-        if not block or block.startswith("#"):
+        # Цитата — та же проза и те же таблицы, только с `>` в начале строк.
+        lines = [_MD_QUOTE.sub("", line) for line in block.strip().split("\n")]
+        # Текст сразу под заголовком, без пустой строки, — абзац. Раньше блок,
+        # начатый с `#`, выбрасывался целиком вместе с ним.
+        lines = [line for line in lines if not _MD_HEADING_LINE.match(line)]
+        if not any(line.strip() for line in lines):
             continue
-        lines = block.split("\n")
         rule = next((i for i in range(1, len(lines))
                      if "|" in lines[i - 1] and _md_table_rule(lines[i])), 0)
         if rule:
@@ -1262,8 +1315,8 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             encoding=encoding,
             notes=notes,
             paragraphs=_md_paragraphs(body),
-            blocks={"li": len(re.findall(r"^[ \t]*[-*+][ \t]+", body, re.M)),
-                    "table": len(re.findall(r"^[ \t]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
+            blocks={"li": _md_list_items(_strip_fences(body)),
+                    "table": len(re.findall(r"^[ \t>]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
                     "img": len(re.findall(r"!\[[^\]\n]{0,1000}\]\(", body)),
                     "img_no_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
                     "script": 0, "p": 0},
@@ -1285,6 +1338,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             text=ex.main_text,
             chrome=ex.chrome_text,
             headings=ex.headings,
+            outline=ex.outline,
             anchors=ex.anchors,
             raw=raw,
             encoding=encoding,
