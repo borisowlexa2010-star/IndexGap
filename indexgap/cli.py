@@ -733,6 +733,31 @@ def cmd_sitemap(args):
     return 0
 
 
+def _warn_open_criticals(urls: list) -> None:
+    """
+    Отправка при открытых критичных находках: поисковик придёт за сломанными
+    страницами. Последний отчёт `check` лежит в текущем каталоге под своим
+    именем по умолчанию — если он там есть, критичные находки называются.
+    """
+    path = "indexgap-check.json"
+    if not urls or not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return
+    if not isinstance(data, dict) or JSON_MARK not in data:
+        return
+    sending = {url_key(u) for u in urls}
+    bad = [i for i in data.get("issues") or [] if isinstance(i, dict)
+           and i.get("level") == "critical" and url_key(i.get("url") or "") in sending]
+    if bad:
+        print(tr("  ! в последнем отчёте check ({a0}) у отправляемых страниц {a1} "
+                 "критичных находок — сначала почини и пересобери, потом отправляй",
+                 a0=path, a1=len(bad)))
+
+
 def cmd_notify(args):
     config_path = apply_project_defaults(args)
     pages = _load(args)
@@ -755,11 +780,14 @@ def cmd_notify(args):
 
     urls = diff["new"] + diff["changed"]
     print(tr("Новых: {a0}   Изменённых: {a1}   Без изменений: {a2}   Пропало: {a3}", a0=len(diff['new']), a1=len(diff['changed']), a2=len(diff['unchanged']), a3=len(diff['removed'])))
+    _warn_open_criticals(urls)
     if not urls:
         print(tr("Отправлять нечего."))
         return 0
 
-    registry = engines.fetch_participants(offline=args.offline)
+    # Пробный прогон в сеть не ходит: реестр участников нужен, только когда
+    # действительно отправляем. В CI без сети пробный прогон падал.
+    registry = engines.fetch_participants(offline=args.offline or not args.send)
     names = ", ".join(sorted(registry["participants"]))
     print(tr("Получат уведомление ({a0}): {a1}", a0=registry['source'], a1=names))
     for note in engines.describe_coverage(list(registry["participants"])):
@@ -786,7 +814,14 @@ def cmd_notify(args):
         print(line)
 
     if not args.send:
+        for url in urls[:20]:
+            print(f"  {url}")
+        if len(urls) > 20:
+            print(tr("  … и ещё {a0}", a0=len(urls) - 20))
         print(tr("Это пробный прогон: {a0} URL готовы к отправке. Чтобы отправить — добавь --send.", a0=len(urls)))
+        print(tr("  Порядок: сначала деплой — и проверь, что изменённая страница и файл "
+                 "ключа уже открываются на сайте, — потом --send. Отправленное "
+                 "отмечается, и после раннего --send поисковик обойдёт старую версию."))
         return 0
 
     accepted = outcome["accepted"]
