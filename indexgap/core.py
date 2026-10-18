@@ -22,10 +22,12 @@ URL, title, description, canonical, robots, текст без разметки �
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
@@ -181,7 +183,8 @@ def tokenize(text: str) -> list:
     диакритикой; для иероглифики — по знаку: фраза без пробелов была одним
     «словом», и две одинаковые китайские страницы не сравнивались вовсе.
     """
-    return _TOKEN.findall((text or "").lower())
+    # Слова интернируются: словарь сайта мал, а копий слов — миллионы.
+    return list(map(sys.intern, _TOKEN.findall((text or "").lower())))
 
 
 def is_dense(words: list) -> bool:
@@ -281,6 +284,7 @@ _INDEX_RE = re.compile(r"(^|/)index\.(html?|md|markdown)$", re.I)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
+@functools.lru_cache(maxsize=1 << 18)
 def url_key(url: str) -> str:
     """
     Приводит адрес к форме, в которой ссылка и страница сравнимы.
@@ -338,6 +342,7 @@ def url_key(url: str) -> str:
     return urlunsplit(("", host, path, query, ""))
 
 
+@functools.lru_cache(maxsize=1 << 18)
 def normalize_url(url: str, directory: bool = None) -> str:
     """
     Каноническая форма для вывода.
@@ -663,7 +668,8 @@ class _Extractor(HTMLParser):
 
     def _flush_paragraph(self):
         buf, self._para_buf = self._para_buf, []
-        text = re.sub(r"\s+", " ", " ".join(t for t, _, _ in buf)).strip()
+        # split() режет по тем же пробелам, что и \s, — и впятеро быстрее.
+        text = " ".join(" ".join(t for t, _, _ in buf).split())
         if text:
             self._paragraphs.append((text, any(m for _, m, _ in buf),
                                      max(k for _, _, k in buf)))
@@ -1051,7 +1057,9 @@ def _is_aside(tag: str, attrs: dict) -> bool:
 
 def _clean(text: str) -> str:
     """Нормализация пробелов вместе с неразрывными: NBSP — тоже пробел."""
-    return re.sub(r"[\s\u00a0\u2007\u202f\u2009]+", " ", text or "").strip()
+    # str.split() режет ровно по этим знакам (NBSP и узкие пробелы — тоже
+    # пробелы для isspace), а работает впятеро быстрее re.sub.
+    return " ".join((text or "").split())
 
 
 # ── Markdown ──────────────────────────────────────────────────────────────────
@@ -1852,13 +1860,14 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         page.url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
-def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
+def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
     """
     Возвращает (страницы, проблемы). Проблемы — это файлы, которые не прочитались,
     и страницы с совпавшими URL. Раньше первый же битый симлинк ронял весь прогон,
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
+    todo = []
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
@@ -1881,8 +1890,10 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                     problems.append(tr(
                         "каталог {a0}/ пропущен как сборочный. Если проверять "
                         "нужно собранный сайт — передай его каталог явно.", a0=name))
-        dirnames[:] = [d for d in dirnames
-                       if not d.startswith(".") and d not in skip and d not in OWN_DIRS]
+        # Порядок обхода — по имени: readdir отдаёт каталоги в порядке
+        # файловой системы, и список «первых пяти» менялся от машины к машине.
+        dirnames[:] = sorted(d for d in dirnames
+                             if not d.startswith(".") and d not in skip and d not in OWN_DIRS)
         for name in sorted(filenames):
             if name.startswith(".") or name.lower() in OWN_FILES:
                 continue
@@ -1896,23 +1907,14 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                 continue
             readme_home = (jekyll and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
-            try:
-                page = load_page(path, root, base_url, as_index=readme_home)
-            except SourceError as exc:
-                problems.append(str(exc))
-                continue
-            if REPORT_MARK in (page.raw or "")[:400]:
-                continue
-            if not path.lower().endswith((".md", ".markdown")):
-                # Кусок шаблона — не страница. В собранный сайт попадают
-                # `partials/nav.html`, `_static/webpack-macros.html`,
-                # `_includes/head.html`: без <html>, <head> и <title>. Каждый
-                # получал «сироту» и «нет title».
-                if _is_fragment(page.raw):
-                    fragments.append(path)
-                    continue
-                page.raw = essence(page.raw)
-            loaded.append(page)
+            todo.append((path, root, base_url, readme_home))
+    for kind, path, value in _parse_all(todo, jobs):
+        if kind == "error":
+            problems.append(value)
+        elif kind == "fragment":
+            fragments.append(path)
+        elif kind == "page":
+            loaded.append(value)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
@@ -1924,10 +1926,12 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; "
             "не проверялись: {a1}", a0=len(fragments),
             a1=", ".join(os.path.relpath(p, root).replace(os.sep, "/") for p in fragments[:5])))
+    position = {}
     for page in loaded:
         other = by_key.get(page.key)
         if other is None:
             by_key[page.key] = page
+            position[page.key] = len(pages)
             pages.append(page)
             continue
         # Из двух файлов с одним адресом берём содержательный, а не тот,
@@ -1941,7 +1945,9 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
         problems.append(
             tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
         if keep is page:
-            pages[pages.index(other)] = page
+            # Место по словарю: `pages.index` сравнивал страницы целиком,
+            # и сайт, где у каждой страницы есть двойник, грузился за квадрат.
+            pages[position[page.key]] = page
             by_key[page.key] = page
     if raw_md:
         problems.append(tr(
@@ -1951,6 +1957,69 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
     pages.sort(key=lambda p: p.url)
     return pages, problems
 
+
+def _parse_one(job):
+    """Разбор одного файла: то, что раньше делалось в цикле load_pages."""
+    path, root, base_url, readme_home = job
+    try:
+        page = load_page(path, root, base_url, as_index=readme_home)
+    except SourceError as exc:
+        return "error", path, str(exc)
+    if REPORT_MARK in (page.raw or "")[:400]:
+        return "skip", path, None
+    if not path.lower().endswith((".md", ".markdown")):
+        # Кусок шаблона — не страница. В собранный сайт попадают
+        # `partials/nav.html`, `_static/webpack-macros.html`,
+        # `_includes/head.html`: без <html>, <head> и <title>. Каждый
+        # получал «сироту» и «нет title».
+        if _is_fragment(page.raw):
+            return "fragment", path, None
+        page.raw = essence(page.raw)
+    return "page", path, page
+
+
+def _parse_chunk(jobs):
+    return [_parse_one(job) for job in jobs]
+
+
+def _init_worker(lang):
+    from . import i18n
+    i18n.set_lang(lang)
+
+
+PARALLEL_FROM = 2000
+
+
+def _parse_all(todo: list, jobs: int = 1) -> list:
+    """
+    Разбор HTML — две трети времени прогона, и он независим по файлам.
+    По просьбе вызывающего (CLI) он идёт в нескольких процессах; порядок
+    результата — порядок обхода, так что вывод не меняется. Библиотечный вызов
+    остаётся однопроцессным: spawn на macOS и Windows заново импортирует
+    чужой __main__.
+    """
+    if jobs < 2 or len(todo) < PARALLEL_FROM:
+        return [_parse_one(job) for job in todo]
+    from concurrent.futures import ProcessPoolExecutor
+    from . import i18n
+    size = 64
+    chunks = [todo[i:i + size] for i in range(0, len(todo), size)]
+    try:
+        with ProcessPoolExecutor(jobs, initializer=_init_worker,
+                                 initargs=(i18n.get_lang(),)) as pool:
+            return [item for part in pool.map(_parse_chunk, chunks) for item in part]
+    except (OSError, ImportError, NotImplementedError, RuntimeError):
+        # Нет процессов (песочница, Lambda) — разбираем по-старому.
+        return [_parse_one(job) for job in todo]
+
+
+def default_jobs() -> int:
+    """INDEXGAP_JOBS, иначе число ядер, но не больше восьми."""
+    try:
+        value = int(os.environ.get("INDEXGAP_JOBS") or 0)
+    except ValueError:
+        value = 0
+    return value or min(8, os.cpu_count() or 1)
 
 def _has_pages(path: str, exts) -> bool:
     for _dirpath, _dirnames, filenames in os.walk(path):
