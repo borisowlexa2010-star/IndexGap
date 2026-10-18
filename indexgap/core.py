@@ -1563,6 +1563,9 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
     host = urlsplit(url_key(base_url)).netloc
 
     if path.lower().endswith((".md", ".markdown")):
+        # CRLF и CR — тот же перевод строки. Первый прогон на Windows показал,
+        # что `\r\n\r\n` не считалось пустой строкой: весь файл был одним блоком.
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
         meta, body = {}, raw
         m = FRONTMATTER.match(raw)
         toml = None if m else FRONTMATTER_TOML.match(raw)

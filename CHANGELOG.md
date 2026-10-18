@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.13.1 — 2026-10-18
+
+* **Markdown with Windows line endings.** A file saved with CRLF was one block:
+  `\r\n\r\n` did not count as an empty line, so paragraphs, list items and
+  pipe tables of 1.13.0 were wrong on every such file. Line endings are
+  normalised before Markdown is read. Found by the Windows job of CI on the
+  1.13.0 tag — the test of it now writes CRLF on every system.
+* The wrong-root hint prints its path with forward slashes on Windows too.
+* The GitHub Action takes an `artifact` name, and replaces the artifact if it
+  exists: used twice in one job, the second upload failed with 409.
+
 ## 1.13.0 — 2026-10-18
 
 The third audit. Eight reviewers at once, each from a side the previous two did
