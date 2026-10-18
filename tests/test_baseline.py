@@ -122,3 +122,14 @@ class Baseline(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExitCodes(Baseline):
+    def test_a_missing_sitemap_file_is_an_error(self):
+        self.assertEqual(self.check("--sitemap", os.path.join(self.dir, "nope.xml"),
+                                    "--out", os.path.join(self.dir, "x.json")), 2)
+        self.assertIn("nope.xml", self.stderr.getvalue())
+
+    def test_a_missing_robots_file_is_an_error(self):
+        self.assertEqual(self.check("--robots", os.path.join(self.dir, "robots.txt"),
+                                    "--out", os.path.join(self.dir, "x.json")), 2)

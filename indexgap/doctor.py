@@ -879,13 +879,15 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     indexed_unknown = sorted(in_index - generated) if in_index is not None else []
 
     steps = [
-        {"name": tr("Сгенерировано"), "count": len(generated)},
-        {"name": tr("Пригодно к индексации"), "count": len(publishable),
+        # `id` — для машин: `name` переведён и на русском CI-раннере другой.
+        {"id": "generated", "name": tr("Сгенерировано"), "count": len(generated)},
+        {"id": "indexable", "name": tr("Пригодно к индексации"), "count": len(publishable),
          "lost": len(blocked),
          "why": tr("noindex или canonical на другую страницу")},
     ]
     if in_sitemap is not None:
-        steps.append({"name": tr("В sitemap"), "count": len(in_sitemap & publishable),
+        steps.append({"id": "in-sitemap", "name": tr("В sitemap"),
+                      "count": len(in_sitemap & publishable),
                       "lost": len(publishable - in_sitemap),
                       "why": tr("страница есть на диске, но в sitemap не попала")})
     if in_index is not None:
@@ -901,14 +903,16 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
             label = tr("С показами в поиске")
             why = tr("показов за период не было — страница в индексе без показов "
                      "в эту выгрузку не попадает")
-        steps.append({"name": label, "count": len(known & in_index),
+        steps.append({"id": "with-impressions" if impressions_only else "indexed",
+                      "name": label, "count": len(known & in_index),
                       "lost": len(known - in_index), "why": why})
         for name in sorted(engines_keys):
             hit = engines_keys[name] & known
             kind = sources.kind_of(name)
             suffix = ("" if kind == sources.INDEX
                       else f" ({tr(sources.KIND_TITLE[kind])})")
-            steps.append({"name": tr("  из них в {a0}{a1}", a0=name, a1=suffix), "count": len(hit),
+            steps.append({"id": "in-source", "name": tr("  из них в {a0}{a1}", a0=name, a1=suffix),
+                          "count": len(hit),
                           "lost": len((known & in_index) - hit),
                           "why": tr("есть в других источниках, но не в {a0}", a0=name),
                           "engine": name, "kind": kind})
@@ -941,6 +945,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
             hit = set(cited_keys[name]) & base
             # Без «потеряно»: отсутствие цитирований — не потеря, данные выборка.
             steps.append({
+                "id": "cited",
                 "name": tr("Цитируется: {a0}", a0=name),
                 "count": len(hit), "lost": None,
                 "engine": name, "kind": sources.CITATION})

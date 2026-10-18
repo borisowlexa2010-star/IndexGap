@@ -248,6 +248,7 @@ def _read_rows(args):
 
 
 JSON_MARK = "_indexgap"
+JSON_SCHEMA = 2
 
 
 def check_json_path(path: str) -> str:
@@ -287,7 +288,9 @@ def check_json_path(path: str) -> str:
 def _write_json(path, payload):
     from . import __version__
     if isinstance(payload, dict):
-        payload = {JSON_MARK: __version__, **payload}
+        # `schema` меняется, только когда меняется смысл полей: по нему CI
+        # узнаёт, что разбирать ответ надо иначе. Версия пакета — для людей.
+        payload = {JSON_MARK: __version__, "schema": JSON_SCHEMA, **payload}
     with open(check_json_path(path), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2, default=str)
 
@@ -458,7 +461,21 @@ def _analyse(args):
             "content": content_result, "aeo": aeo_result}
 
 
+def _given_files_exist(args) -> None:
+    """
+    Путь, названный явно, обязан существовать. Опечатка в `--sitemap` или
+    `--robots` раньше давала код 0 и одну строку предупреждения: CI проходил,
+    а сверки с sitemap не было вовсе.
+    """
+    for flag, value in (("--sitemap", getattr(args, "sitemap", None)),
+                        ("--robots", getattr(args, "robots", None))):
+        for item in ([value] if isinstance(value, str) else value or []):
+            if item and "://" not in item and not os.path.exists(item):
+                raise SourceError(tr("{a0} {a1}: такого файла нет.", a0=flag, a1=item))
+
+
 def cmd_check(args):
+    _given_files_exist(args)
     _check_report_pair(args.out)
     # База читается до работы: тот же файл может быть и базой, и результатом.
     baseline = load_baseline(args.baseline) if args.baseline else None
@@ -837,6 +854,7 @@ def cmd_notify(args):
 
 
 def cmd_doctor(args):
+    _given_files_exist(args)
     _check_report_pair(args.out)
     apply_project_defaults(args)
     pages = _load(args)
@@ -1240,6 +1258,9 @@ def cmd_portfolio(args):
     if failed:
         print(tr("Не проверено проектов: {a0}", a0=len(failed)))
     total_critical = sum((r.get("counts") or {}).get("critical", 0) for r in results)
+    # Ни один проект не проверен — это ошибка, а не «всё хорошо», и без --strict.
+    if results and len(failed) == len(results):
+        return 2
     return 1 if (args.strict and (failed or total_critical)) else 0
 
 
