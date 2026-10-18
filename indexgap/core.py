@@ -1063,7 +1063,7 @@ FRONTMATTER_OPEN = re.compile(r"^\ufeff?\s*-{3,}[ \t]*\r?\n")
 # подобранном вводе — сорок килобайт открывающих скобок, незакрытых блоков
 # кода или пустых строк — работало за квадрат и подвешивало разбор одной
 # страницы на десятки секунд. Настоящая разметка в границы укладывается.
-MD_LINK = re.compile(r"(?<!!)\[([^\]\n]{0,1000})\]\(([^)\s]{1,2000})")
+MD_LINK = re.compile(r"(?<!!)\[([^\[\]\n]{0,1000})\]\(([^)\s]{1,2000})")
 MD_HEADING = re.compile(r"^(#{1,4})[ \t]+([^\n]+?)[ \t]*$", re.M)
 _FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)")
 
@@ -1093,10 +1093,10 @@ def _strip_fences(md: str) -> str:
 
 
 _MD_REF_DEF = re.compile(
-    r"^[ \t]{0,3}\[([^\]\n]{1,300})\]:[ \t]*<?([^\s>]{1,2000})>?", re.M)
-_MD_REF_USE = re.compile(r"(?<!!)\[([^\]\n]{1,300})\](?:\[([^\]\n]{0,300})\])?(?![(:\[])")
+    r"^[ \t]{0,3}\[([^\[\]\n]{1,300})\]:[ \t]*<?([^\s>]{1,2000})>?", re.M)
+_MD_REF_USE = re.compile(r"(?<!!)\[([^\[\]\n]{1,300})\](?:\[([^\[\]\n]{0,300})\])?(?![(:\[])")
 _MD_INLINE = re.compile(
-    r"(?<!!)\[([^\]\n]{0,1000})\]\(\s*<?((?:[^()\s<>]|\([^()\s]{0,500}\)){1,2000})>?")
+    r"(?<!!)\[([^\[\]\n]{0,1000})\]\(\s*<?((?:[^()\s<>]|\([^()\s]{0,500}\)){1,2000})>?")
 _MD_AUTO = re.compile(r"<(https?://[^\s<>]{1,2000})>")
 _MD_HTML_A = re.compile(r"<a\b[^<>]{0,1000}?\bhref\s*=\s*[\"']([^\"'<>]{1,2000})[\"']", re.I)
 
@@ -1297,8 +1297,8 @@ def essence(raw: str) -> str:
 def _strip_markdown(md: str) -> str:
     md = _strip_fences(md)
     md = re.sub(r"`[^`\n]{0,2000}`", " ", md)
-    md = re.sub(r"!\[[^\]\n]{0,1000}\]\([^)\n]{0,2000}\)", " ", md)
-    md = re.sub(r"\[([^\]\n]{0,1000})\]\([^)\n]{0,2000}\)", r"\1", md)
+    md = re.sub(r"!\[[^\[\]\n]{0,1000}\]\([^)\n]{0,2000}\)", " ", md)
+    md = re.sub(r"\[([^\[\]\n]{0,1000})\]\([^)\n]{0,2000}\)", r"\1", md)
     md = drop_spans(md, (("<!--", "-->"),))
     md = re.sub(r"<[^<>]{1,5000}>", " ", md)  # сырой HTML внутри markdown
     md = re.sub(r"^[#>\-\*\+ \t]+", " ", md, flags=re.M)
@@ -1587,7 +1587,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             slots=find_slots(text, markdown=True),
             blocks={"li": _md_list_items(_strip_fences(body)),
                     "table": len(re.findall(r"^[ \t>]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
-                    "img": len(re.findall(r"!\[[^\]\n]{0,1000}\]\(", body)),
+                    "img": len(re.findall(r"!\[[^\[\]\n]{0,1000}\]\(", body)),
                     "img_no_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
                     "script": 0, "p": 0},
         )
