@@ -111,6 +111,12 @@ WHY = {
    "The page hands its accumulated weight to a different URL and drops out of "
    "the index itself. On a generated site this is nearly always one wrong line "
    "in the template, repeated across every page it produced.",
+ "broken-link":
+   "A link into a section of the build that points at a page the build does "
+   "not have is a 404 on the live site. On a generated site it is usually a "
+   "template linking to a data row that a filter kept out of generation — one "
+   "line in the template, repeated on every page. Links to assets, feeds and "
+   "sections not present in the checked directory are not judged.",
  "orphan":
    "A page nothing links to is discovered only through the sitemap, crawled "
    "rarely, and treated as unimportant — because in the site's own structure it "
@@ -334,7 +340,7 @@ FAMILIES = [
  ("indexing", "Indexing and reachability",
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
-  ["noindex", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "deep", "js-shell"]),
+  ["noindex", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link", "deep", "js-shell"]),
 
  ("content", "Content quality at scale",
   "The failures that only appear when pages are compared with each other. A "

@@ -25,12 +25,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from collections import Counter, defaultdict, deque
 
 from . import hreflang
 from .core import EMPTY_MOUNT, NOT_LIVE, SourceError, drop_spans, is_dense
-from .core import url_key
+from .core import ALWAYS_SKIP, url_key
+from urllib.parse import urlsplit
 from .publish import indexable
 from .settings import display_width, text_volume
 from .i18n import tr
@@ -446,6 +448,7 @@ def link_graph(pages: list, home_url: str = None) -> dict:
     outbound = {}
     by_hreflang = defaultdict(set)
     unresolved = set()
+    unresolved_from = defaultdict(set)
     for p in pages:
         targets = set()
         for link in p.links:
@@ -457,6 +460,7 @@ def link_graph(pages: list, home_url: str = None) -> dict:
                 targets.add(target)
             elif not target:
                 unresolved.add(key)
+                unresolved_from[p.url].add(key)
         # Заглушка-редирект ведёт туда, куда перебрасывает, — хотя ссылки <a>
         # в ней нет. Алиасы Hugo так и устроены, и всё за ними считалось
         # недостижимым.
@@ -524,6 +528,7 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         "outbound": {u: sorted(t) for u, t in outbound.items()},
         "depth": depth,
         "unresolved": sorted(unresolved),
+        "unresolved_from": {u: sorted(k) for u, k in unresolved_from.items()},
         "home_redirected_from": redirected_from,
         # Сама заглушка — не страница: на неё не должны вести ссылки, и из неё
         # никуда не нужно доходить.
@@ -534,6 +539,105 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         "unreachable": sorted(u for u in urls if u not in depth
                               and u != redirected_from) if home else [],
     }
+
+
+def _parent(key: str) -> str:
+    return key[:key.rfind("/")] if key.count("/") > 2 else key.rstrip("/")
+
+
+_ROUTE_LEAF = {"index", "page", "route", "+page", "+server", "default"}
+_DYNAMIC = re.compile(r"^\[{1,2}(\.\.\.)?[^\]]*\]{1,2}$")
+MAX_ROUTE_ENTRIES = 200_000
+
+
+def build_routes(root: str) -> tuple:
+    """
+    Маршруты, которые сборка знает, даже если HTML у них нет.
+
+    Next.js кладёт динамический маршрут как `[lang]/start/page.js`: страница
+    отдаётся сервером, а файла `start.html` нет. Без этого на сайте виз
+    `broken-link` стоял на 527 страницах со ссылкой на /en/start. Группы
+    `(marketing)` и параллельные `@slot` в адрес не входят; `[x]` — любой
+    сегмент, `[...x]` и `[[...x]]` — любой хвост.
+    """
+    literal, dynamic = set(), []
+    if not root or not os.path.isdir(root):
+        return literal, dynamic
+    seen = 0
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP]
+        rel = os.path.relpath(current, root)
+        base = [] if rel == "." else rel.replace(os.sep, "/").split("/")
+        names = [base] + [base + [os.path.splitext(f)[0]] for f in files]
+        seen += len(files) + 1
+        for segs in names:
+            if segs and segs[-1] in _ROUTE_LEAF:
+                segs = segs[:-1]
+            segs = [x for x in segs if not (x.startswith("(") and x.endswith(")"))
+                    and not x.startswith("@")]
+            if any(_DYNAMIC.match(x) for x in segs):
+                dynamic.append(tuple(segs))
+            else:
+                literal.add("/" + "/".join(segs))
+        if seen > MAX_ROUTE_ENTRIES:
+            break
+    return literal, sorted(set(dynamic))
+
+
+def _route_matches(pattern: tuple, segs: list) -> bool:
+    for n, part in enumerate(pattern):
+        m = _DYNAMIC.match(part)
+        if m and m.group(1):                       # [...x] / [[...x]]: хвост
+            return len(segs) > n or part.startswith("[[")
+        if n >= len(segs):
+            return False
+        if not m and part != segs[n]:
+            return False
+    return len(segs) == len(pattern)
+
+
+def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
+    """
+    Ссылки на страницы, которых в сборке нет: страница → пути.
+
+    Ссылка считается битой, только если ведёт в раздел, который в сборке есть:
+    хотя бы одна страница лежит в том же каталоге или каталог сам страница.
+    Проверяли только /blog — ссылка в /pricing ведёт в другую часть сайта,
+    а не в пустоту. Ассеты, ленты и sitemap — не страницы: у них остаётся
+    расширение после того, как `url_key` снял `.html`.
+    """
+    keys = {p.key for p in pages}
+    sections = keys | {_parent(k) for k in keys}
+    paths = [os.path.dirname(os.path.abspath(p.path)) for p in pages if p.path]
+    try:
+        root = os.path.commonpath(paths) if paths else ""
+    except ValueError:                         # разные диски Windows
+        root = ""
+    literal, dynamic = build_routes(root) if graph.get("unresolved_from") else (set(), [])
+    base = "/" + base_path.strip("/") if base_path.strip("/") else ""
+
+    def is_route(path):
+        local = "/" + path.split("/", 3)[-1] if path.count("/") >= 3 else "/"
+        if base and (local == base or local.startswith(base + "/")):
+            local = local[len(base):] or "/"
+        local = local.rstrip("/") or "/"
+        if local in literal:
+            return True
+        segs = [x for x in local.strip("/").split("/") if x]
+        return any(_route_matches(pattern, segs) for pattern in dynamic)
+
+    found = {}
+    for source, targets in (graph.get("unresolved_from") or {}).items():
+        bad = []
+        for key in targets:
+            path = key.split("?", 1)[0]
+            if "." in path.rsplit("/", 1)[-1]:
+                continue
+            if _parent(path) in sections and not is_route(path):
+                bad.append(path)
+        if bad:
+            found[source] = sorted(set(bad))
+    return found
 
 
 def root_mismatch(pages: list, graph: dict) -> str:
@@ -630,7 +734,7 @@ def is_shell(page, cfg: dict = None) -> bool:
 SHELL_DEPENDENT = {
     "thin", "low-uniqueness", "template-skeleton", "same-opening",
     "near-duplicate", "similar", "no-headings", "no-h1", "many-h1",
-    "orphan", "unreachable", "deep", "description-length",
+    "orphan", "unreachable", "deep", "description-length", "broken-link",
 }
 
 
@@ -727,7 +831,7 @@ CODE_WEIGHT = {
     "orphan": 6, "unreachable": 7, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "broken-link": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -1066,6 +1170,18 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     mismatch = root_mismatch(pages, graph)
     if mismatch:
         notes.append(mismatch)
+    else:
+        # При сдвинутом корне битой выглядит каждая ссылка: причина одна,
+        # и о ней уже сказано.
+        base_path = urlsplit(home_url).path if home_url else ""
+        for url, paths in sorted(broken_links(pages, graph, base_path).items()):
+            shown = ", ".join("/" + p.split("/", 3)[-1] if p.count("/") >= 3 else "/"
+                              for p in paths[:3])
+            more = tr(" и ещё {a0}", a0=len(paths) - 3) if len(paths) > 3 else ""
+            issues.append(("warning", url, "broken-link", tr(
+                "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом "
+                "сайте это 404, если сервер их не перенаправляет",
+                a0=len(paths), a1=shown, a2=more)))
     if graph.get("home_redirected_from"):
         notes.append(tr(
             "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "
