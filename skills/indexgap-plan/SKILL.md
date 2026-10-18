@@ -1,10 +1,13 @@
 ---
 name: indexgap-plan
 description: >
-  Audit the keyword set before generating programmatic pages, and lay out
-  stubs carrying a brief. Use when someone brings a CSV of keywords and
-  intends to turn it into many similar pages. Catches same-intent keywords
-  before they become competing pages.
+  Audit a keyword CSV before generating programmatic pages: drop exact
+  duplicates, same-intent keywords and slug collisions before they become
+  competing pages (cannibalisation); optionally lay out stubs carrying a
+  brief. Use when someone brings a list of keywords, cities or products to
+  turn into many similar pages. Triggers: plan pages from a CSV, dedupe or
+  cluster keywords by intent, clean up the keyword list, keyword
+  cannibalisation before launch.
 ---
 
 # Planning the pipeline
@@ -13,8 +16,8 @@ description: >
 indexgap plan keywords.csv --keyword keyword
 ```
 
-If the package is not installed (`pip install -e .` in its directory), the same
-thing runs as `python3 -m indexgap plan …` from the package directory.
+No `indexgap` command: `pipx install indexgap`; from a checkout,
+`pipx install -e <path>` or `PYTHONPATH=<path> python3 -m indexgap plan …`.
 
 It shows how many rows will reach generation and what was rejected: exact
 duplicates, slug collisions, identical intents. Row numbers in the report match
@@ -45,7 +48,14 @@ skipped.
 
 **Do not remove `keyword` from the frontmatter when writing the page.** Facts
 are later verified through it: without it the check looks the row up by slug and
-title, and when that is ambiguous it honestly refuses to verify.
+title, and when that is ambiguous it honestly refuses to verify. If your own
+generator builds HTML pages, the template needs the same key:
+`<meta name="keyword" content="…">`.
+
+The stub's brief asks for at least 350 words (`--min-words`). The `thin`
+threshold is 250 for the `catalog` profile and 120 for `events`: pass
+`--min-words` to match the project's profile or `checks.thin_words` in
+`indexgap.json`, so the brief and the check do not ask for different things.
 
 **Remove `status: draft` once the page is finished.** The stub is marked a draft
 on purpose: while the mark stays, the page reaches neither the sitemap nor the
@@ -63,8 +73,9 @@ last step of writing, not a cosmetic detail.
 | the keyword contains no letter or digit | junk like `---` or `%%%` |
 
 By default rows with partly empty columns are **not** rejected — the command
-only warns which column is empty and in how many rows. If incomplete rows are
-useless for this project, switch the threshold on explicitly:
+only warns about a column that is empty in most rows (more than half). A column
+empty in fewer rows is not named: look at the data yourself. If incomplete rows
+are useless for this project, switch the threshold on explicitly:
 `--min-filled 0.7`.
 
 ## A brief for your niche
@@ -88,9 +99,13 @@ need literal braces (a JSON-LD example, for instance), double them: `{{` and
 
 For non-latin scripts a slug becomes a short hash. If you need readable URLs,
 add a column of ready-made slugs to the dataset and pass
-`--pattern "{your_column}/index.md"` — the column value is used as it is, with
-no second transliteration. The column can simply be called `slug`: a value the
-dataset provides beats a computed one.
+`--pattern "{your_column}/index.md"` — the value goes in with no second
+transliteration. The column can simply be called `slug`: a value the dataset
+provides beats a computed one.
+
+A slash inside a value becomes a hyphen: `plumbing/austin` gives
+`plumbing-austin/index.md`. Nested addresses are built from separate columns:
+`--pattern "{service}/{city}/index.md"`.
 
 An empty column value in the template is a write error, not "put it at the
 root": such rows are skipped with an explanation. The template cannot escape

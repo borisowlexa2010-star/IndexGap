@@ -140,10 +140,9 @@ Otherwise the row is looked up by slug and title, and often not found. If N in
 the binding first: a clean check on three pages out of forty means nothing. Hub
 and home pages without a row are expected.
 
-A number in a brief is normalised (`1200`, `15 %`); on the page it may read
-`1,200` or `15%` — search the template for both. False positives happen: a
-number can be legitimate and simply absent from the dataset. Go through them
-with the person.
+A number in a brief is normalised (`1200`, `15 %`); the page may say `1,200` or
+`15%` — search the template for both. False positives happen: a legitimate
+number can be absent from the dataset. Go through them with the person.
 
 ## A gate for CI
 
@@ -164,8 +163,10 @@ indexgap brief ./out --site https://example.com --dataset keywords.csv --write
 
 Lays the findings out as work orders in `indexgap-briefs/`: what to do, the
 profile's thresholds, and the dataset row — the only permitted source of
-numbers. Without `--write` it is a dry run. Each brief ends with a check
-command; it must carry the same `--dataset` and profile, or the fact check
+numbers. Without `--write` it is a dry run. Briefs are overwritten on every
+run — they are a report; keep your edits in the source the pages are built
+from. Each brief ends with the check command that produced it, `--dataset` and
+profile included; run it after the rebuild. Without `--dataset` the fact check
 silently drops out.
 
 Order:
@@ -193,9 +194,6 @@ facts from its row; if the row has none, ask the person whether the page should
 exist. The threshold is `checks.thin_words` in `indexgap.json`; to silence the
 finding for a content type that is legitimately short, **lower** it. Do not pad
 the text to reach it.
-
-Briefs are overwritten on every run — they are a report. Keep your edits in the
-source the pages are built from.
 
 **The package does not write the text, and must not.** The central check
 compares the numbers on a page with the dataset row; if the package supplied
