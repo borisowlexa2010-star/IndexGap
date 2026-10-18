@@ -1,5 +1,60 @@
 # Changelog
 
+## Unreleased
+
+**A paragraph is prose.** On the built eventiq.io `long-paragraph` stood on 43
+of 87 pages. Of the 55 blocks over 900 characters one was a paragraph: 53 were
+tables read as "caption headers cell cell …" and one was a `<dl>`. On this
+package's own documentation the same finding sat on the `<pre>` blocks holding
+`--help` output. The advice that goes with it — break the block up with
+subheadings — is harmful for a table.
+
+A paragraph used to end only at `</p>`, `</div>`, `</section>`, `</li>` and at
+the start of a `<p>` or a heading. A cell, a row, a `<dt>` and a `<pre>` ended
+nothing, so everything between two of those boundaries was one block.
+
+* Text of a `<table>` and of a `<pre>` is data, not a paragraph. It stays in
+  the page text, the word count, the content hash and the `table` counter —
+  those never came from paragraphs.
+* A page that opens with a table is judged by its first paragraph of prose,
+  not by the caption. A caption is the table's heading and is never a
+  paragraph.
+* A page with no prose at all still has blocks — each cell separately — rather
+  than "found no paragraph, nothing to quote".
+* A `<p>` inside a cell is still a paragraph: sites laid out with tables keep
+  theirs.
+* In a `<dl>` each term with its definition is one block, like a list item. A
+  definition a thousand characters long is still reported.
+* Markdown is read the same way: a pipe table and a `<table>` written in tags
+  are not paragraphs, and every list item is its own block instead of the whole
+  list being one.
+
+eventiq.io: 43 pages → 1, the real paragraph. The documentation: 8 → 1, also
+real. On 4,201 built pages of five other projects: 491 such blocks → 33, with
+the page text, word count, hash, counters and headings identical on every page
+and the first paragraph unchanged on every one.
+
+Seen on the same run and left as it is:
+
+* `no-question-headings` counts the headings of the site template together with
+  the article's. On eventiq.io the footer columns ("Platform", "Blog") are on
+  86 pages, the call to action on 83, "Keep reading" on 82; the median page
+  gets 40% of its subheadings from the template. The share of questions is
+  lowered on every page and the verdict changes on 2 of the 12 pages where the
+  finding fires. Headings are collected for the whole document, and `no-h1`,
+  `many-h1` and the repeated-skeleton check read the same list — the fix is a
+  second list, not a filter.
+* `vague-anchor` judges "ROI" and "FAQ" by length (under four characters). The
+  list of short anchors that are fine holds language codes and social networks
+  only; an all-capitals abbreviation is a common menu label.
+* `<h5>`, `<h6>`, `<figcaption>`, `<blockquote>` and `<br><br>` do not end a
+  paragraph either. Of the 33 long blocks left on the other projects, 15 are
+  paragraphs and 18 are cards and form widgets built from `<div>` and `<span>`.
+* In Markdown, text placed right under a heading with no empty line between
+  them is not among the paragraphs; a numbered list is not counted as a list,
+  so `no-structure` can fire next to one; a table inside a blockquote is not
+  recognised.
+
 ## 1.12.0 — 2026-10-02
 
 Until now the package had seen three sites of its author and examples written

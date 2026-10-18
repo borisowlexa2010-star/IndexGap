@@ -494,6 +494,12 @@ class _Extractor(HTMLParser):
         # подпись автора, оглавление. Текст их остаётся в странице, но абзацем
         # не становится.
         self._aside_stack = []
+        # Глубины открытых <table> и <pre>: их текст — данные, а не проза.
+        # И глубины <p>, открытых внутри таблицы: при вёрстке таблицами в
+        # ячейке лежит обычный абзац, и он абзацем остаётся.
+        self._data_stack = []
+        self._prose_stack = []
+        self._after_dt = False     # последним в <dl> был <dt>, а не <dd>
         # Открытые элементы по именам. Глубина — длина этого стека, а не счётчик
         # «открыл минус закрыл»: <img> и <br> не закрываются вовсе, <p> и <li>
         # закрывать не обязательно, и счётчик уезжал на единицу с каждым таким
@@ -513,7 +519,13 @@ class _Extractor(HTMLParser):
         # страницы оказывался пункт меню, и проверка прямого ответа выносила
         # вердикт по хлебным крошкам.
         if self._in_main or not self._saw_main:
-            self._para_buf.append((text, self._in_main, bool(self._aside_stack)))
+            kind = _PROSE
+            if self._aside_stack:
+                kind = _SERVICE
+            elif self._data_stack and not (
+                    self._prose_stack and self._prose_stack[-1] > self._data_stack[-1]):
+                kind = _DATA
+            self._para_buf.append((text, self._in_main, kind))
         self._glue = True
 
     def _flush_paragraph(self):
@@ -521,7 +533,7 @@ class _Extractor(HTMLParser):
         text = re.sub(r"\s+", " ", " ".join(t for t, _, _ in buf)).strip()
         if text:
             self._paragraphs.append((text, any(m for _, m, _ in buf),
-                                     any(a for _, _, a in buf)))
+                                     max(k for _, _, k in buf)))
 
     def _close_to(self, index: int):
         """Закрывает всё открытое выше `index` и то, что на этом держалось."""
@@ -533,6 +545,13 @@ class _Extractor(HTMLParser):
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
                 self._aside_stack.pop()
+        if self._data_stack:
+            while self._prose_stack and self._prose_stack[-1] > self._depth:
+                self._prose_stack.pop()
+            if self._data_stack[-1] > self._depth:
+                self._flush_paragraph()
+                while self._data_stack and self._data_stack[-1] > self._depth:
+                    self._data_stack.pop()
 
     def _imply_end(self, tag: str):
         """
@@ -585,6 +604,28 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and _is_aside(tag, a):
             self._flush_paragraph()
             self._aside_stack.append(self._depth)
+        # Границы абзаца, которых раньше не было. Таблица от подписи до
+        # последней ячейки и весь <dl> были одним «абзацем»: на eventiq.io
+        # `long-paragraph` стоял на 43 страницах из 87, а прозой из 55 блоков
+        # был один.
+        if tag in _DATA_TAGS:
+            self._flush_paragraph()
+            self._data_stack.append(self._depth)
+        elif tag in _TABLE_PARTS:
+            self._flush_paragraph()
+        elif tag == "p" and self._data_stack:
+            self._prose_stack.append(self._depth)
+        elif tag == "dl":
+            self._flush_paragraph()
+            self._after_dt = False
+        elif tag == "dt":
+            # Термин и его определение — один блок, как пункт списка. Два
+            # <dt> подряд делят одно определение и блок не разрывают.
+            if not self._after_dt:
+                self._flush_paragraph()
+            self._after_dt = True
+        elif tag == "dd":
+            self._after_dt = False
 
         # Счётчики структуры считаются по основному блоку: список в меню
         # не делает страницу структурированной.
@@ -691,7 +732,11 @@ class _Extractor(HTMLParser):
         elif tag == "a" and self._in_anchor:
             self.anchors.append(_clean(self._anchor_buf))
             self._in_anchor = False
-        elif tag in ("p", "div", "section", "li"):
+        elif tag == "caption":
+            # Подпись таблицы — её заголовок. Абзацем она не бывает никогда:
+            # иначе на странице без прозы прямой ответ искали бы в подписи.
+            self._para_buf = []
+        elif tag in ("p", "div", "section", "li", "td", "th", "dl"):
             self._flush_paragraph()
 
     def handle_data(self, data):
@@ -752,8 +797,13 @@ class _Extractor(HTMLParser):
         # Служебные блоки не абзацы — но если кроме них на странице ничего
         # нет, это не служебный блок, а обёртка: кое-где в <nav> завёрнут весь
         # текст. Ноль абзацев на полной странице хуже, чем крошки первым.
-        body = [text for text, _, aside in found if not aside]
-        return body or [text for text, _, _ in found]
+        # С таблицами и кодом так же: при прозе их нет вовсе, без прозы
+        # блоками служат ячейки — каждая отдельно.
+        for limit in (_PROSE, _DATA):
+            body = [text for text, _, kind in found if kind <= limit]
+            if body:
+                return body
+        return [text for text, _, _ in found]
 
 
 # Служебные блоки внутри основного текста. На eventiq.io крошки, подпись и
@@ -769,6 +819,11 @@ _ASIDE_NAMES = ("breadcrumb", "breadcrumbs", "byline", "toc",
 _ASIDE_NOT = ("has", "with", "without", "no", "is", "show", "hide")
 _ASIDE_HINT = re.compile(r"breadcrumb|byline|toc|table-of-contents|-meta|_meta", re.I)
 _ASIDE_NEVER = {"html", "body", "main", "article"}
+
+# Чем является блок текста: абзацем, данными (таблица, код) или служебным.
+_PROSE, _DATA, _SERVICE = 0, 1, 2
+_DATA_TAGS = {"table", "pre"}
+_TABLE_PARTS = {"caption", "thead", "tbody", "tfoot", "tr", "td", "th"}
 
 # Какой открытый элемент закрывает новый тег, если закрывающего не написали.
 _BLOCKS = ("address", "article", "aside", "blockquote", "details", "div", "dl",
@@ -993,16 +1048,74 @@ def _strip_markdown(md: str) -> str:
     return _clean(md)
 
 
-def _md_paragraphs(md: str) -> list:
-    body = _strip_fences(md)
-    body = drop_spans(body, (("<!--", "-->"),))
-    out = []
+_MD_LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|(\d{1,9})[.)])[ \t]+")
+
+
+def _md_table_rule(line: str) -> bool:
+    """Строка `|---|:---:|` под шапкой таблицы. Без `|` это просто линия."""
+    if "|" not in line:
+        return False
+    return all(re.fullmatch(r":?-+:?", cell.strip())
+               for cell in line.strip().strip("|").split("|"))
+
+
+def _md_cells(row: str) -> list:
+    return [_strip_markdown(cell) for cell in row.strip().strip("|").split("|")]
+
+
+def _md_items(lines: list) -> list:
+    """
+    Делит блок на пункты списка. Строки без маркера продолжают пункт.
+
+    Номер посреди абзаца — чаще перенос на «2019. », чем пункт: абзац
+    прерывает только список, начатый с единицы. Так же считает CommonMark.
+    """
+    items, listed = [], False
+    for line in lines:
+        mark = _MD_LIST_ITEM.match(line)
+        if mark and (listed or not items or mark.group(1) in (None, "1")):
+            items.append([line[mark.end():]])
+            listed = True
+        elif items:
+            items[-1].append(line)
+        else:
+            items.append([line])
+    return ["\n".join(item) for item in items]
+
+
+def _md_blocks(body: str) -> tuple:
+    """Блоки прозы и отдельно ячейки таблиц: (абзацы и пункты, ячейки)."""
+    prose, cells = [], []
     for block in re.split(r"\n[ \t]*\n", body):
         block = block.strip()
         if not block or block.startswith("#"):
             continue
-        out.append(_strip_markdown(block))
-    return [p for p in out if p]
+        lines = block.split("\n")
+        rule = next((i for i in range(1, len(lines))
+                     if "|" in lines[i - 1] and _md_table_rule(lines[i])), 0)
+        if rule:
+            for row in lines[rule - 1:rule] + lines[rule + 1:]:
+                cells += _md_cells(row)
+            lines = lines[:rule - 1]
+        prose += [_strip_markdown(item) for item in _md_items(lines)]
+    return [p for p in prose if p], [c for c in cells if c]
+
+
+# Таблицу в Markdown пишут и тегами: в исходниках eventiq.io все таблицы такие.
+_MD_HTML_DATA = (("<table", "</table>"), ("<pre", "</pre>"))
+
+
+def _md_paragraphs(md: str) -> list:
+    """
+    Абзацы Markdown — в том же смысле, что и в HTML: пункт списка — отдельный
+    блок, таблица — не абзац. Раньше блоком было всё между пустыми строками,
+    и таблица или список в тридцать строк считались одним длинным абзацем.
+    Когда прозы нет вовсе, блоками служат ячейки таблицы, а если нет и их —
+    то, что на странице есть.
+    """
+    body = drop_spans(_strip_fences(md), (("<!--", "-->"),))
+    prose, cells = _md_blocks(drop_spans(body, _MD_HTML_DATA))
+    return prose or cells or _md_blocks(body)[0]
 
 
 def _unquote_value(value: str) -> str:
