@@ -271,6 +271,10 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html":
+        "where to write the HTML report; the machine-readable data goes next to "
+        "it with a .json extension. A name ending in .json names the data, and "
+        "the report goes next to it as .html",
     "конфиг: {a0}": "config: {a0}",
     "куда записать разбор целиком": "where to write the full breakdown",
     "куда класть заготовки": "where to put the stubs",

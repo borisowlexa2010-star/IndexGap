@@ -292,10 +292,23 @@ def _write_json(path, payload):
         json.dump(payload, fh, ensure_ascii=False, indent=2, default=str)
 
 
+def report_pair(out: str) -> tuple:
+    """
+    Пути отчёта и его данных из `--out`. Имя с `.json` — это имя данных:
+    раньше в него писался HTML, данные шли туда же, и второй запуск
+    отказывался перезаписывать «чужой» файл.
+    """
+    stem, ext = os.path.splitext(out)
+    if ext.lower() == ".json":
+        return stem + ".html", out
+    return out, stem + ".json"
+
+
 def _check_report_pair(out: str) -> None:
     """Оба файла отчёта проверяются до работы, а не после неё."""
-    check_out_path(out)
-    check_json_path(os.path.splitext(out)[0] + ".json")
+    html_path, json_path = report_pair(out)
+    check_out_path(html_path)
+    check_json_path(json_path)
 
 
 # ── команды ───────────────────────────────────────────────────────────────────
@@ -409,10 +422,10 @@ def cmd_check(args):
     notes += got["template_notes"]
 
     html_path = report.build(analysis, funnel_result, causes,
-                             out_path=check_out_path(args.out), site=args.site,
+                             out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
                              cross=cross, notes=notes,
                              title=tr("Проверка перед публикацией"))
-    json_path = os.path.splitext(args.out)[0] + ".json"
+    json_path = report_pair(args.out)[1]
     _write_json(json_path, {
         "site": args.site,
         "pages": len(pages),
@@ -743,10 +756,10 @@ def cmd_doctor(args):
         print(f"  ! {note}")
 
     path = report.build(analysis, funnel_result, causes,
-                        out_path=check_out_path(args.out),
+                        out_path=check_out_path(report_pair(args.out)[0]),
                         site=args.site, cross=cross, notes=notes,
                         title=tr("Разбор потерь"))
-    json_path = os.path.splitext(args.out)[0] + ".json"
+    json_path = report_pair(args.out)[1]
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
                             "foreign": foreign, "live": live, "notes": notes})
@@ -1041,8 +1054,9 @@ def cmd_portfolio(args):
         for p in site_patterns[:6]:
             print(f"  {p['code']:<24} {', '.join(p['projects'])}")
 
-    path = report.build_portfolio(results, patterns, uniques, out_path=args.out)
-    json_path = os.path.splitext(args.out)[0] + ".json"
+    path = report.build_portfolio(results, patterns, uniques,
+                                  out_path=report_pair(args.out)[0])
+    json_path = report_pair(args.out)[1]
     _write_json(json_path, {
         "projects": [{k: v for k, v in r.items() if k != "issues"} for r in results],
         "patterns": patterns,
@@ -1266,7 +1280,8 @@ def build_parser():
     p.add_argument("--indexed", action="append", metavar=tr("[источник=]файл"),
                    help=tr("выгрузка со списком страниц: панель вебмастера, Ahrefs, Semrush, Screaming Frog, GA4, цитирования Copilot из Bing AI Performance и другие. CSV, XLSX, JSON или список адресов. Можно указывать несколько раз: --indexed google=gsc.csv --indexed ahrefs=pages.xlsx. Источник определяется сам; метка нужна, когда имя файла ни о чём не говорит"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
-    p.add_argument("--out", default="indexgap-check.html")
+    p.add_argument("--out", default="indexgap-check.html",
+                   help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
     p.add_argument("--dataset", help=tr("семантика (CSV или XLSX) — включает сверку фактов с данными строк"))
     p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом в датасете"))
     p.add_argument("--robots", help=tr("путь к robots.txt проекта"))
@@ -1324,7 +1339,8 @@ def build_parser():
     p = sub.add_parser("portfolio",
                        help=tr("один прогон по нескольким проектам и сводный разбор"))
     p.add_argument("portfolio", help=tr("JSON с описанием проектов"))
-    p.add_argument("--out", default="indexgap-portfolio.html")
+    p.add_argument("--out", default="indexgap-portfolio.html",
+                   help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
     p.add_argument("--reports", default="",
                    help=tr("каталог для отдельных отчётов по каждому проекту"))
     p.add_argument("--strict", action="store_true",
@@ -1362,7 +1378,8 @@ def build_parser():
     p.add_argument("--indexed", action="append", metavar=tr("[движок=]файл.csv"),
                    help=tr("выгрузка индексации или цитирований Copilot из Bing AI Performance; несколько раз для разных источников"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
-    p.add_argument("--out", default="indexgap-doctor.html")
+    p.add_argument("--out", default="indexgap-doctor.html",
+                   help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
     p.set_defaults(func=cmd_doctor)
     ap._subparsers_map = dict(sub.choices)
     return ap

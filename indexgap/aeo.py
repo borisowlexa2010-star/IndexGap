@@ -250,7 +250,9 @@ def check_extractable(page, cfg: dict = None) -> list:
     """
     cfg = {**CONFIG, **(cfg or {})}
     issues = []
-    subheads = [t for lvl, t in page.headings if lvl >= 2]
+    # Заголовки врезок, подвала и меню — шаблон, а не разделы статьи.
+    outline = page.outline if getattr(page, "outline", None) is not None else page.headings
+    subheads = [t for lvl, t in outline if lvl >= 2]
     if len(subheads) >= 3:
         questions = sum(1 for t in subheads if QUESTION.search(t))
         # Считаем долю, а не «хотя бы один»: одно ложное срабатывание
