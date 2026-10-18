@@ -61,7 +61,17 @@ def apply_project_defaults(args) -> str:
     `indexgap check`, без путей и флагов. Явный аргумент всегда сильнее конфига.
     """
     path = ""
-    for directory in (os.getcwd(), os.path.dirname(os.getcwd())):
+    # `--config` — явный выбор; затем текущий каталог, затем каталог страниц.
+    # Раньше `site` из `--config` и из indexgap.json рядом со страницами
+    # не читался вовсе, хотя `--help` обещал именно это.
+    explicit = getattr(args, "config", None)
+    if explicit and os.path.isfile(explicit):
+        path = explicit
+    places = [os.getcwd(), os.path.dirname(os.getcwd())]
+    root = getattr(args, "root", None)
+    if root and os.path.isdir(root):
+        places += [os.path.abspath(root), os.path.dirname(os.path.abspath(root))]
+    for directory in ([] if path else places):
         for name in PROJECT_FILES:
             candidate = os.path.join(directory, name)
             if os.path.isfile(candidate):
@@ -80,6 +90,13 @@ def apply_project_defaults(args) -> str:
             tr("{a0} не читается: {a1}.\n    Это файл настроек проекта. Поправь его или удали и запусти `indexgap init` заново.", a0=path, a1=exc))
     if not isinstance(data, dict):
         return ""
+    # Число вместо строки (`"site": 123`) роняло прогон трассировкой.
+    # `content` здесь не проверяется: это раздел порогов (словарь), а строкой
+    # он был только в старых конфигах, где так назывался каталог страниц.
+    for key in ("site", "pages", "dataset", "profile", "home"):
+        if key in data and data[key] is not None and not isinstance(data[key], str):
+            raise SourceError(tr("{a0}: значение `{a1}` должно быть строкой, а там {a2}.",
+                                 a0=path, a1=key, a2=json.dumps(data[key])[:40]))
 
     base = os.path.dirname(path)
     pages = data.get("pages")
@@ -98,6 +115,19 @@ def apply_project_defaults(args) -> str:
 
 
 def _load(args):
+    if args.root and not args.site and os.path.isdir(args.root):
+        # Адрес сайта часто лежит рядом: canonical главной, sitemap.xml,
+        # строка Sitemap: в robots.txt. Демо-сайт из README без --site
+        # отвечал «не хватает данных», хотя адрес был в двух файлах рядом.
+        from .install import detect_site
+        guessed = detect_site(args.root, ".")
+        if guessed:
+            args.site = guessed
+            print(tr("Адрес сайта взят из файлов рядом со страницами: {a0} — если не так, "
+                     "укажи --site", a0=guessed))
+    if args.root and not args.site:
+        raise SourceError(tr("Не указан адрес сайта: добавь --site https://… — или запиши "
+                             "`site` в indexgap.json."))
     if not args.root or not args.site:
         raise SourceError(
             tr("Не хватает данных о проекте.\n    Либо укажи их явно: indexgap check ./content --site https://example.com\n    Либо один раз выполни `indexgap init` в корне проекта — тогда\n    ежедневная команда станет просто `indexgap check`."))

@@ -78,6 +78,18 @@ def read_portfolio(path: str) -> list:
             raise SourceError(tr("{a0}: имя проекта «{a1}» повторяется.", a0=path, a1=name))
         seen.add(name)
 
+        # Число вместо строки или строка вместо списка роняли прогон
+        # трассировкой, а строку в `indexed` обходили по буквам.
+        for key in ("site", "root", "dataset", "sitemap", "robots", "config", "out",
+                    "profile", "home", "keyword"):
+            if spec.get(key) is not None and not isinstance(spec[key], str):
+                raise SourceError(tr("{a0}: у проекта «{a1}» поле `{a2}` должно быть строкой.",
+                                     a0=path, a1=name, a2=key))
+        indexed = spec.get("indexed")
+        if indexed is not None and (not isinstance(indexed, list)
+                                    or not all(isinstance(x, str) for x in indexed)):
+            raise SourceError(tr("{a0}: у проекта «{a1}» поле `indexed` должно быть списком "
+                                 "строк.", a0=path, a1=name))
         resolved = dict(spec)
         resolved["name"] = name
         resolved["site"] = check_site_url(str(spec["site"]))
