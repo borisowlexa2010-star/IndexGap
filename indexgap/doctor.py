@@ -1111,8 +1111,10 @@ def explain(funnel_result: dict, analysis: dict) -> list:
     near = analysis["config"].get("near_duplicate", 0.8)
     dupes = _keys({p.url for pair in analysis["duplicates"]
                    if pair[2] >= near for p in pair[:2]})
+    # Тот же объём, что в находке `thin`: для иероглифики слово — не мера.
+    from .checks import text_volume
     thin = _keys({p.url for p in analysis["pages"]
-                  if p.word_count < config["thin_words"]})
+                  if text_volume(p) < config["thin_words"]})
     deep = _keys({u for u, d in graph["depth"].items() if d > config["max_click_depth"]})
     no_title = _keys({p.url for p in analysis["pages"] if not p.title})
 

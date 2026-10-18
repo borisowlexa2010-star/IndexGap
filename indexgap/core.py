@@ -790,7 +790,8 @@ class _Extractor(HTMLParser):
         # Счётчики структуры считаются по основному блоку: список в меню
         # не делает страницу структурированной.
         if self._in_main or not self._saw_main:
-            if tag == "li":
+            # Пункт меню до <main> — не список статьи.
+            if tag == "li" and not self._chrome_stack and not self._aside_stack:
                 self.blocks["li"] += 1
             elif tag == "table":
                 self.blocks["table"] += 1
@@ -1278,7 +1279,7 @@ def essence(raw: str) -> str:
     opener = _HTML_OPEN.search(raw)
     if opener:
         parts.append(opener.group(0))
-    lowered_hint = "http-equiv" in raw or "HTTP-EQUIV" in raw or "Http-Equiv" in raw
+    lowered_hint = "equiv" in raw or "EQUIV" in raw or "Equiv" in raw
     if lowered_hint or "NEXT_REDIRECT" in raw:
         live = drop_spans(raw, NOT_LIVE)
         if lowered_hint:

@@ -177,7 +177,7 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
 
         cap = 200
         candidate_set = set()
-        clustered = 0
+        clustered = set()
         for bucket in buckets.values():
             if len(bucket) < 2:
                 continue
@@ -189,13 +189,15 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
                 # Корзина такого размера — это не «шаблон, значит не дубли»,
                 # а наоборот: кластер почти одинаковых страниц. Полный перебор
                 # внутри неё квадратичен, поэтому сравниваем всех с образцом.
-                clustered += 1
                 rep = bucket[0]
+                # Одна группа попадает в корзину каждой полосы: считаем группы,
+                # а не полосы — «8 групп» печаталось для одной.
+                clustered.add(frozenset(bucket))
                 for other in bucket[1:]:
                     candidate_set.add((rep, other))
         if clustered:
             notes.append(
-                tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=clustered))
+                tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=len(clustered)))
         candidates = sorted(candidate_set)
 
     by_url = {p.url: p for p in pages}
@@ -413,7 +415,9 @@ def _redirect_target(page) -> str:
                  and len((getattr(page, "text", "") or "").split()) < 30)
     # Подстрока ищется на порядок быстрее выражения без учёта регистра, а на
     # большинстве страниц `http-equiv` нет вовсе.
-    by_meta = (("http-equiv" in raw or "HTTP-EQUIV" in raw or "Http-Equiv" in raw)
+    # `equiv` и `EQUIV` покрывают и `HTTP-equiv`: раньше смешанный регистр
+    # пропускался, и редирект не узнавался.
+    by_meta = (("equiv" in raw or "EQUIV" in raw or "Equiv" in raw)
                and bool(_REFRESH.search(raw)))
     if not by_script and not by_meta:
         return ""
