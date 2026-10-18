@@ -271,6 +271,19 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "Базовой линии {a0} нет. Её делают обычным прогоном:\n    indexgap check --out {a0}\n    и коммитят вместе с проектом.":
+        "There is no baseline at {a0}. It is made by an ordinary run:\n"
+        "    indexgap check --out {a0}\n    and committed with the project.",
+    "{a0} — не данные прогона indexgap check. Базовой линией служит JSON, который пишет `indexgap check`.":
+        "{a0} is not data from an indexgap check run. The baseline is the JSON "
+        "that `indexgap check` writes.",
+    "Против базовой линии {a0}: новых находок {a1}, из них критичных {a2}; исчезло {a3}.":
+        "Against the baseline {a0}: new findings {a1}, critical among them {a2}; "
+        "gone {a3}.",
+    "  … и ещё {a0}": "  … and {a0} more",
+    "данные прошлого прогона: находки, которые в них уже были, считаются долгом, и --strict валит сборку только на новых":
+        "data from an earlier run: findings already in it count as known debt, "
+        "and --strict fails the build only on new ones",
     "куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html":
         "where to write the HTML report; the machine-readable data goes next to "
         "it with a .json extension. A name ending in .json names the data, and "

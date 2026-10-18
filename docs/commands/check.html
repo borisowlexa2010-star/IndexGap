@@ -95,7 +95,7 @@ font-size:.85rem;color:var(--ink3)}
                       [--indexed [source=]file] [--gsc GSC] [--out OUT]
                       [--dataset DATASET] [--keyword KEYWORD]
                       [--robots ROBOTS] [--no-content] [--no-aeo] [--strict]
-                      [--lang {en,ru}]
+                      [--baseline JSON] [--lang {en,ru}]
                       [root]
 
 positional arguments:
@@ -123,7 +123,10 @@ options:
                         needed when the filename says nothing
   --gsc GSC             the same as --indexed google=... (kept for
                         compatibility)
-  --out OUT
+  --out OUT             where to write the HTML report; the machine-readable
+                        data goes next to it with a .json extension. A name
+                        ending in .json names the data, and the report goes
+                        next to it as .html
   --dataset DATASET     the keyword set (CSV or XLSX) — switches on fact-
                         checking against the rows
   --keyword KEYWORD     the keyword column in the dataset
@@ -132,6 +135,9 @@ options:
   --no-aeo              skip the machine-readability checks
   --strict              exit non-zero when there are critical findings — for
                         CI
+  --baseline JSON       data from an earlier run: findings already in it count
+                        as known debt, and --strict fails the build only on
+                        new ones
   --lang {en,ru}        output language: en or ru. By default from
                         INDEXGAP_LANG or the system locale, otherwise English</code></pre>
 <h2>The rest of the pipeline</h2>

@@ -311,6 +311,70 @@ def _check_report_pair(out: str) -> None:
     check_json_path(json_path)
 
 
+def load_baseline(path: str) -> list:
+    """
+    Находки прошлого прогона — базовая линия для `check --baseline`.
+
+    Ею служат данные, которые пишет сам `check`: отдельного формата нет, и
+    в CI один и тот же файл бывает и базой, и результатом.
+    """
+    if not os.path.isfile(path):
+        raise SourceError(tr(
+            "Базовой линии {a0} нет. Её делают обычным прогоном:\n"
+            "    indexgap check --out {a0}\n    и коммитят вместе с проектом.", a0=path))
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        data = None
+    if (not isinstance(data, dict) or JSON_MARK not in data
+            or not isinstance(data.get("issues"), list)):
+        raise SourceError(tr(
+            "{a0} — не данные прогона indexgap check. Базовой линией служит JSON, "
+            "который пишет `indexgap check`.", a0=path))
+    return [i for i in data["issues"] if isinstance(i, dict)]
+
+
+def compare_baseline(issues: list, old: list) -> dict:
+    """
+    Что появилось и что исчезло с прошлого прогона.
+
+    Находка узнаётся по уровню, коду и странице, а не по тексту: в тексте
+    бывают числа, и «37 из 40» вместо «36 из 40» новой находкой не делает.
+    Адрес сравнивается по ключу — база могла быть снята с другим написанием
+    `--site`. Одинаковых находок на странице бывает несколько: считаются штуки.
+    """
+    def key(level, url, code):
+        return level, code, url_key(url or "")
+
+    before = Counter(key(i.get("level"), i.get("url"), i.get("code")) for i in old)
+    now = Counter(key(l, u, c) for l, u, c, _ in issues)
+    new, seen = [], Counter()
+    for level, url, code, message in issues:
+        k = key(level, url, code)
+        seen[k] += 1
+        if seen[k] > before[k]:
+            new.append({"level": level, "url": url, "code": code, "message": message})
+    fixed, gone = [], Counter()
+    for item in old:
+        k = key(item.get("level"), item.get("url"), item.get("code"))
+        gone[k] += 1
+        if gone[k] > now[k]:
+            fixed.append(item)
+    return {"new": new, "fixed": fixed}
+
+
+def _print_baseline(path: str, diff: dict) -> None:
+    new = diff["new"]
+    crit = [i for i in new if i["level"] == "critical"]
+    print(tr("Против базовой линии {a0}: новых находок {a1}, из них критичных {a2}; "
+             "исчезло {a3}.", a0=path, a1=len(new), a2=len(crit), a3=len(diff["fixed"])))
+    for item in (crit or new)[:5]:
+        print(f"  + {item['level']:<8} {item['code']:<22} {item['url']}")
+    if len(crit or new) > 5:
+        print(tr("  … и ещё {a0}", a0=len(crit or new) - 5))
+
+
 # ── команды ───────────────────────────────────────────────────────────────────
 
 def _sitemaps(args) -> dict:
@@ -396,6 +460,8 @@ def _analyse(args):
 
 def cmd_check(args):
     _check_report_pair(args.out)
+    # База читается до работы: тот же файл может быть и базой, и результатом.
+    baseline = load_baseline(args.baseline) if args.baseline else None
     got = _analyse(args)
     pages, project, analysis = got["pages"], got["project"], got["analysis"]
     notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
@@ -426,6 +492,7 @@ def cmd_check(args):
                              cross=cross, notes=notes,
                              title=tr("Проверка перед публикацией"))
     json_path = report_pair(args.out)[1]
+    diff = compare_baseline(analysis["issues"], baseline) if baseline is not None else None
     _write_json(json_path, {
         "site": args.site,
         "pages": len(pages),
@@ -443,6 +510,7 @@ def cmd_check(args):
         "repeated_skeletons": (content_result or {}).get("repeated_skeletons"),
         "unmatched": (content_result or {}).get("unmatched"),
         "robots": (aeo_result or {}).get("robots"),
+        **({"baseline": dict(path=args.baseline, **diff)} if baseline is not None else {}),
     })
 
     for note in notes:
@@ -457,6 +525,10 @@ def cmd_check(args):
     print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
     _print_first_things(analysis["issues"])
     print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
+    if diff is not None:
+        _print_baseline(args.baseline, diff)
+        # С базой сборку валят только новые критичные находки: старые — долг.
+        crit = sum(1 for i in diff["new"] if i["level"] == "critical")
     return 1 if (crit and args.strict) else 0
 
 
@@ -1290,6 +1362,9 @@ def build_parser():
                    help=tr("пропустить проверки машинной читаемости"))
     p.add_argument("--strict", action="store_true",
                    help=tr("ненулевой код возврата при критичных находках — для CI"))
+    p.add_argument("--baseline", metavar="JSON",
+                   help=tr("данные прошлого прогона: находки, которые в них уже были, "
+                           "считаются долгом, и --strict валит сборку только на новых"))
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("brief",

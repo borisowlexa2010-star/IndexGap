@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+**`check --baseline`: CI fails only on what is new.** A site with a hundred
+critical findings could not turn `--strict` on — the build was red from day
+one. Now the data of one ordinary run serves as the baseline: findings already
+in it are known debt, and `--strict` fails only on new critical ones. A finding
+is matched by page, check and level, not by its wording; the page address by
+its key, so a baseline taken with `--site https://EXAMPLE.com/` still matches.
+The same file can be both the baseline and the output. What appeared and what
+is gone is printed and written to the JSON under `baseline`.
+
+**A GitHub Action.** `uses: borisowlexa2010-star/IndexGap@v1.13.0` with `root`,
+`site`, optional `baseline` and `args`. It installs the package from the tag
+itself, writes a summary to the run page (counts, new critical findings, the
+most frequent checks — `python -m indexgap.summary` does the same anywhere),
+keeps the HTML report as an artifact and fails on critical findings. The
+repository's own CI runs it on the demo site both ways: failing without a
+baseline, passing with one. Python 3.15 joined the test matrix.
+
 **A paragraph is prose.** On the built eventiq.io `long-paragraph` stood on 43
 of 87 pages. Of the 55 blocks over 900 characters one was a paragraph: 53 were
 tables read as "caption headers cell cell …" and one was a `<dl>`. On this
