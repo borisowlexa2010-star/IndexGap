@@ -152,7 +152,7 @@ indexgap check --out indexgap-baseline.json                # один раз; ф
 indexgap check --baseline indexgap-baseline.json --strict  # падает только на новых critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.13.1` с `root`, `site`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.14.0` с `root`, `site`,
 необязательными `baseline` и `args`.
 
 ## Наряды на починку
@@ -176,7 +176,7 @@ indexgap brief ./out --site https://example.com --dataset keywords.csv --write
    разбавили долю) — тогда одинаковый код с одинаковым текстом на большинстве
    постраничных нарядов всё равно одна правка шаблона.
 2. `_site.md` — robots.txt, разметка, связи языковых версий.
-3. `_duplicates/group-NNN.md` — группы почти-дублей, см. ниже.
+3. `_duplicates/<первая-страница>.md` — группы почти-дублей, по файлу на группу, имя — по первому адресу группы; см. ниже.
 4. Постраничные наряды, самые тяжёлые первыми (`--limit`, по умолчанию 50; `0` — все).
 
 **Почти-дубли.** Если страницы группы собраны из *разных* строк датасета

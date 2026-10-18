@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.14.0 — 2026-10-19
+
+**Big sites fit.** The scale reviewer generated programmatic sites of 5,000 to
+100,000 pages. Time grew linearly, about 10 ms a page; memory did not fit: a
+50,000-page `check` needed 18 GB, more than a 16 GB CI runner has, and 7 GB
+ended at about 17,000 pages. Now:
+
+| | 1.13.1 | 1.14.0 |
+|---|---|---|
+| `check`, 50,000 generated pages | 516 s CPU, 18.1 GB | 150 s, 5.1 GB |
+| `check`, 100,000 | about 36 GB (not run) | 389 s, 9.8 GB |
+| `sitemap`, 50,000 | 230 s | 39 s |
+| Apache APISIX, 5,546 pages | 104 s, 1.14 GB | 31 s, 0.58 GB |
+| hugo-theme-relearn, 2,298 pages | 25 s, 324 MB | 6.4 s, 180 MB |
+
+* Pages are parsed in up to eight processes (`INDEXGAP_JOBS` sets the number;
+  sites under 2,000 pages and library calls stay in one). The output is the same
+  byte for byte, whatever the number of processes and whatever `PYTHONHASHSEED`.
+* Near-duplicates: shingles hashed once per word, signatures streamed instead of
+  every page's shingle sets held at once, no union set per candidate pair.
+* Boilerplate is counted in bounded memory with identical results; words are
+  interned; `url_key` and `normalize_url` are memoised — sidebars repeat the
+  same thousand links on every page.
+* Two inputs were quadratic: a site where every page has a twin URL (`x.html`
+  beside `x/index.html`), and the directory walk order leaking into output; the
+  walk is sorted now, so the lists in the console are the same on every machine.
+* Near-duplicate group briefs are named after the group's first page instead of
+  `group-NNN.md`: one new pair used to renumber hundreds of files.
+
+On relearn the findings are identical to 1.13.1. On APISIX the near-duplicate
+findings are identical; 52 of 275 `similar` pairs (info, 0.55–0.73) went and 40
+came — that band is sampled by LSH, and the new hashing samples it differently.
+
+913 tests on 3.9, 3.12 and 3.15.
+
 ## 1.13.1 — 2026-10-18
 
 * **Markdown with Windows line endings.** A file saved with CRLF was one block:

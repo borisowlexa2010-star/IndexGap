@@ -375,7 +375,10 @@ def build(pages: list, analysis: dict, cfg: dict = None,
             where = f" — `{_where(page, root)}`" if page is not None else ""
             body.append(f"- {url}{where} — {alike[url]:.0%}")
         body += _verify(verify, site)
-        briefs.append({"name": f"_duplicates/group-{number:03d}.md",
+        # Имя — от первого адреса группы, а не от её номера: одна новая пара
+        # раньше перенумеровывала сотни файлов, и каждый коммит нарядов был
+        # шумом во всю их ширину.
+        briefs.append({"name": f"_duplicates/{_slug(sorted(group)[0]).replace('/', '--')}.md",
                        "kind": "group",
                        "title": tr("Группа почти-дублей №{a0}", a0=number),
                        "body": "\n".join(body), "count": len(group)})
