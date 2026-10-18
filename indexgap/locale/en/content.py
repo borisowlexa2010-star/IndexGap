@@ -4,6 +4,11 @@
 MESSAGES = {
     # ── content ───────────────────────────────────────────────────────────────
     " и ещё": " and more",
+    "незаполненные места шаблона: {a0}": "unfilled template slots: {a0}",
+    "в тексте остался ответ модели, а не текст страницы: «{a0}»":
+        "the model's reply was left instead of the page text: “{a0}”",
+    "текст в неверной кодировке: «{a0}» — файл сохранён в одной кодировке, а прочитан в другой":
+        "text in the wrong encoding: “{a0}” — saved in one encoding and read in another",
     " и ещё {a0}": " and {a0} more",
     "status: {a0} — страница помечена как незаконченная":
         "status: {a0} — the page is marked unfinished",

@@ -27,6 +27,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from html import unescape as html_unescape
 from html.parser import HTMLParser
 from urllib.parse import (urljoin, urlparse, urldefrag, urlsplit, urlunsplit,
                           quote, unquote)
@@ -212,6 +213,7 @@ class Page:
     blocks: dict = field(default_factory=dict)     # счётчики li/table/img и т.п.
     alternates: list = None                        # hreflang: (код, href); None — не собирались
     outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
+    slots: list = None                             # следы незаполненного шаблона: (вид, образец)
 
     @property
     def key(self) -> str:
@@ -1032,6 +1034,68 @@ _TIME_TAG = re.compile(r"<time\b[^<>]{0,500}>", re.I)
 _NEXT_SCRIPT = re.compile(r"NEXT_REDIRECT[^<]{0,300}")
 
 
+# ── следы незаполненного шаблона ─────────────────────────────────────────────
+
+# Видимый текст — без кода, скриптов, комментариев и заготовок: `{{city}}`
+# в `<code>` — пример, в `<template>` — заготовка для скрипта, а не шов.
+NOT_VISIBLE = NOT_PROSE + (("<!--", "-->"), ("<noscript", "</noscript>"),
+                           ("<template", "</template>"), ("<textarea", "</textarea>"),
+                           ("<svg", "</svg>"), ("<head", "</head>"))
+_TAG = re.compile(r"<[^<>]{0,5000}>")
+SLOT_TEMPLATE = re.compile(
+    r"\{\{[^{}\n]{1,80}\}\}"                       # {{city}}, {{ city.name }}
+    r"|\{%[^%\n]{1,80}%\}"                          # {% if city %}
+    r"|\$\{[A-Za-z_][\w.]{0,40}\}"                   # ${city}
+    # {city}: но не \frac{a}{b}, x^{n} и не {1, 2, 3}
+    r"|(?<![\w\\^_{}$])\{[A-Za-z_][\w.]{0,40}\}(?!\})"
+    r"|(?<![\w%])%[A-Z][A-Z0-9_]{1,30}%(?![\w%])")     # %CITY%
+SLOT_LEFTOVER = re.compile(r"\[object Object\]|\$\s?NaN\b|\bNaN\s?%|[$€£₽]\s?undefined\b")
+SLOT_LOREM = re.compile(r"\blorem ipsum\b", re.I)
+SLOT_BRACKET = re.compile(r"\[([A-Za-zА-Яа-яЁё_][\w ]{0,30})\]")
+LLM_PHRASES = re.compile(
+    r"\bas an ai(?: language)? model\b|\bas a large language model\b"
+    r"|\b(?:certainly|sure)! here(?: is|'s)\b|\bi hope this helps\b"
+    r"|\bhere is a rewritten\b|\bi cannot fulfill\b"
+    r"|как языковая модель|как ии-модель|конечно! вот\b|надеюсь, это поможет", re.I)
+MOJIBAKE = re.compile(r"â€[\u0080-\u00bf\u2018-\u201e\u2122\u0153\u02dc]|Ã[\u0080-\u00bf]"
+                      r"|Ð[\u0080-\u00bf]Ð|Ñ[\u0080-\u008f]")
+
+
+def visible_text(raw: str) -> str:
+    """Текст, который видит читатель: без кода, скриптов, <head> и комментариев."""
+    return html_unescape(_TAG.sub(" ", drop_spans(raw or "", NOT_VISIBLE)))
+
+
+def find_slots(text: str, markdown: bool = False) -> list:
+    """
+    Следы незаполненного шаблона в тексте: [(вид, образец)], не больше трёх
+    образцов на вид. В исходнике Markdown `{{ }}` и `{% %}` — синтаксис Hugo
+    и Jekyll, а не шов: их там не ищем.
+    """
+    text = (text or "").replace("\u2019", "'")
+    found = []
+    kinds = [("leftover", SLOT_LEFTOVER), ("lorem", SLOT_LOREM),
+             ("llm", LLM_PHRASES), ("mojibake", MOJIBAKE)]
+    if not markdown:
+        kinds.insert(0, ("template", SLOT_TEMPLATE))
+        kinds.append(("bracket", SLOT_BRACKET))
+    for kind, pattern in kinds:
+        samples = []
+        for m in pattern.finditer(text):
+            if kind == "mojibake":
+                sample = text[max(0, m.start() - 6):m.end() + 4].strip()
+            elif kind == "llm":
+                sample = text[m.start():m.end() + 40].split("\n")[0].strip()
+            else:
+                sample = m.group(0)
+            if sample not in samples:
+                samples.append(sample)
+            if len(samples) >= (12 if kind == "bracket" else 3):
+                break
+        found += [(kind, sample) for sample in samples]
+    return found
+
+
 def essence(raw: str) -> str:
     """
     То немногое, что проверки читают из исходника страницы.
@@ -1315,6 +1379,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             encoding=encoding,
             notes=notes,
             paragraphs=_md_paragraphs(body),
+            slots=find_slots(text, markdown=True),
             blocks={"li": _md_list_items(_strip_fences(body)),
                     "table": len(re.findall(r"^[ \t>]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
                     "img": len(re.findall(r"!\[[^\]\n]{0,1000}\]\(", body)),
@@ -1443,6 +1508,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                 if _is_fragment(page.raw):
                     fragments.append(path)
                     continue
+                page.slots = find_slots(visible_text(page.raw))
                 page.raw = essence(page.raw)
             loaded.append(page)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник

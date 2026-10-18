@@ -36,6 +36,12 @@ MESSAGES = {
         "template takes these addresses from, and either remove the link or "
         "generate the page. If the server redirects these addresses, check that "
         "the redirect really exists.",
+    "Найди, откуда приходит пустое значение: строка датасета без поля, опечатка в имени переменной шаблона или поле, которое генератор не подставляет. Почини данные или шаблон и пересобери — править готовую страницу бесполезно, следующая сборка вернёт шов.":
+        "Find where the empty value comes from: a dataset row missing the field, a typo in a template variable, or a field the generator does not fill. Fix the data or the template and rebuild — editing the built page is useless, the next build brings the seam back.",
+    "Перегенерируй или перепиши этот текст. В конвейере отбрасывай ответы модели с отказом или вступлением до того, как они попадут в шаблон.":
+        "Regenerate or rewrite this text. In the pipeline, drop model replies that refuse or open with a preamble before they reach the template.",
+    "Найди шаг конвейера, где UTF-8 читается как Latin-1 или cp1252 (обычно импорт CSV или ответ API), и укажи кодировку явно. Пересобери страницы.":
+        "Find the pipeline step where UTF-8 is read as Latin-1 or cp1252 (usually a CSV import or an API response) and set the encoding explicitly. Rebuild the pages.",
     "Поставь ссылки на эту страницу с хабовых страниц раздела. Анкор — описательный, не «подробнее».":
         "Link to this page from the section's hub pages. Make the anchor "
         "descriptive, not “read more”.",

@@ -27,9 +27,11 @@
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/jsonld-broken.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/jsonld-faq-invisible.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/jsonld-no-type.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/llm-leftover.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/long-paragraph.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/low-uniqueness.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/many-h1.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/mojibake.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/near-duplicate.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-answer.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-author.html</loc></url>
@@ -58,6 +60,7 @@
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/title-long.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/title-short.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/unfilled-slot.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/unreachable.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/unsupported-number.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/vague-anchor.html</loc></url>
