@@ -55,6 +55,7 @@ jobs:
         with:
           root: examples/demo-site
           site: https://demo.example
+          artifact: indexgap-report-strict
       - name: That run must have failed
         shell: bash
         run: test "${{ steps.strict.outcome }}" = "failure"
@@ -67,6 +68,7 @@ jobs:
           root: examples/demo-site
           site: https://demo.example
           baseline: ${{ runner.temp }}/baseline.json
+          artifact: indexgap-report-baseline
 
   # Сайт документации и обёртка плагина собираются из пакета, а лежат в
   # репозитории готовыми. Забыть пересобрать — значит опубликовать страницы,

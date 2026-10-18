@@ -144,7 +144,7 @@ indexgap check --baseline indexgap-baseline.json --strict
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.13.0
+- uses: borisowlexa2010-star/IndexGap@v1.13.1
   with:
     root: out
     site: https://example.com

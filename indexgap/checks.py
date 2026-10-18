@@ -676,9 +676,10 @@ def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
                       "базовый путь в генераторе (pathPrefix, baseURL, basePath) и "
                       "пересобери. Из-за этого же все страницы выглядят сиротами.",
                       a0=prefix)
-        paths = [os.path.dirname(os.path.abspath(p.path)) for p in pages if p.path]
+        paths = [os.path.dirname(p.path) for p in pages if p.path]
         try:
-            first = os.path.commonpath(paths) if paths else "."
+            # Прямые слэши на любой системе: путь печатается и в CI-логах.
+            first = (os.path.commonpath(paths) if paths else ".").replace(os.sep, "/")
         except ValueError:
             first = "."
         return (tr("похоже, каталог не соответствует корню сайта: ссылки на страницах короче их собственных адресов на один сегмент. Из-за этого все страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n    Проверь, какой каталог отображается в корень {a0} — сейчас это {a1}", a0=pages[0].url.split('/')[2], a1=first))

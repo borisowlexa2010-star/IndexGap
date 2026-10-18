@@ -160,3 +160,21 @@ class MarkdownBlocks(Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsLineEndings(Fixture):
+    """
+    Первый прогон на Windows: Markdown с CRLF делился на блоки неверно —
+    `\\r\\n\\r\\n` не похоже на пустую строку, и весь файл был одним абзацем.
+    """
+
+    def test_crlf_markdown_has_the_same_blocks(self):
+        body = f"# Аренда\n\n{PROSE}\n\n- первый пункт\n- второй пункт\n\n{PROSE}\n"
+        root = tempfile.mkdtemp(prefix="indexgap-crlf-")
+        self.addCleanup(shutil.rmtree, root, True)
+        for name, newline in (("unix.md", "\n"), ("dos.md", "\r\n")):
+            with open(os.path.join(root, name), "w", encoding="utf-8", newline=newline) as fh:
+                fh.write("---\ntitle: Аренда\n---\n" + body)
+        pages = {os.path.basename(p.path): p for p in core.load_pages(root, SITE)[0]}
+        self.assertEqual(pages["dos.md"].paragraphs, pages["unix.md"].paragraphs)
+        self.assertEqual(pages["dos.md"].blocks["li"], 2)
