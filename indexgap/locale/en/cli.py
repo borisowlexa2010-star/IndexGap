@@ -271,6 +271,13 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "  Порядок: сначала деплой — и проверь, что изменённая страница и файл ключа уже открываются на сайте, — потом --send. Отправленное отмечается, и после раннего --send поисковик обойдёт старую версию.":
+        "  Order: deploy first — and check that the changed page and the key file "
+        "already open on the site — then --send. What is sent is marked, and after an "
+        "early --send the search engine crawls the old version.",
+    "  ! в последнем отчёте check ({a0}) у отправляемых страниц {a1} критичных находок — сначала почини и пересобери, потом отправляй":
+        "  ! the last check report ({a0}) has {a1} critical findings on the pages to be "
+        "sent — fix and rebuild first, then send",
     "  ! robots.txt указывает на sitemap, которого нет в сборке: {a0} — на живом сайте это скорее всего 404. Исправь строку Sitemap: или собери этот файл":
         "  ! robots.txt points at a sitemap that is not in the build: {a0} — on the "
         "live site it is most likely a 404. Fix the Sitemap: line or build that file",

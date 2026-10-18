@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import time
@@ -96,7 +97,9 @@ def fetch_participants(cache_path_dir: str = None, timeout: int = 15,
             except OSError:
                 pass
             return {"participants": data, "source": tr("реестр indexnow.org")}
-    except (urllib.error.URLError, json.JSONDecodeError, ValueError, TimeoutError):
+    except (OSError, json.JSONDecodeError, ValueError, TimeoutError,
+            http.client.HTTPException):
+        # Сбой сети любого вида — встроенный список, а не трассировка.
         pass
 
     return {"participants": dict(FALLBACK_PARTICIPANTS), "source": tr("встроенный список")}
