@@ -99,7 +99,10 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
-  --out OUT
+  --out OUT          where to write the HTML report; the machine-readable data
+                     goes next to it with a .json extension. A name ending in
+                     .json names the data, and the report goes next to it as
+                     .html
   --reports REPORTS  directory for the per-project reports
   --strict           exit non-zero when there are critical findings — for CI
   --lang {en,ru}     output language: en or ru. By default from INDEXGAP_LANG

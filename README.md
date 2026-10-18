@@ -121,6 +121,36 @@ re-saving, JSON, NDJSON, an XML sitemap, or a plain list of URLs — and the
 keyword column is found whether the export calls it `Keyword`, `Фраза`,
 `Запрос` or `Search Term`.
 
+## In CI
+
+A site that already has a hundred critical findings cannot turn on `--strict`:
+the build is red from day one, and someone switches the check off. A baseline
+fixes that. Run once, commit the data, and from then on the build fails only
+on findings that are new:
+
+```bash
+indexgap check --out indexgap-baseline.json      # once; commit the file
+indexgap check --baseline indexgap-baseline.json --strict
+```
+
+A finding is matched by page, check and level, not by its wording, so a
+changed number in the message does not make it new. The run prints what
+appeared and what is gone, and both go into the JSON under `baseline`.
+
+On GitHub it is one step. The summary — counts, new critical findings, the most
+frequent checks — appears on the run page, and the HTML report is kept as an
+artifact:
+
+```yaml
+- run: npm run build
+- uses: borisowlexa2010-star/IndexGap@v1.13.0
+  with:
+    root: out
+    site: https://example.com
+    baseline: indexgap-baseline.json   # optional
+    args: --sitemap out/sitemap.xml    # optional, anything `check` accepts
+```
+
 ---
 
 ## What it checks

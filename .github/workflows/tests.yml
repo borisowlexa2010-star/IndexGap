@@ -18,9 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        # 3.9 is the floor the package promises; 3.14 is the ceiling it must
-        # not break on. 3.11 sits in the middle so a break has a bisect point.
-        python-version: ["3.9", "3.11", "3.14"]
+        # 3.9 is the floor the package promises; 3.15 is the ceiling it must
+        # not break on. 3.11 and 3.14 sit between so a break has a bisect point.
+        python-version: ["3.9", "3.11", "3.14", "3.15"]
         include:
           - os: macos-latest
             python-version: "3.12"
@@ -40,6 +40,33 @@ jobs:
           for cmd in init plan check brief sitemap notify portfolio profiles doctor cite; do
             python -m indexgap "$cmd" --help > /dev/null
           done
+
+  # Сам GitHub Action — тем же способом, каким его подключит человек:
+  # `uses:` на демо-сайте. Без базы он обязан упасть на его критичных
+  # находках, с базой из того же прогона — пройти.
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Without a baseline the demo site's critical findings fail it
+        id: strict
+        continue-on-error: true
+        uses: ./
+        with:
+          root: examples/demo-site
+          site: https://demo.example
+      - name: That run must have failed
+        shell: bash
+        run: test "${{ steps.strict.outcome }}" = "failure"
+      - name: Keep its data as the baseline
+        shell: bash
+        run: cp "${{ steps.strict.outputs.data }}" "$RUNNER_TEMP/baseline.json"
+      - name: With that baseline nothing is new, and it passes
+        uses: ./
+        with:
+          root: examples/demo-site
+          site: https://demo.example
+          baseline: ${{ runner.temp }}/baseline.json
 
   # Сайт документации и обёртка плагина собираются из пакета, а лежат в
   # репозитории готовыми. Забыть пересобрать — значит опубликовать страницы,
