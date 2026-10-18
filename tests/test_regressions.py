@@ -80,7 +80,8 @@ class TestUrlMatching(Fixture):
         self.write("index.md", "---\ntitle: Раз\n---\n\n# Раз")
         pages, problems = self.load()
         self.assertEqual(len(pages), 1)
-        self.assertTrue(any("один URL" in p for p in problems))
+        # Рядом с собранным index.html markdown — файл сборки, и он назван.
+        self.assertTrue(any("index.md" in p for p in problems), problems)
 
     def test_a_raw_markdown_twin_is_named_as_a_file_not_a_collision(self):
         self.write("index.html", "<html><body><p>Раз</p></body></html>")

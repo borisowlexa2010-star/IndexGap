@@ -640,7 +640,7 @@ def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
     return found
 
 
-def root_mismatch(pages: list, graph: dict) -> str:
+def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
     """
     Самый частый неверный вердикт: каталог не соответствует корню сайта.
 
@@ -663,8 +663,21 @@ def root_mismatch(pages: list, graph: dict) -> str:
             shifted.add(f"//{host}/{tail}")
     hits = len(unresolved & shifted)
     if hits >= max(2, len(unresolved) * 0.5):
-        first = pages[0].path
-        return (tr("похоже, каталог не соответствует корню сайта: ссылки на страницах короче их собственных адресов на один сегмент. Из-за этого все страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n    Проверь, какой каталог отображается в корень {a0} — сейчас это {a1}", a0=pages[0].url.split('/')[2], a1=first.rsplit('/', 2)[0] or '.'))
+        prefix = "/" + base_path.strip("/") if base_path.strip("/") else ""
+        if prefix:
+            # Сайт живёт под префиксом, а ссылки его не несут: на живом сайте
+            # они ведут в 404 — это ошибка шаблона, а не запуска.
+            return tr("ссылки на страницах не несут префикса {a0}: сайт живёт под ним, а "
+                      "ссылки ведут от корня домена — на живом сайте это 404. Задай "
+                      "базовый путь в генераторе (pathPrefix, baseURL, basePath) и "
+                      "пересобери. Из-за этого же все страницы выглядят сиротами.",
+                      a0=prefix)
+        paths = [os.path.dirname(os.path.abspath(p.path)) for p in pages if p.path]
+        try:
+            first = os.path.commonpath(paths) if paths else "."
+        except ValueError:
+            first = "."
+        return (tr("похоже, каталог не соответствует корню сайта: ссылки на страницах короче их собственных адресов на один сегмент. Из-за этого все страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n    Проверь, какой каталог отображается в корень {a0} — сейчас это {a1}", a0=pages[0].url.split('/')[2], a1=first))
     return ""
 
 
@@ -738,10 +751,28 @@ SHELL_DEPENDENT = {
 }
 
 
+def _consolidated(page, target) -> bool:
+    """
+    Вариант страницы, отданный основной: печатная копия, второй адрес. Перевод
+    с canonical на другой язык — не вариант, а потерянная версия: он остаётся
+    критичным (на apisix /zh/comparisons/ → /comparisons/).
+    """
+    if not indexable(target):
+        return False
+    lang_a = (page.lang or "").lower().split("-")[0]
+    lang_b = (target.lang or "").lower().split("-")[0]
+    if lang_a and lang_b and lang_a != lang_b:
+        return False
+    first = lambda p: urlsplit(p.url).path.strip("/").split("/")[0].lower()
+    a, b = first(page), first(target)
+    return not (a != b and (_is_locale(a) or _is_locale(b)))
+
+
 def technical_issues(pages: list, cfg: dict = None, language: str = "",
                      shells: set = None) -> list:
     """Плоский список находок: (уровень, url, код, пояснение)."""
     cfg = {**CONFIG, **(cfg or {})}
+    by_key = {p.key: p for p in pages}
     bounds = _length_bounds(cfg)
     shells = shells or set()
     issues = []
@@ -793,9 +824,19 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         elif len(h1) > 1:
             issues.append(("info", p.url, "many-h1", tr("H1 на странице {a0}, нужен один", a0=len(h1))))
 
-        if p.canonical and url_key(p.canonical) != p.key:
-            issues.append(("critical", p.url, "canonical-elsewhere",
-                           tr("canonical указывает на {a0} — страница отдаёт вес другой", a0=p.canonical)))
+        # На закрытой странице canonical — часть того же решения: одна находка,
+        # а не две. Старые версии документации давали восемь тысяч критичных.
+        if p.canonical and url_key(p.canonical) != p.key and not p.noindex:
+            target = by_key.get(url_key(p.canonical))
+            if target is not None and _consolidated(p, target):
+                issues.append(("info", p.url, "canonical-elsewhere",
+                               tr("копия страницы {a0}: canonical указывает на неё, и та в сборке "
+                                  "открыта — так и должно быть, если это вариант (печатная версия, "
+                                  "второй адрес)", a0=target.url)))
+            else:
+                issues.append(("critical", p.url, "canonical-elsewhere",
+                               tr("canonical указывает на {a0} — страница отдаёт вес другой",
+                                  a0=p.canonical)))
         volume = text_volume(p, language)
         if volume < cfg["thin_words"]:
             issues.append(("warning", p.url, "thin",
@@ -1071,7 +1112,57 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
 # Что имеет смысл говорить о странице, закрытой от индекса: само закрытие и
 # то, что касается связей с другими страницами.
 KEEP_ON_CLOSED = {"noindex", "canonical-elsewhere", "nosnippet", "stale-closed",
+                  "still-draft", "brief-left", "hreflang-canonical-conflict",
                   "translations-parked"}
+
+
+CLOSED_SECTION_MIN = 20
+
+
+def _closed_sections(issues: list, notes: list, pages: list) -> list:
+    """
+    Закрытый раздел — решение, а не четыре тысячи ошибок.
+
+    Docusaurus закрывает старые версии документации, pkgdown — `/dev/`, Hugo —
+    журнал изменений. На apisix это 4 172 критичных `noindex` и первое место
+    в «чинить в этом порядке». Раздел, где закрыто не меньше 90% из двадцати
+    и более страниц и который меньше половины сайта, получает одну заметку,
+    а его страницы — сведения вместо критичных. Закрытый целиком сайт —
+    по-прежнему беда: это правило его не трогает.
+    """
+    from collections import Counter as _Counter
+    total, closed = _Counter(), _Counter()
+    for p in pages:
+        parts = urlsplit(p.url).path.strip("/").split("/")
+        for depth in range(1, min(len(parts), 4)):
+            prefix = "/" + "/".join(parts[:depth]) + "/"
+            total[prefix] += 1
+            if p.noindex:
+                closed[prefix] += 1
+    sections = sorted(
+        (prefix for prefix, n in total.items()
+         if n >= CLOSED_SECTION_MIN and closed[prefix] >= 0.9 * n and n < 0.5 * len(pages)),
+        key=lambda s: (s.count("/"), s))
+    chosen = []
+    for prefix in sections:
+        if not any(prefix.startswith(c) for c in chosen):
+            chosen.append(prefix)
+    if not chosen:
+        return issues
+    for prefix in chosen:
+        notes.append(tr(
+            "раздел {a0}: закрыто от индекса {a1} страниц из {a2}. Похоже на решение, а "
+            "не на ошибку — старые версии документации, черновики, служебные копии. "
+            "Если так и задумано, делать ничего не нужно; находки noindex там понижены "
+            "до сведений", a0=prefix, a1=closed[prefix], a2=total[prefix]))
+
+    def inside(url):
+        path = urlsplit(url).path
+        path = path if path.endswith("/") else path + "/"
+        return any(path.startswith(c) for c in chosen)
+
+    return [("info",) + tuple(i[1:]) if i[2] == "noindex" and i[0] == "critical"
+            and inside(i[1]) else i for i in issues]
 
 
 def drop_closed_noise(issues: list, pages: list) -> list:
@@ -1083,11 +1174,12 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     выдаче не появится: её заголовок, объём и первый абзац никому не видны.
     Остаются само закрытие и находки hreflang — они про связи, а не про текст.
     """
-    closed = {p.url for p in pages if p.noindex}
+    # Закрыта и страница с canonical на другую: печатная копия Hugo
+    # получала «тонкая», «нет описания» и «глубоко» — 800 находок на сайте.
+    closed = {p.url for p in pages if not indexable(p)}
     if not closed:
         return issues
-    return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED
-            or i[2].startswith("hreflang-")]
+    return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED]
 
 
 def validate_config(cfg: dict) -> list:
@@ -1167,7 +1259,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             tr("пустых JS-каркасов: {a0} из {a1} ({a2:.0%}). На этих страницах не считались объём текста, уникальность, дубли и ссылки — в исходном HTML их неоткуда взять. Это одна беда, а не четыре: появится серверный HTML — проверки заработают.", a0=len(shells), a1=len(pages), a2=share))
     if boiler["skipped"]:
         notes.append(tr("шаблонность не оценивалась: ") + boiler["skipped"])
-    mismatch = root_mismatch(pages, graph)
+    mismatch = root_mismatch(pages, graph, urlsplit(home_url).path if home_url else "")
     if mismatch:
         notes.append(mismatch)
     else:
@@ -1288,6 +1380,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             "поисковик видит то, куда они ведут.", a0=len(stubs)))
 
     issues = _collapse_parked(issues, notes, pages, cfg)
+    issues = _closed_sections(issues, notes, pages)
     issues = drop_closed_noise(issues, pages)
 
     return {

@@ -147,7 +147,7 @@ class TestJekyllSource(Fixture):
             "_includes/head-custom.html": '<link rel="icon" href="/favicon.ico">',
         })
         self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages),
-                         ["/", "/Rguide/", "/cppguide/"])
+                         ["/", "/Rguide/", "/cppguide.html"])
         self.assertEqual(self.found(result, "orphan", "unreachable"), [])
 
     def test_without_a_jekyll_config_a_raw_markdown_file_stays_a_file(self):

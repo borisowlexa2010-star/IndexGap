@@ -177,7 +177,9 @@ class TestFlatUrls(Fixture):
                 "<head>", '<head><link rel="canonical" href="https://example.com/about.html">'),
             "team.html": html("Команда", ["index.html"]),
         })
-        self.assertEqual(self.sitemap(pages), ["/", "/about.html", "/team/"])
+        # team.html без canonical и без ссылок — `team.html`: эта форма работает
+        # на любом статическом хостинге, `/team/` — нет.
+        self.assertEqual(self.sitemap(pages), ["/", "/about.html", "/team.html"])
         self.assertEqual([i for i in checks.run_all(pages, SITE + "/")["issues"]
                           if i[2] == "canonical-elsewhere"], [])
 

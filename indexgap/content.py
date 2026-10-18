@@ -37,7 +37,7 @@ import os
 import re
 from collections import Counter, defaultdict
 from .core import (BRIEF_MARKERS, NOT_PROSE, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, _strip_fences,
-                   drop_spans, find_slots, visible_text)
+                   drop_spans, find_slots, tokenize, visible_text)
 from .i18n import tr
 
 CONFIG = {
@@ -409,6 +409,27 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
     return issues
 
 
+def _opening(page) -> list:
+    """
+    Слова, с которых начинается текст страницы, — после её заголовка.
+
+    У страницы без <main> в начале текста стоят баннер и меню: на pyvideo
+    «A thank you to everyone who makes this possible» и пункты навигации
+    давали `same-opening` на 21 756 страницах. Текст статьи начинается после
+    её H1 — или первого заголовка, если H1 нет.
+    """
+    words = page.words
+    heads = page.headings or []
+    title = next((t for level, t in heads if level == 1), heads[0][1] if heads else "")
+    marker = tokenize(title) if title else []
+    if marker:
+        window = words[:300]
+        for at in range(len(window) - len(marker) + 1):
+            if window[at:at + len(marker)] == marker:
+                return words[at + len(marker):]
+    return words
+
+
 def check_template_seams(pages: list, cfg: dict = None) -> dict:
     """
     Ищет общий скелет: одинаковую последовательность заголовков.
@@ -443,7 +464,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     # тексту: раньше сюда попадало меню, и находка срабатывала на любом сайте.
     openings = defaultdict(list)
     for page in pages:
-        words = page.words[:12]
+        words = _opening(page)[:12]
         if len(words) >= 8:
             openings[" ".join(words)].append(page.url)
     for opening, urls in sorted(openings.items()):

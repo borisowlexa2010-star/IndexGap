@@ -158,7 +158,7 @@ class TestWhatCountsAsAPage(Site):
             "dist/index.html": doc("Сборка"),
             "src/about.html": doc("О нас"),
         })
-        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages), ["/", "/src/about/"])
+        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages), ["/", "/src/about.html"])
         self.assertTrue(any("dist" in p for p in problems), problems)
 
     def test_markdown_twin_never_displaces_its_html_page(self):
@@ -167,7 +167,7 @@ class TestWhatCountsAsAPage(Site):
             "guide.html": doc("Гид"),
             "guide.md": "# Гид\n\n[a](/a/) [b](/b/) [c](/c/) " + "слово " * 300,
         })
-        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages), ["/", "/guide/"])
+        self.assertEqual(sorted(p.url.replace(SITE, "") for p in pages), ["/", "/guide.html"])
         self.assertFalse(any("один URL" in p for p in problems), problems)
 
 
