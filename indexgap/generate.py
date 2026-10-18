@@ -193,6 +193,8 @@ def read_dataset(path: str) -> dict:
                 "delimiter": "", "problems": []}
 
     text, encoding = read_text(path)
+    # NUL внутри ячейки: Python до 3.11 бросал `_csv.Error: line contains NUL`.
+    text = text.replace("\x00", "")
     first_line = text.splitlines()[0] if text.strip() else ""
     single_column = not any(ch in first_line for ch in ",;\t|")
     if single_column:

@@ -271,6 +271,10 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "{a0}: сюда нельзя записать манифест — sitemap не строился. Укажи другое место через --manifest.":
+        "{a0}: the manifest cannot be written here — the sitemap was not built. "
+        "Choose another place with --manifest.",
+    "\n{a0}: не удалось записать или прочитать ({a1}).": "\n{a0}: could not write or read it ({a1}).",
     "Базовой линии {a0} нет. Её делают обычным прогоном:\n    indexgap check --out {a0}\n    и коммитят вместе с проектом.":
         "There is no baseline at {a0}. It is made by an ordinary run:\n"
         "    indexgap check --out {a0}\n    and committed with the project.",

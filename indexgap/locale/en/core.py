@@ -23,6 +23,11 @@ MESSAGES = {
         "{a0}: cannot read the file ({a1}).",
     "Не указан адрес сайта. Добавь --site https://example.com":
         "No site address given. Add --site https://example.com",
+    "в файле {a0} байт(а) не в UTF-8 — на их месте знак замены; остальной текст прочитан как UTF-8":
+        "the file has {a0} byte(s) that are not UTF-8 — they show as the replacement "
+        "character; the rest of the text was read as UTF-8",
+    "{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись":
+        "{a0}: the directory could not be read ({a1}) — its pages were not checked",
     "файл прочитан как {a0}, а не UTF-8":
         "read as {a0}, not UTF-8",
     "фронтматтер не распознан":

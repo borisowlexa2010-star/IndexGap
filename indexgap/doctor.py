@@ -603,6 +603,11 @@ _NOT_INDEXED = re.compile(
     re.I)
 
 
+_SURELY_INDEXED = re.compile(
+    r"^\s*(?:submitted and )?indexed\b(?!\s*:?\s*no)|\burl is on google\b|\bpage is indexed\b"
+    r"|^\s*(?:отправлена и )?проиндексирован", re.I)
+
+
 def _status_column(rows: list, start: int):
     """Номер столбца со статусом индексации — или None, если такого нет."""
     if start == 0 or not rows:
@@ -625,7 +630,14 @@ def _is_indexed_status(status: str) -> bool:
     дубль» — всё это строки с адресом, и раньше каждая засчитывалась как
     страница в индексе. Засчитывается только то, что сказано прямо.
     """
-    if not status or _NOT_INDEXED.search(status):
+    if not status:
+        return False
+    # «Indexed, though blocked by robots.txt» — в индексе, хотя и со словом
+    # «blocked»; «URL is on Google» — вердикт проверки URL. Прямые слова о
+    # том, что адрес в индексе, проверяются раньше слов об исключении.
+    if _SURELY_INDEXED.search(status):
+        return True
+    if _NOT_INDEXED.search(status):
         return False
     return bool(_INDEXED.search(status))
 

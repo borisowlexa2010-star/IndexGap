@@ -66,6 +66,7 @@ MESSAGES = {
     "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404, если сервер их не перенаправляет":
         "links to pages that are not in the build: {a0} — {a1}{a2}. On the live "
         "site they are 404s unless the server redirects them",
+    "слишком глубокая вложенность": "nesting too deep",
     "ни одна внутренняя ссылка не ведёт на страницу":
         "no internal link points at this page",
     "объём текста ≈ {a0} — тонкая страница":

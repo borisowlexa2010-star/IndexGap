@@ -314,7 +314,7 @@ def _read_json(text: str) -> list:
     data = None
     try:
         data = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         items = []
         for line in text.splitlines():
             line = line.strip()
@@ -322,7 +322,7 @@ def _read_json(text: str) -> list:
                 continue
             try:
                 items.append(json.loads(line))
-            except ValueError:
+            except (ValueError, RecursionError):
                 return []
         data = items
     if isinstance(data, dict):
@@ -400,8 +400,13 @@ def read_table(path: str) -> tuple:
     return _rows_from_text(text), encoding
 
 
+_BARE_URL = re.compile(r"^(?:https?://|/)\S*$")
+
+
 def _rows_from_text(text: str) -> list:
     """Текст таблицы → строки. Отдельно, потому что нужен и внутри архива."""
+    # NUL в ячейке: Python до 3.11 отвергал из-за него всю выгрузку.
+    text = text.replace("\x00", "")
     # GA4 начинает CSV с шапки из строк `# …` и пустой строки. Судить о том,
     # таблица это или список, по первой физической строке нельзя: шапка
     # превращала выгрузку в список из одной ячейки на строку.
@@ -413,6 +418,11 @@ def _rows_from_text(text: str) -> list:
     text = "".join(lines[start:])
     first = text.splitlines()[0] if text.strip() else ""
     if not any(ch in first for ch in ",;\t|"):
+        return _read_lines(text)
+    # Список адресов без шапки, где в самом адресе есть запятая или `;`:
+    # `?x=1,2`, `;jsessionid=`. Разбор как CSV резал адрес на запятой.
+    sample = [line.strip() for line in text.splitlines()[:50] if line.strip()]
+    if sample and all(_BARE_URL.match(line) for line in sample):
         return _read_lines(text)
 
     try:

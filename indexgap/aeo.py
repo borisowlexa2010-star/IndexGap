@@ -305,9 +305,10 @@ def check_jsonld(page) -> list:
     for raw in page.jsonld or ():
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as exc:
+        except (ValueError, RecursionError) as exc:
             issues.append(("warning", page.url, "jsonld-broken",
-                           tr("блок JSON-LD не парсится ({a0}) — для поисковика его просто нет", a0=exc.msg)))
+                           tr("блок JSON-LD не парсится ({a0}) — для поисковика его просто нет",
+                              a0=getattr(exc, "msg", None) or tr("слишком глубокая вложенность"))))
             continue
         for item in _ld_items(data):
             # Контейнер `@graph` сам по себе типа не имеет — это обёртка,
@@ -391,7 +392,7 @@ def check_provenance(page) -> list:
     for raw in page.jsonld or ():
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             continue
         for item in _ld_items(data):
             keys = {str(k).lower() for k in item}
