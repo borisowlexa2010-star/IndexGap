@@ -83,10 +83,10 @@ WHY = {
    "package refuses to guess between them and hands you the short list instead "
    "of silently picking.",
  "source-note":
-   "A claim with a source attached can be verified by a reader and survives an "
-   "editor who was not there when the page was generated. A claim without one "
-   "has to be taken on trust, and generated pages have not earned it."
-   " On a hand-written page a missing source is a stylistic choice. On a generated one it is structural: the text was assembled from a row of data that had a provenance, and the page dropped it. Carrying the source through the template costs one line and turns an unverifiable claim into a checkable one — which also happens to be what an editor needs before approving three thousand pages nobody can read individually.",
+   "Something the parser had to say aloud about the file itself: it was read as "
+   "cp1251 rather than UTF-8, a few bytes were not UTF-8, the front matter was "
+   "opened and never closed, a canonical could not be parsed as an address."
+   " None of these is a ranking problem by itself, and each is a reason the other findings on the page may be wrong: a page read in the wrong encoding has the wrong words, the wrong title and the wrong duplicates. That is why it is a warning and why it comes first on the page's work order — fix the file, and the rest of the report becomes trustworthy.",
  "still-draft":
    "A draft that reached the sitemap is worse than a missing page: search "
    "engines index the unfinished version, and the finished one later competes "
@@ -401,11 +401,11 @@ COMMANDS = [
   "competing pages, checks that the path pattern resolves for every row, and "
   "writes the work list. The cheapest place to fix a pipeline is before it runs."),
  ("check", "The full audit of generated pages",
-  "Every check in this reference, run against the pages on disk or a live site: "
+  "Every check in this reference, run against the built pages (or Markdown sources) on disk: "
   "invented numbers, indexing, duplicates, hreflang clusters, headings and "
   "structured data. Reports HTML and JSON."),
  ("brief", "Turn findings into work orders",
-  "Lays the findings out as markdown files next to the pages they belong to, "
+  "Lays the findings out as markdown files in indexgap-briefs/, mirroring the page tree, "
   "with an imperative fix, the thresholds the result must meet, and the dataset "
   "row as the only permitted source of numbers. Writes no page text, "
   "deliberately."),
@@ -419,14 +419,13 @@ COMMANDS = [
  ("portfolio", "One table across every project",
   "Runs the audit over several sites at once and reports them side by side, "
   "so that a portfolio of generated sites can be triaged in one pass instead of "
-  "one project at a time. Each row carries the same counts a single audit "
-  "produces — critical findings, warnings, duplicate clusters, orphans — which "
-  "makes the comparison meaningful rather than decorative: the site with three "
-  "hundred warnings and no critical findings is in better shape than the one "
-  "with two criticals, and the table says so at a glance. Projects are read "
-  "from their own indexgap.json files, so each keeps its own thresholds and "
-  "content profile; a catalogue and a blog are not forced onto one standard "
-  "just because they are reported together."),
+  "one project at a time. Each row carries the pages, critical findings, "
+  "warnings and the profile, which makes the comparison meaningful rather than "
+  "decorative: the site with three hundred warnings and no critical findings is "
+  "in better shape than the one with two criticals, and the table says so at a "
+  "glance. Each project names its own profile in projects.json, so a catalogue "
+  "and a blog are not forced onto one standard just because they are reported "
+  "together; findings that repeat across projects are listed as shared habits."),
  ("profiles", "Show the built-in content profiles",
   "Thresholds differ by content type: a reference page and a landing page are "
   "not thin at the same word count, and an events site has a notion of "
@@ -572,6 +571,23 @@ def page(path: str, title: str, description: str, body: str,
     target.write_text(doc, encoding="utf-8")
 
 
+_RANK = {"info": 0, "warning": 1, "critical": 2}
+# Проверки, чей уровень или текст собирается из переменных: регулярка по
+# исходникам их не находит. Список короткий и проверяется тестом на покрытие.
+LEVEL_OVERRIDES = {
+    "ai-crawler-blocked": {"levels": {"critical", "info"},
+                           "message": "OAI-SearchBot is closed: … (critical for the "
+                                      "AI-search crawlers, info for training crawlers)"},
+    "translations-parked": {"levels": {"critical"},
+                            "message": "… language versions are closed with noindex and a "
+                                       "canonical to the original — parked, not published"},
+    "source-note": {"levels": {"warning"},
+                    "message": "what the parser has to say aloud: the file was read as "
+                               "cp1251, the front matter was not recognised, a canonical "
+                               "cannot be parsed"},
+}
+
+
 def collect() -> dict:
     """Реестр проверок из пакета: уровень и текст находки — из исходников."""
     src = "".join(p.read_text(encoding="utf-8")
@@ -585,19 +601,34 @@ def collect() -> dict:
     pat = re.compile(
         r'\(\s*"(critical|warning|info)"\s*,\s*[^,\n]+,\s*'
         r'"([a-z0-9-]+)"\s*,\s*\n?\s*tr\(\s*((?:' + literal + r'\s*)+)', re.S)
-    seen = {}
+    seen, levels = {}, {}
     for level, code, literals in pat.findall(src):
         source = "".join(ast.literal_eval(x) for x in re.findall(literal, literals))
         seen.setdefault(code, (level, i18n.t(source)))
+        levels.setdefault(code, set()).add(level)
+    # Уровень бывает выражением: `"critical" if … else "warning"`, `level`.
+    # Регулярка выше их не видит — раньше такие проверки выходили «info».
+    loose = re.compile(r'\(\s*([^,()\n]{1,80}?)\s*,\s*[^,\n]+,\s*"([a-z0-9-]+)"\s*,')
+    for expr, code in loose.findall(src):
+        found = set(re.findall(r'"(critical|warning|info)"', expr))
+        if found:
+            levels.setdefault(code, set()).update(found)
+    for code, extra in LEVEL_OVERRIDES.items():
+        levels.setdefault(code, set()).update(extra["levels"])
+        if extra.get("message") and code not in seen:
+            seen[code] = (max(extra["levels"], key=_RANK.get), extra["message"])
 
     # объединение: часть проверок эмитится, но не имеет записи в FIX
     codes = set(repair.FIX) | set(seen) | set(checks.CODE_WEIGHT)
     codes -= {"noindex-meta"}
     out = {}
     for code in sorted(codes):
-        level, message = seen.get(code, ("", ""))
+        _level, message = seen.get(code, ("", ""))
+        found = levels.get(code, set())
+        level = max(found, key=_RANK.get) if found else ""
         out[code] = {
             "level": level,
+            "also": sorted(found - {level}, key=_RANK.get, reverse=True),
             "message": re.sub(r"\{a\d[^}]*\}", "…", message).strip(),
             "fix": repair._fix(code),
             "template_wide": code not in checks.NOT_TEMPLATE_WIDE,
@@ -630,9 +661,9 @@ def check_page(code: str, data: dict, family: tuple, siblings: list) -> None:
     if data["template_wide"] and not data["site_level"]:
         behaviour.append(
             "Collapsed when it fires <b>template-wide</b>. If it appears on 90% "
-            "or more of the pages — or of one language version — it is a "
-            "property of the template and is reported once, with the count, "
-            "instead of once per page.")
+            "or more of the pages — or of one language version — of a site with "
+            "at least 20 pages, it is a property of the template and is reported "
+            "once, with the count, instead of once per page.")
     else:
         if not data["site_level"] and not data["grouped"]:
             behaviour.append(
@@ -663,7 +694,7 @@ def check_page(code: str, data: dict, family: tuple, siblings: list) -> None:
     body = f"""
 <h1>{esc(humanise(code))}</h1>
 <div class="meta">
-  <span class="tag {level}">{esc(level)}</span>
+  <span class="tag {level}">{esc(level)}</span>{''.join(f' <span class="tag {a}">{esc(a)}</span>' for a in data.get('also', []))}
   <span class="tag">{esc(code)}</span>
   <span class="tag acc">{esc(fam_title)}</span>
 </div>
@@ -684,8 +715,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in {esc(fam_title.lower())}</h2>
 <ul class="plain">{others}</ul>

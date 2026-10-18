@@ -180,3 +180,30 @@ class RatingScales(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrossEngine(unittest.TestCase):
+    def test_three_engines_are_not_double_counted(self):
+        from indexgap import doctor
+        pages = [core.Page(path=f"{n}.html", url=f"{SITE}/{n}/") for n in ("", "berlin", "munich")]
+        key = lambda n: core.url_key(f"{SITE}/{n}/")
+        funnel = {"panel_keys": {"google": {key("")}, "bing": {key(""), key("berlin")},
+                                 "yandex": {key("munich")}}}
+        out = {row["id"] + ":" + row.get("engine", ""): row["count"]
+               for row in doctor.cross_engine(funnel, pages)}
+        # Только в одном — не «нет только в» двух других.
+        self.assertNotIn("missing-only:google", out)
+        self.assertNotIn("missing-only:bing", out)
+        # Главная есть в Google и Bing — нет только в Яндексе.
+        self.assertEqual(out.get("missing-only:yandex"), 1)
+        # Берлин и Мюнхен — каждый в одном индексе из трёх.
+        self.assertEqual(out.get("partly:"), 2)
+
+    def test_missing_only_from_one_engine(self):
+        from indexgap import doctor
+        pages = [core.Page(path="a.html", url=f"{SITE}/a/")]
+        k = core.url_key(f"{SITE}/a/")
+        funnel = {"panel_keys": {"google": set(), "bing": {k}, "yandex": {k}}}
+        rows = {r["id"] + ":" + r.get("engine", ""): r["count"]
+                for r in doctor.cross_engine(funnel, pages)}
+        self.assertEqual(rows.get("missing-only:google"), 1)

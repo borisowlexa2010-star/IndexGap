@@ -92,7 +92,7 @@ indexgap check
 indexgap init                       # install into this project
 indexgap plan keywords.csv          # audit the keyword set before generating
 indexgap check                      # everything local: text, structure, machine-readability
-indexgap brief --write              # turn the findings into work orders beside the pages
+indexgap brief --write              # turn the findings into work orders in indexgap-briefs/
 indexgap sitemap --out-dir ./public # sitemap with sharding and an honest lastmod
 indexgap notify --key <your-key>    # tell IndexNow what actually changed
 indexgap doctor --sitemap ./public/sitemap.xml --indexed gsc.csv
@@ -194,9 +194,11 @@ does not mark the whole site as modified. IndexNow sends only what changed.
 ## From findings to work orders
 
 A report answers "what is wrong with me". `indexgap brief` answers "what do I
-do" — it lays the same findings out as markdown files next to the pages they
-belong to, each with an imperative fix, the thresholds the fix has to meet, and
-the dataset row as the only permitted source of numbers.
+do" — it lays the same findings out as markdown files in `indexgap-briefs/`,
+mirroring the page tree, each with an imperative fix, the thresholds the fix has
+to meet, the dataset row as the only permitted source of numbers, and the exact
+command that checks the fix. For built pages the brief says so: the fix goes into
+the template, the data or the generator, then the site is rebuilt.
 
 ```bash
 indexgap brief --dataset keywords.csv        # dry run: says what it would write

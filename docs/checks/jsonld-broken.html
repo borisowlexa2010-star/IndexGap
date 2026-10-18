@@ -100,7 +100,7 @@ font-size:.85rem;color:var(--ink3)}
 <h2>How to fix it</h2><div class="fix"><p>Fix the JSON-LD: it does not parse, so as far as a search engine is concerned it is not there.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>
+<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in ai search and answer extraction</h2>
 <ul class="plain"><li><a href="no-question-headings.html">no-question-headings</a><span>no question headings</span></li><li><a href="no-answer.html">no-answer</a><span>no answer</span></li><li><a href="answer-short.html">answer-short</a><span>answer short</span></li><li><a href="answer-long.html">answer-long</a><span>answer long</span></li><li><a href="answer-preamble.html">answer-preamble</a><span>answer preamble</span></li><li><a href="jsonld-no-type.html">jsonld-no-type</a><span>jsonld no type</span></li><li><a href="jsonld-faq-invisible.html">jsonld-faq-invisible</a><span>jsonld faq invisible</span></li><li><a href="no-author.html">no-author</a><span>no author</span></li><li><a href="no-date.html">no-date</a><span>no date</span></li><li><a href="ai-crawler-blocked.html">ai-crawler-blocked</a><span>ai crawler blocked</span></li></ul>

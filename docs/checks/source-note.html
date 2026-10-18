@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>source note — indexgap check</title>
-<meta name="description" content="source note: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta name="description" content="source note: what indexgap reports, why it matters and how to fix it. Reported as warning.">
 <link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/source-note.html">
 <meta property="og:type" content="article">
 <meta property="og:title" content="source note — indexgap check">
-<meta property="og:description" content="source note: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta property="og:description" content="source note: what indexgap reports, why it matters and how to fix it. Reported as warning.">
 <meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/source-note.html">
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"source note \u2014 indexgap check","description":"source note: what indexgap reports, why it matters and how to fix it. Reported as info.",
+ "headline":"source note \u2014 indexgap check","description":"source note: what indexgap reports, why it matters and how to fix it. Reported as warning.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/source-note.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-10-02",
  "author":{"@type":"Person","name":"Alexey Borisov"},
@@ -87,20 +87,20 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>source note</h1>
 <div class="meta">
-  <span class="tag info">info</span>
+  <span class="tag warning">warning</span>
   <span class="tag">source-note</span>
   <span class="tag acc">Invented facts</span>
 </div>
-<p class="lede">A claim with a source attached can be verified by a reader and survives an editor who was not there when the page was generated. A claim without one has to be taken on trust, and generated pages have not earned it. On a hand-written page a missing source is a stylistic choice. On a generated one it is structural: the text was assembled from a row of data that had a provenance, and the page dropped it. Carrying the source through the template costs one line and turns an unverifiable claim into a checkable one — which also happens to be what an editor needs before approving three thousand pages nobody can read individually.</p>
+<p class="lede">Something the parser had to say aloud about the file itself: it was read as cp1251 rather than UTF-8, a few bytes were not UTF-8, the front matter was opened and never closed, a canonical could not be parsed as an address. None of these is a ranking problem by itself, and each is a reason the other findings on the page may be wrong: a page read in the wrong encoding has the wrong words, the wrong title and the wrong duplicates. That is why it is a warning and why it comes first on the page's work order — fix the file, and the rest of the report becomes trustworthy.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>info  source-note  —</code></pre>
+<pre><code>warning  source-note  what the parser has to say aloud: the file was read as cp1251, the front matter was not recognised, a canonical cannot be parsed</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>Fix the file itself — its encoding or its front matter. While it is read wrongly, every other finding on it is unreliable.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>
+<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in invented facts</h2>
 <ul class="plain"><li><a href="unsupported-number.html">unsupported-number</a><span>unsupported number</span></li><li><a href="check-by-eye.html">check-by-eye</a><span>check by eye</span></li><li><a href="still-draft.html">still-draft</a><span>still draft</span></li><li><a href="brief-left.html">brief-left</a><span>brief left</span></li><li><a href="unfilled-slot.html">unfilled-slot</a><span>unfilled slot</span></li><li><a href="llm-leftover.html">llm-leftover</a><span>llm leftover</span></li><li><a href="mojibake.html">mojibake</a><span>mojibake</span></li></ul>

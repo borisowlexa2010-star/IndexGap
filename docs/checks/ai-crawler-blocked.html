@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ai crawler blocked — indexgap check</title>
-<meta name="description" content="ai crawler blocked: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta name="description" content="ai crawler blocked: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/ai-crawler-blocked.html">
 <meta property="og:type" content="article">
 <meta property="og:title" content="ai crawler blocked — indexgap check">
-<meta property="og:description" content="ai crawler blocked: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta property="og:description" content="ai crawler blocked: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/ai-crawler-blocked.html">
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"ai crawler blocked \u2014 indexgap check","description":"ai crawler blocked: what indexgap reports, why it matters and how to fix it. Reported as info.",
+ "headline":"ai crawler blocked \u2014 indexgap check","description":"ai crawler blocked: what indexgap reports, why it matters and how to fix it. Reported as critical.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/ai-crawler-blocked.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-10-02",
  "author":{"@type":"Person","name":"Alexey Borisov"},
@@ -87,7 +87,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>ai crawler blocked</h1>
 <div class="meta">
-  <span class="tag info">info</span>
+  <span class="tag critical">critical</span> <span class="tag info">info</span>
   <span class="tag">ai-crawler-blocked</span>
   <span class="tag acc">AI search and answer extraction</span>
 </div>
@@ -95,7 +95,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>info  ai-crawler-blocked  —</code></pre>
+<pre><code>critical  ai-crawler-blocked  OAI-SearchBot is closed: … (critical for the AI-search crawlers, info for training crawlers)</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>Decide deliberately whether you want this crawler, and open it up in robots.txt if you do.</p></div>
 
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in ai search and answer extraction</h2>
 <ul class="plain"><li><a href="no-question-headings.html">no-question-headings</a><span>no question headings</span></li><li><a href="no-answer.html">no-answer</a><span>no answer</span></li><li><a href="answer-short.html">answer-short</a><span>answer short</span></li><li><a href="answer-long.html">answer-long</a><span>answer long</span></li><li><a href="answer-preamble.html">answer-preamble</a><span>answer preamble</span></li><li><a href="jsonld-broken.html">jsonld-broken</a><span>jsonld broken</span></li><li><a href="jsonld-no-type.html">jsonld-no-type</a><span>jsonld no type</span></li><li><a href="jsonld-faq-invisible.html">jsonld-faq-invisible</a><span>jsonld faq invisible</span></li><li><a href="no-author.html">no-author</a><span>no author</span></li><li><a href="no-date.html">no-date</a><span>no date</span></li></ul>

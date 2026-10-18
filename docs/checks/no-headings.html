@@ -100,7 +100,7 @@ font-size:.85rem;color:var(--ink3)}
 <h2>How to fix it</h2><div class="fix"><p>Add a heading structure.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p><p>Suppressed on JavaScript shells. A page with no text in its source HTML would trip this check for a reason that is already reported as <code>js-shell</code>, and repeating it four times is not four times as informative.</p>
+<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p><p>Suppressed on JavaScript shells. A page with no text in its source HTML would trip this check for a reason that is already reported as <code>js-shell</code>, and repeating it four times is not four times as informative.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in titles, descriptions and headings</h2>
 <ul class="plain"><li><a href="no-title.html">no-title</a><span>no title</span></li><li><a href="title-short.html">title-short</a><span>title short</span></li><li><a href="title-long.html">title-long</a><span>title long</span></li><li><a href="duplicate-title.html">duplicate-title</a><span>duplicate title</span></li><li><a href="no-description.html">no-description</a><span>no description</span></li><li><a href="description-length.html">description-length</a><span>description length</span></li><li><a href="duplicate-description.html">duplicate-description</a><span>duplicate description</span></li><li><a href="no-h1.html">no-h1</a><span>no h1</span></li><li><a href="many-h1.html">many-h1</a><span>many h1</span></li><li><a href="no-structure.html">no-structure</a><span>no structure</span></li><li><a href="img-no-alt.html">img-no-alt</a><span>img no alt</span></li><li><a href="vague-anchor.html">vague-anchor</a><span>vague anchor</span></li></ul>

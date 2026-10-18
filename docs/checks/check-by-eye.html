@@ -100,7 +100,7 @@ font-size:.85rem;color:var(--ink3)}
 <h2>How to fix it</h2><div class="fix"><p>Read these numbers with your own eyes. Some are ordinary turns of phrase, some are invented. Keep only what you can confirm.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>
+<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in invented facts</h2>
 <ul class="plain"><li><a href="unsupported-number.html">unsupported-number</a><span>unsupported number</span></li><li><a href="source-note.html">source-note</a><span>source note</span></li><li><a href="still-draft.html">still-draft</a><span>still draft</span></li><li><a href="brief-left.html">brief-left</a><span>brief left</span></li><li><a href="unfilled-slot.html">unfilled-slot</a><span>unfilled slot</span></li><li><a href="llm-leftover.html">llm-leftover</a><span>llm leftover</span></li><li><a href="mojibake.html">mojibake</a><span>mojibake</span></li></ul>
