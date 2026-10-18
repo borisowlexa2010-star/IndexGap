@@ -72,9 +72,11 @@ FIX = {
     "low-uniqueness": N_("Добавь то, что отличает эту страницу от соседних: "
                          "конкретику из её строки данных. Шаблонного текста "
                          "должно стать меньше, чем своего."),
-    "thin": N_("Наполни страницу или убери из индекса. Если порог не подходит "
-               "этому типу контента — поправь его в indexgap.json, а не "
-               "дописывай воду."),
+    "thin": N_("Хаб, листинг и главная ценны ссылками, а не словами: закрывать их "
+               "нельзя. Страницу строки наполни фактами из её строки данных; если "
+               "фактов нет — спроси, нужна ли эта страница. Порог — `checks.thin_words` "
+               "в indexgap.json: понижай его, только если этот тип контента законно "
+               "короткий, а не дописывай воду."),
     "template-skeleton": N_("Поменяй структуру заголовков под данные этой строки. "
                             "Одинаковый скелет на всех страницах читается "
                             "как штамповка."),
@@ -194,19 +196,49 @@ def _fix(code: str) -> str:
 
 
 def _where(page, root: str) -> str:
-    """Путь к файлу — от корня проекта: абсолютный не помещается в строку."""
+    """
+    Путь к файлу — от корня проекта, то есть от текущего каталога. Путь от
+    каталога страниц (`plumbing/dallas/index.html` вместо
+    `out/plumbing/dallas/index.html`) из корня проекта не существует.
+    Если страницы лежат вне текущего каталога — от каталога страниц.
+    """
     path = getattr(page, "path", "") or ""
-    if root and path:
+    if not path:
+        return path
+    # Прямые слэши на любой системе: наряд читают и люди, и агенты, и путь в
+    # нём должен совпадать с тем, что лежит в репозитории.
+    for base in (os.getcwd(), root):
+        if not base:
+            continue
         try:
-            # Прямые слэши на любой системе: наряд читают и люди, и агенты, и
-            # путь в нём должен совпадать с тем, что лежит в репозитории.
-            return os.path.relpath(path, root).replace(os.sep, "/")
+            # realpath с обеих сторон: на macOS /var — это /private/var.
+            rel = os.path.relpath(os.path.realpath(path), os.path.realpath(base))
         except ValueError:                     # разные диски в Windows
-            return path
-    return path
+            continue
+        if not rel.startswith(".."):
+            return rel.replace(os.sep, "/")
+    return path.replace(os.sep, "/")
 
 
-def _requirements(cfg: dict, profile_title: str = "", has_rows: bool = True) -> list:
+def _is_built(page) -> bool:
+    """HTML — результат сборки; Markdown — исходник, его и правят."""
+    return (getattr(page, "path", "") or "").lower().endswith((".html", ".htm"))
+
+
+def _built_note() -> str:
+    return tr("Это собранный файл: правка в нём пропадёт при следующей сборке. Чини "
+              "источник — шаблон, строку данных или генератор — и пересобери. Путь "
+              "показывает, какой шаблон и какая строка дали эту страницу.")
+
+
+def _verify(verify: str, site: str) -> list:
+    command = verify or f"indexgap check{' --site ' + site if site else ''}"
+    return ["", tr("Проверить результат (после пересборки, если страницы собираются):"),
+            "", "```bash", command, "```"]
+
+
+def _requirements(cfg: dict, profile_title: str = "", has_rows: bool = True,
+                  unmatched: bool = False) -> list:
     """Чему страница обязана удовлетворять после починки — из настроек проекта."""
     out = []
     if profile_title:
@@ -219,14 +251,19 @@ def _requirements(cfg: dict, profile_title: str = "", has_rows: bool = True) -> 
                   a0=cfg.get("near_duplicate", 0.8)))
     # Требовать сверки чисел с датасетом там, где датасета нет, — значит
     # выдать заведомо непроверяемое требование.
-    if has_rows:
+    if has_rows and not unmatched:
         out.append(tr("ни одного числа, которого нет в строке датасета"))
+    elif unmatched:
+        out.append(tr("страница не сопоставлена со строкой датасета — её числа НЕ "
+                      "проверялись. Если это страница строки, назови строку: `keyword:` "
+                      "во фронтматтере или <meta name=\"keyword\"> в шаблоне"))
     return out
 
 
 def build(pages: list, analysis: dict, cfg: dict = None,
           template_notes: list = None, rows_by_key: dict = None,
-          profile_title: str = "", site: str = "", root: str = "") -> list:
+          profile_title: str = "", site: str = "", root: str = "",
+          verify: str = "") -> list:
     """
     Собирает наряды. Возвращает список словарей: имя файла, заголовок, тело.
 
@@ -271,6 +308,7 @@ def build(pages: list, analysis: dict, cfg: dict = None,
             fix = _fix(match.group(1)) if match else ""
             if fix:
                 body.append(f"  {tr('Что делать:')} {fix}")
+        body += _verify(verify, site)
         briefs.append({"name": "_template.md", "kind": "template",
                        "title": tr("Починка шаблона"), "body": "\n".join(body),
                        "count": len(template_notes)})
@@ -284,6 +322,7 @@ def build(pages: list, analysis: dict, cfg: dict = None,
             fix = _fix(code)
             if fix:
                 body.append(f"  {tr('Что делать:')} {fix}")
+        body += _verify(verify, site)
         briefs.append({"name": "_site.md", "kind": "site",
                        "title": tr("Починка на уровне сайта"),
                        "body": "\n".join(body), "count": len(site_issues)})
@@ -291,25 +330,51 @@ def build(pages: list, analysis: dict, cfg: dict = None,
     # ── группы дублей ─────────────────────────────────────────────────────────
     from .checks import _clusters
 
-    edges = [(a.url, b.url) for a, b, j in analysis.get("duplicates", ())
+    pairs = [(a.url, b.url, j) for a, b, j in analysis.get("duplicates", ())
              if j >= cfg.get("near_duplicate", 0.8)]
+    edges = [(a, b) for a, b, _j in pairs]
+    alike = defaultdict(float)
+    for a, b, j in pairs:
+        alike[a] = max(alike[a], j)
+        alike[b] = max(alike[b], j)
     for number, group in enumerate(_clusters(edges), 1):
         if len(group) < 2:
             continue
+        members = [known.get(url) for url in group]
+        langs = {(p.lang or "").lower().split("-")[0] for p in members if p is not None}
+        langs.discard("")
+        rows = [(rows_by_key or {}).get(url) for url in group]
+        distinct = {tuple(sorted((r or {}).items())) for r in rows if r}
+        if len(langs) > 1:
+            # Непереведённая версия: canonical на одну из них выбросит язык.
+            advice = tr("Что делать: страницы на разных языках совпадают текстом — "
+                        "перевод не сделан. Переведи каждую версию. Canonical на одну "
+                        "из них выбросит языковую версию из поиска.")
+        elif len(distinct) > 1:
+            # Двадцать четыре города из разных строк — дублирует их шаблон.
+            advice = tr("Что делать: страницы собраны из разных строк датасета — "
+                        "дублирует их шаблон, а не интент. Чини шаблон: больше данных "
+                        "своей строки, разделы, которые зависят от данных. Склеивать их "
+                        "canonical'ом нельзя — пропадут настоящие страницы.")
+        else:
+            advice = tr("Что делать: выбери одну страницу как основную и разведи "
+                        "остальные по разным интентам — у каждой должен быть свой "
+                        "вопрос, на который она отвечает. Если развести нечем — это "
+                        "один интент: убери лишнюю строку из датасета (её покажет "
+                        "`indexgap plan`) или поставь с остальных страниц canonical на "
+                        "основную.")
         # Код находки называется и здесь: по нему наряд сверяют с отчётом.
         body = ["`near-duplicate` — "
                 + tr("{a0} страниц почти совпадают друг с другом. Поисковик "
-                     "оставит в индексе одну.", a0=len(group)), "",
-                tr("Что делать: выбери одну страницу как основную и разведи "
-                   "остальные по разным интентам — у каждой должен быть свой "
-                   "вопрос, на который она отвечает. Если развести нечем, "
-                   "оставь одну, а с остальных поставь canonical на неё. "
-                   "Связывать их ссылками между собой нельзя."), "",
-                tr("Страницы группы:")]
+                     "оставит в индексе одну.", a0=len(group)), "", advice,
+                tr("Обычные ссылки на соседние страницы и хабы оставь: ссылка не "
+                   "делает страницы разными, но и не вредит им."), "",
+                tr("Страницы группы (наибольшее совпадение с другой страницей группы):")]
         for url in group:
             page = known.get(url)
             where = f" — `{_where(page, root)}`" if page is not None else ""
-            body.append(f"- {url}{where}")
+            body.append(f"- {url}{where} — {alike[url]:.0%}")
+        body += _verify(verify, site)
         briefs.append({"name": f"_duplicates/group-{number:03d}.md",
                        "kind": "group",
                        "title": tr("Группа почти-дублей №{a0}", a0=number),
@@ -324,6 +389,8 @@ def build(pages: list, analysis: dict, cfg: dict = None,
         body = []
         if page is not None:
             body.append(tr("Файл: `{a0}`", a0=_where(page, root)))
+            if _is_built(page):
+                body.append(_built_note())
         body.append(tr("Адрес: {a0}", a0=url))
         body.append("")
         body.append(tr("Что не так:"))
@@ -340,12 +407,12 @@ def build(pages: list, analysis: dict, cfg: dict = None,
                 if (value or "").strip():
                     body.append(f"- {key}: {value}")
         body += ["", tr("Чему страница должна удовлетворять после починки:")]
-        for line in requirements:
+        own = (_requirements(cfg, profile_title, True, unmatched=True)
+               if rows_by_key and not row else requirements)
+        for line in own:
             body.append(f"- {line}")
-        body += ["", tr("Ничего не выдумывать. Если данных нет, раздел не пишем."),
-                 "", tr("Проверить результат:"),
-                 "", "```bash", f"indexgap check{' --site ' + site if site else ''}",
-                 "```"]
+        body += ["", tr("Ничего не выдумывать. Если данных нет, раздел не пишем.")]
+        body += _verify(verify, site)
         briefs.append({"name": _slug(url) + ".md", "kind": "page", "url": url,
                        "title": tr("Починка страницы"), "body": "\n".join(body),
                        "count": len(found),
