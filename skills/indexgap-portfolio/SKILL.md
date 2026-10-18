@@ -4,7 +4,9 @@ description: >
   One run across several sites at once, plus a combined breakdown of what
   breaks the same way everywhere. Use when the person owns not one site but
   a portfolio — several products, catalogues or feeds — and needs to tell a
-  shared habit from a one-off.
+  shared habit from a one-off. Triggers: audit all my sites at once, check
+  several sites or projects together, the same SEO problem across all my
+  sites, what my sites get wrong in common.
 ---
 
 # Portfolio
@@ -38,8 +40,16 @@ Plain JSON; paths inside are relative to the file itself:
 }
 ```
 
-Only `name`, `root` and `site` are required. Optional: `profile`, `dataset`,
-`sitemap`, `robots`, `config`, `home`, `keyword`, `out`.
+Only `name`, `root` and `site` are required. Optional:
+
+* `profile`, `dataset`, `keyword` (the keyword column, `keyword` by default),
+  `config`, `robots`, `home` — like the `check` flags of the same names;
+* `sitemap` — adds the generated → sitemap step of the funnel;
+* `out` — where to write this project's HTML report;
+* `freshness` — for `events`: `{"grace_days": 14, "min_dated_share": 0.3}`;
+* `indexed` — a list of `source=file`; it is read, but the portfolio run does
+  not use it yet. For the funnel down to the index run `indexgap doctor` per
+  project.
 
 One project failing does not kill the run: it becomes a line in the report and
 the rest carry on.
@@ -74,6 +84,11 @@ For a single site the profile goes in a flag:
 thousand pages and ten across twenty are the same disease at different volumes.
 The table puts them side by side as percentages precisely because that is where
 the systemic cause becomes visible.
+
+**Threshold codes need care.** `thin`, `similar`, `title-short` and the like
+on nearly every page of every project are a question about the threshold, not
+the pages; the report marks such rows. `similar` is not a finding at all, only a
+reason to look: do not call it a shared problem.
 
 **Site-level findings are separate.** robots.txt and markup belong to the site,
 not to pages; a share of pages is meaningless for them, so the table just says
