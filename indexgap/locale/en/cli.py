@@ -271,6 +271,13 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "{a0}: у проекта «{a1}» поле `{a2}` должно быть строкой.": "{a0}: project “{a1}”: `{a2}` must be a string.",
+    "{a0}: у проекта «{a1}» поле `indexed` должно быть списком строк.": "{a0}: project “{a1}”: `indexed` must be a list of strings.",
+    "{a0}: значение `{a1}` должно быть строкой, а там {a2}.": "{a0}: `{a1}` must be a string, and it is {a2}.",
+    "Адрес сайта взят из файлов рядом со страницами: {a0} — если не так, укажи --site":
+        "The site address was taken from the files beside the pages: {a0} — if that is wrong, pass --site",
+    "Не указан адрес сайта: добавь --site https://… — или запиши `site` в indexgap.json.":
+        "The site address is missing: add --site https://… — or write `site` into indexgap.json.",
     "{a0} {a1}: такого файла нет.": "{a0} {a1}: there is no such file.",
     "  Порядок: сначала деплой — и проверь, что изменённая страница и файл ключа уже открываются на сайте, — потом --send. Отправленное отмечается, и после раннего --send поисковик обойдёт старую версию.":
         "  Order: deploy first — and check that the changed page and the key file "
