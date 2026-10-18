@@ -437,7 +437,7 @@ def _plain(text: str) -> str:
     import html
     import unicodedata
     text = unicodedata.normalize("NFKC", html.unescape(html.unescape(text or "")))
-    return re.sub(r"\s+", " ", text.translate(_TYPOGRAPHY)).strip().lower()
+    return " ".join(text.translate(_TYPOGRAPHY).split()).lower()
 
 
 def _ld_items(data) -> list:

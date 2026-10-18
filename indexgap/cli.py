@@ -29,7 +29,7 @@ from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
                sources)
 from . import i18n
 from .i18n import tr
-from .core import (SourceError, check_site_url, load_manifest, load_pages,
+from .core import (SourceError, check_site_url, default_jobs, load_manifest, load_pages,
                    save_manifest, url_key)
 
 MANIFEST = ".indexgap-manifest.json"
@@ -133,7 +133,7 @@ def _load(args):
             tr("Не хватает данных о проекте.\n    Либо укажи их явно: indexgap check ./content --site https://example.com\n    Либо один раз выполни `indexgap init` в корне проекта — тогда\n    ежедневная команда станет просто `indexgap check`."))
     site = check_site_url(args.site)
     args.site = site
-    pages, problems = load_pages(args.root, site)
+    pages, problems = load_pages(args.root, site, jobs=default_jobs())
     for problem in problems:
         print(f"  ! {problem}")
     if not pages:

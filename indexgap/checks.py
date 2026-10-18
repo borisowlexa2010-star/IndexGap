@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -73,14 +74,37 @@ _MASK = (1 << 61) - 1
 _PRIME = (1 << 61) - 1
 
 
+_WORD_IDS = {}
+
+
+def _word_ids(words: list) -> list:
+    """
+    Слово -> 64-битное число, детерминированно (blake2b), по разу на слово.
+    Хэш `hash(str)` здесь нельзя: он меняется от запуска к запуску.
+    """
+    ids = _WORD_IDS
+    out = list(map(ids.get, words))
+    if None in out:
+        for i, v in enumerate(out):
+            if v is None:
+                w = words[i]
+                v = ids.get(w)
+                if v is None:
+                    v = ids[w] = int.from_bytes(
+                        hashlib.blake2b(w.encode("utf-8"), digest_size=8).digest(), "little")
+                out[i] = v
+    return out
+
+
 def _shingles(words: list, k: int) -> set:
-    if len(words) < k:
-        return {int(hashlib.blake2b(" ".join(words).encode("utf-8"),
-                                    digest_size=8).hexdigest(), 16)} if words else set()
-    return {
-        int(hashlib.blake2b(" ".join(words[i:i + k]).encode("utf-8"), digest_size=8).hexdigest(), 16)
-        for i in range(len(words) - k + 1)
-    }
+    # Шингл — хэш кортежа чисел. hash() кортежа из int не зависит от
+    # PYTHONHASHSEED, а считается в C: втрое быстрее blake2b на каждый шингл.
+    if not words:
+        return set()
+    ids = _word_ids(words)
+    if len(ids) < k:
+        return {hash(tuple(ids))}
+    return set(map(hash, zip(*(ids[i:] for i in range(k)))))
 
 
 def _minhash(shingles: set, perms: int) -> tuple:
@@ -146,27 +170,32 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
     pages = eligible
 
     words = words or {p.url: p.words for p in pages}
-    shingles = {}
-    for p in pages:
-        own = words.get(p.url, [])
+
+    def shingle_set(url):
+        own = words.get(url, [])
         # У иероглифики слово — один знак: пять знаков подряд совпадают у любых
         # двух текстов на одну тему. Шингл берётся вдвое длиннее.
-        sh = _shingles(own, k * 2 if is_dense(own) else k)
-        if sh:
-            shingles[p.url] = sh
-    urls = sorted(shingles)
+        return _shingles(own, k * 2 if is_dense(own) else k)
+
+    urls = sorted({p.url for p in pages if words.get(p.url)})
     if len(urls) < 2:
         return {"pairs": [], "notes": notes, "method": tr("нет данных")}
 
     if len(urls) <= cfg["exact_below"]:
         method = tr("попарное сравнение")
+        shingles = {u: shingle_set(u) for u in urls}
+        get = shingles.__getitem__
         candidates = [(urls[i], urls[j])
                       for i in range(len(urls)) for j in range(i + 1, len(urls))]
     else:
         method = "LSH"
         perms, bands = cfg["minhash_perms"], cfg["lsh_bands"]
         rows = max(1, perms // bands)
-        signatures = {u: _minhash(shingles[u], perms) for u in urls}
+        # Множества шинглов всех страниц разом не держатся: на 50 000 страниц
+        # это восемь гигабайт. Подпись считается потоком, а множества
+        # пересобираются только для пар-кандидатов.
+        signatures = {u: _minhash(shingle_set(u), perms) for u in urls}
+        get = functools.lru_cache(maxsize=4096)(shingle_set)
         buckets = defaultdict(list)
         for url in urls:
             sig = signatures[url]
@@ -203,11 +232,14 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
     by_url = {p.url: p for p in pages}
     out = []
     for a, b in candidates:
-        sa, sb = shingles[a], shingles[b]
-        union = len(sa | sb)
+        sa, sb = get(a), get(b)
+        # |A ∪ B| = |A| + |B| - |A ∩ B|: объединение не строится — на
+        # кластере похожих страниц это сотни тысяч лишних множеств.
+        inter = len(sa & sb) if len(sa) <= len(sb) else len(sb & sa)
+        union = len(sa) + len(sb) - inter
         if not union:
             continue
-        j = len(sa & sb) / union
+        j = inter / union
         if cfg["slot_floor"] <= j < cfg["near_duplicate"]:
             j = max(j, _without_slots(words.get(a, []), words.get(b, []), k, cfg))
         if j >= cfg["similar"]:
@@ -238,8 +270,9 @@ def _without_slots(a: list, b: list, k: int, cfg: dict) -> float:
     k = k * 2 if is_dense(a) else k
     sa = _shingles(["\x00" if w in only_a else w for w in a], k)
     sb = _shingles(["\x00" if w in only_b else w for w in b], k)
-    union = len(sa | sb)
-    return len(sa & sb) / union if union else 0.0
+    inter = len(sa & sb)
+    union = len(sa) + len(sb) - inter
+    return inter / union if union else 0.0
 
 
 def trimmed_words(pages: list) -> dict:
@@ -320,7 +353,9 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
     words = words or {p.url: p.words for p in pages}
 
     def bigrams(seq):
-        return [f"{seq[i]} {seq[i+1]}" for i in range(len(seq) - 1)]
+        # Пара слов кортежем: слова интернированы, и кортеж из двух ссылок
+        # дешевле строки «a b», а смысл тот же — пробела в слове не бывает.
+        return list(zip(seq, seq[1:]))
 
     # Шаблон свой у каждого языка. Если считать фразы по всем страницам сразу,
     # на сайте из двух языков ни одна не встретится «в 90% страниц» — и
@@ -335,15 +370,30 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
         if len(members) < cfg["boilerplate_min_pages"]:
             small += len(members)
             continue
-        df = Counter()
-        for p in members:
-            df.update(set(bigrams(words.get(p.url, []))))
         # Порог не может требовать «на всех страницах»: при девяти страницах
         # ceil(9*0.9) давал ровно 9, шаблон переставал находиться, и добавление
         # десятой страницы переворачивало вердикт с «всё чисто» на «10 критичных».
         threshold = max(2, min(len(members) - 1,
                                math.ceil(len(members) * cfg["boilerplate_share"])))
+        # Частоты всех фраз сайта не держатся: общая фраза стоит хотя бы на
+        # одной из первых (n - порог + 1) страниц — иначе её нет как минимум
+        # на n - порог + 1 страницах, и до порога она не дотянет. Считаем
+        # только фразы этих страниц, а безнадёжные выбрасываем по дороге.
+        # Результат тот же, что у полного подсчёта.
+        n = len(members)
+        seed = n - threshold + 1
+        df = Counter()
+        for p in members[:seed]:
+            df.update(set(bigrams(words.get(p.url, []))))
+        for i, p in enumerate(members[seed:], seed + 1):
+            for g in set(bigrams(words.get(p.url, []))):
+                if g in df:
+                    df[g] += 1
+            if i % 256 == 0:
+                left = n - i
+                df = Counter({g: c for g, c in df.items() if c + left >= threshold})
         common = {g for g, c in df.items() if c >= threshold}
+        del df
         for p in members:
             grams = bigrams(words.get(p.url, []))
             if not grams:
