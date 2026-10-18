@@ -204,6 +204,10 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         if not (isinstance(lastmod, str) and _LASTMOD.match(lastmod)):
             lastmod = today
         entry = dict(prev)
+        # Вернувшаяся страница забывает дату исчезновения. Раньше она её
+        # хранила, и при следующем исчезновении запись удалялась сразу —
+        # вместе с lastmod и отметкой об отправке.
+        entry.pop("missing_since", None)
         entry["hash"] = h
         entry["lastmod"] = lastmod
         new_manifest[p.url] = entry

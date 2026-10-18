@@ -62,6 +62,12 @@ class TestMissingSince(OutDir):
                                                       "missing_since": "2020-01-01"}})
         self.assertEqual(manifest[closed.url], {"notified": "x"})
 
+    def test_a_returning_page_forgets_when_it_went_missing(self):
+        back = page(f"{SITE}/back/", "текст вернувшейся страницы " * 30)
+        manifest = self.build([back], {back.url: {"hash": "old", "lastmod": "2026-08-01",
+                                                  "missing_since": "2026-08-01"}})
+        self.assertNotIn("missing_since", manifest[back.url])
+
     def test_thirty_days_is_kept_thirty_one_is_pruned(self):
         manifest = self.build([], {f"{SITE}/kept/": {"missing_since": "2026-09-01"},
                                    f"{SITE}/gone/": {"missing_since": "2026-08-31"}})
@@ -1485,3 +1491,18 @@ class TestMarkdownBlocks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestConfirmedBugs(unittest.TestCase):
+    def test_mixed_case_http_equiv_is_a_redirect(self):
+        stub = page(f"{SITE}/a/", raw='<html><head><meta HTTP-equiv="Refresh" '
+                                      'content="0; url=/b/"></head><body></body></html>')
+        self.assertTrue(checks.redirect_target(stub))
+
+    def test_a_menu_before_main_is_not_a_list_of_the_article(self):
+        root = tempfile.mkdtemp(prefix="indexgap-nav-")
+        self.addCleanup(shutil.rmtree, root, True)
+        with open(os.path.join(root, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write("<html><head><title>T</title></head><body><nav><ul><li>a</li><li>b</li>"
+                     "</ul></nav><main><p>text</p></main></body></html>")
+        self.assertEqual(core.load_pages(root, SITE)[0][0].blocks["li"], 0)
