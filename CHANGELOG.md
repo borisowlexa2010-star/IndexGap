@@ -1,6 +1,139 @@
 # Changelog
 
-## Unreleased
+## 1.13.0 — 2026-10-18
+
+The third audit. Eight reviewers at once, each from a side the previous two did
+not cover: twelve more site generators, a seeded 757-page catalogue measuring
+what is *missed* rather than what is wrongly reported, messy input, scale,
+the truth of the documentation, an agent following the skills on a generator
+project, mutation testing of the suite, and the tools indexgap competes with.
+Tests: 573 → 911. Across eleven of the twelve new sites critical findings went
+from 14,699 to 2,720; what remains was sampled by hand.
+
+**What it now catches that it did not**
+
+* **`unfilled-slot`** (critical). The most programmatic of programmatic
+  failures had no check at all: `{{city}}`, `{city}`, `${city}`, `%CITY%`,
+  `{% %}` in the visible text, title, description, headings or JSON-LD;
+  `undefined`, `NaN`, `null`, `None`, `[object Object]`, `$NaN`; a bracketed
+  dataset column such as `[City]`; lorem ipsum. An empty place in a title or a
+  heading — `Plumbers in , TX`, a title opening with ` | Brand` — is a warning.
+  Code blocks, scripts, comments, TeX formulas and Markdown sources (where
+  `{{ }}` is Hugo's and Jekyll's own syntax) are not judged. On the seeded
+  catalogue: 40 pages found, none of them false; on eventiq.io, rumors.app and
+  a 4,292-page visa catalogue: nothing, as it should be.
+* **`llm-leftover`** (warning): "As an AI language model…", "Certainly! Here
+  is…", "Конечно! Вот…" left in place of the text. **`mojibake`** (warning):
+  `CafÃ©`, `Weâ€™re` — UTF-8 read as Latin-1 somewhere in the pipeline.
+* **`broken-link`** (warning). `link_graph` had always collected links to pages
+  the build does not have, and used them only to guess a wrong root. Now each
+  page gets one finding naming the targets. A link counts only if it points
+  into a section that is in the build (checking `/blog` does not make every link
+  to `/pricing` broken), assets and feeds are not pages, and the build's own
+  server routes are known: Next.js `[lang]/start/page.js`, route groups,
+  `[...slug]`. The visa catalogue's 527 links to its dynamic `/en/start` were
+  the false alarm that made this rule.
+* **`robots-blocks-page`** (critical). robots.txt rules were parsed but only
+  `Disallow: /` was read. Each indexable page is now matched the way Google
+  matches: the agent's own group beats `*`, the longest rule wins, `Allow` wins
+  a tie, `*` and `$` work.
+* **X-Robots-Tag from hosting files.** `noindex` sent as a header from
+  `_headers` (Netlify, Cloudflare Pages), `netlify.toml` or `vercel.json` — in
+  the build or one level up — closes the pages it matches, and is named.
+
+**False alarms on twelve more generators.** Hugo, Docusaurus with i18n,
+VitePress, Hexo, Pelican, Gatsby, Nuxt, Eleventy, pkgdown, Docsify, Next.js;
+about 15,000 findings, most of them critical, came from six causes:
+
+* hreflang and content were judged on pages that will never be in the index —
+  Hugo's print copies (`index.print.html`, canonical to the main page), old
+  documentation versions. They are not any more; a translation whose canonical
+  points at another language is still reported, because that is the conflict
+  that kills the cluster.
+* One decision to close a page gave two criticals (`noindex` and
+  `canonical-elsewhere`); a closed section of 4,000 pages gave 8,000. Now: one
+  finding per page, and a section where at least 90% of 20 or more pages are
+  closed becomes one note, its pages lowered to info. A whole closed site is
+  still the disaster it was. A copy canonicalised to an open page of the same
+  language is info ("consolidated variant").
+* `.md` files inside a built site — Hugo's `index.source.md` beside every page,
+  Docsify's `_media/` — were pages.
+* One malformed link (`https://x.org][1`) killed a 47,000-page run with
+  `ValueError: Invalid IPv6 URL`.
+* A flat `filter.html` without a canonical was reported, and written to the
+  sitemap, as `/filter/` — a 404 on GitHub Pages, S3 and nginx. A flat page now
+  gets the form the site's own links use (`filter.html`, or `/about` for a
+  Next.js export), and `name.html` when nothing links to it.
+* `same-opening` read a site banner and menu as the opening of the text on
+  pages without `<main>` (21,756 warnings on pyvideo.org). The opening is now
+  counted after the page's heading.
+
+Also: the root-mismatch hint printed the wrong directory, and now says when the
+real cause is links without the site's base path; robots.txt pointing at a
+sitemap the build does not have is named instead of recommended.
+
+**From the seeded catalogue.** `answer-short` stood on 98% of pages because the
+"Updated September 2026" line was taken for the first paragraph; a dateline or
+byline no longer is. "Rated 4.6 out of 5" made the 5 a fact to check by eye.
+`doctor` with three engines counted a page found in one index as "missing only
+from" both others; "missing only from X" now means present in all the rest, and
+pages the engines disagree on have their own row.
+
+**Messy input.** Encodings are read the way browsers read them: a page that is
+valid UTF-8 is UTF-8 whatever its stale `<meta charset>` says; a stray byte in
+an otherwise UTF-8 file is one replacement character and a note, not the whole
+page read as cp1251; `charset=` inside a description or a commented-out tag is
+not a declaration; `iso-8859-1` means windows-1252; UTF-16 without a BOM is
+recognised; Latin-1 text without a declaration is no longer read as Cyrillic.
+240 KB of stray closing tags took 77 seconds and now takes a fraction of one; a
+run of 48,000 `[` in Markdown took 4 seconds and now takes 0.03. `draft: true #
+comment` is a draft (it went to the sitemap and IndexNow). NFD file names from
+macOS match NFC links. The first attribute, `<title>` and `<base>` win, as in a
+browser. An unclosed `<svg>` no longer hides the rest of the page. A read-only
+output directory, a non-string value in indexgap.json or projects.json, deeply
+nested JSON-LD on Python 3.9 and a NUL byte in a CSV were tracebacks; they are
+one-line errors. An unreadable directory is named instead of silently skipped.
+"Indexed, though blocked by robots.txt" and "URL is on Google" count as indexed.
+
+**For agents on a generator project.** Briefs used to point at the built file
+(`plumbing/dallas/index.html`, a path that does not exist from the project root)
+and say nothing about it being built. Now the path is from the project root, a
+built page's brief says the fix goes into the template, the data or the
+generator, followed by a rebuild, and every brief ends with the exact command
+that produced it — `--dataset` included, so the fact check is not silently
+dropped. A near-duplicate group built from different dataset rows is a template
+problem and is never to be canonicalised; a group in different languages is a
+missing translation. Ordinary sibling links stay. `thin` no longer advises
+taking pages out of the index, and names `checks.thin_words`. `notify` does a
+dry run without the network, lists what would be sent, explains that deploy
+comes first, and names open critical findings from the last `check`. The four
+skills were rewritten from an agent's actual run: where to make the fix, the
+order of publishing, the committed manifest, the new checks.
+
+**First run.** `init` takes a complete build over Markdown sources (Hugo pages
+checked as sources were all orphans), reads the site from the build's canonical
+or og:url, ignores `$schema` lines and code-hosting homepages
+(`https://openapi.vercel.sh/` was every Vercel project's site), and calls a
+project with a dataset a catalogue. Without `--site`, `check` takes the address
+from the files beside the pages and says so — the README demo runs as plain
+`indexgap check .`. `--config`, and an indexgap.json next to the pages, are read
+for the site and pages, as `--help` always said. A typo in `--sitemap` or
+`--robots` is exit code 2, not a warning and 0; a portfolio where no project
+could be checked is 2. Exit codes are documented. The JSON carries
+`"schema": 2`, and funnel steps and cross-engine rows have stable `id`s next to
+their translated names. `indexgap profiles` prints the thresholds it describes.
+The docs site showed three checks at the wrong level and now shows every level a
+check can emit.
+
+**The suite itself.** A mutation run (3,253 mutants over six modules) found that
+the tests killed 57%: lastmod could keep the old date after a text change, the
+IndexNow queue could drop changed pages, near every threshold could move
+unnoticed. 160 new tests take it to 82%. The run also found real bugs, fixed
+here: a page that disappeared and came back kept its `missing_since`, and on
+disappearing again was dropped from the manifest at once; `HTTP-equiv` in mixed
+case was not a redirect; a menu list before `<main>` counted as the article's
+list; the duplicate-group note counted LSH bands, not groups; `doctor` measured
+thin pages in words while `check` used text volume.
 
 **`check --baseline`: CI fails only on what is new.** A site with a hundred
 critical findings could not turn `--strict` on — the build was red from day

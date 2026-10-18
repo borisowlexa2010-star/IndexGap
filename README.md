@@ -439,10 +439,12 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-573 scenarios. Each one is a reproduced defect: from three waves of adversarial
-review (the latest by ten independent reviewers, each on its own area), from
-runs against live sites, plus the behaviour of profiles, portfolio and project
-installation. The rule: a finding without a test comes back.
+911 scenarios. Each one is a reproduced defect: from four waves of adversarial
+review (the latest by eight reviewers at once — new generators, a seeded
+catalogue measuring what is missed, messy input, scale, the truth of these
+docs, an agent following the skills, the competition), from runs against live
+sites, plus 160 tests written to kill the mutants the suite let live. The rule:
+a finding without a test comes back.
 
 ## Calibrated on live sites, not fixtures
 
@@ -475,6 +477,15 @@ called a JavaScript shell, template partials taken for pages, Markdown without
 front matter dropped from a GitHub Pages source, content findings on `noindex`
 service pages. Critical findings across the twelve went from 1,606 to 397, and
 the ones that remain were checked by hand.
+
+**And on twelve more.** Hugo (relearn), Docusaurus with i18n (Apache APISIX),
+VitePress (Element Plus), Hexo, Pelican (pyvideo.org, 47,000 pages), Gatsby,
+Nuxt, Eleventy, pkgdown (dplyr), Docsify and Next.js. Six causes made about
+15,000 findings — Hugo's print copies judged as pages, a closed section of old
+docs versions reported 8,000 times, `index.source.md` taken for pages, flat
+`name.html` pages given a `/name/` address that 404s, one malformed link that
+killed a 47,000-page run. Across eleven of them critical findings went from
+14,699 to 2,720.
 
 ---
 
