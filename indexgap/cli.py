@@ -1375,6 +1375,13 @@ def cmd_profiles(args):
         print(f"      {tr(profile['about'])}")
         for note in profile["notes"]:
             print(f"      · {tr(note)}")
+        # Сами пороги: менять их в indexgap.json — осознанно, видя исходные.
+        values = []
+        for section in ("checks", "content", "aeo"):
+            for key, value in sorted((profile.get(section) or {}).items()):
+                values.append(f"{section}.{key} = {value}")
+        if values:
+            print("      " + ", ".join(values))
         print()
     return 0
 

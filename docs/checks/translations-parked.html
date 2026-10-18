@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>translations parked — indexgap check</title>
-<meta name="description" content="translations parked: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta name="description" content="translations parked: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html">
 <meta property="og:type" content="article">
 <meta property="og:title" content="translations parked — indexgap check">
-<meta property="og:description" content="translations parked: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta property="og:description" content="translations parked: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html">
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"translations parked \u2014 indexgap check","description":"translations parked: what indexgap reports, why it matters and how to fix it. Reported as info.",
+ "headline":"translations parked \u2014 indexgap check","description":"translations parked: what indexgap reports, why it matters and how to fix it. Reported as critical.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/translations-parked.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-10-02",
  "author":{"@type":"Person","name":"Alexey Borisov"},
@@ -87,7 +87,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>translations parked</h1>
 <div class="meta">
-  <span class="tag info">info</span>
+  <span class="tag critical">critical</span>
   <span class="tag">translations-parked</span>
   <span class="tag acc">hreflang and language versions</span>
 </div>
@@ -95,7 +95,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>info  translations-parked  —</code></pre>
+<pre><code>critical  translations-parked  … language versions are closed with noindex and a canonical to the original — parked, not published</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>Decide per language. If a translation is ready, open it: its own canonical and index. If it is not, keep it closed, but remove hreflang from it and from the pages that point at it: right now the signals contradict each other and the search engine picks for itself.</p></div>
 
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in hreflang and language versions</h2>
 <ul class="plain"><li><a href="hreflang-missing.html">hreflang-missing</a><span>hreflang missing</span></li><li><a href="hreflang-no-self.html">hreflang-no-self</a><span>hreflang no self</span></li><li><a href="hreflang-no-return.html">hreflang-no-return</a><span>hreflang no return</span></li><li><a href="hreflang-bad-code.html">hreflang-bad-code</a><span>hreflang bad code</span></li><li><a href="hreflang-unknown-target.html">hreflang-unknown-target</a><span>hreflang unknown target</span></li><li><a href="hreflang-lang-mismatch.html">hreflang-lang-mismatch</a><span>hreflang lang mismatch</span></li><li><a href="hreflang-canonical-conflict.html">hreflang-canonical-conflict</a><span>hreflang canonical conflict</span></li><li><a href="hreflang-target-blocked.html">hreflang-target-blocked</a><span>hreflang target blocked</span></li><li><a href="hreflang-static-cluster.html">hreflang-static-cluster</a><span>hreflang static cluster</span></li></ul>

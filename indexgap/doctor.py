@@ -1041,25 +1041,45 @@ def cross_engine(funnel_result: dict, pages: list) -> list:
         return sorted(display.get(k, k) for k in keys)
 
     out = [{
+        "id": "everywhere",
         "kind": tr("везде"),
         "count": len(everywhere),
         "note": tr("во всех подключённых индексах — здесь вопросов нет"),
         "urls": [],
     }]
 
+    # «Нет только в X» — есть во всех остальных. Раньше это было «нет в X, но
+    # есть хоть в одном другом»: с тремя поисковиками страница из одного
+    # индекса попадала в «нет только в» двух других, и сумма превышала сайт.
+    only = set()
     for name, keys in sorted(by_engine.items()):
-        missing = (anywhere - keys)
+        others = [v for n, v in by_engine.items() if n != name]
+        missing = (set.intersection(*others) & expected) - keys
+        only |= missing
         if missing:
             out.append({
+                "id": "missing-only", "engine": name,
                 "kind": tr("нет только в {a0}", a0=name),
                 "count": len(missing),
                 "note": tr("другие поисковики страницу приняли, значит она доступна и валидна. Причина на стороне {a0}: оценка качества или более медленная индексация — техническими правками это обычно не лечится", a0=name),
                 "urls": show(missing)[:50],
             })
 
+    partly = anywhere - everywhere - only
+    if partly:
+        out.append({
+            "id": "partly",
+            "kind": tr("не во всех"),
+            "count": len(partly),
+            "note": tr("приняты одними поисковиками и не приняты несколькими другими — "
+                       "страница доступна, а решения поисковиков расходятся"),
+            "urls": show(partly)[:50],
+        })
+
     nowhere = expected - anywhere
     if nowhere:
         out.append({
+            "id": "nowhere",
             "kind": tr("нигде"),
             "count": len(nowhere),
             "note": tr("ни один поисковик не добавил в индекс — это техническая проблема, ищите причину в разделе ниже"),

@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>unfilled slot — indexgap check</title>
-<meta name="description" content="unfilled slot: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta name="description" content="unfilled slot: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/unfilled-slot.html">
 <meta property="og:type" content="article">
 <meta property="og:title" content="unfilled slot — indexgap check">
-<meta property="og:description" content="unfilled slot: what indexgap reports, why it matters and how to fix it. Reported as info.">
+<meta property="og:description" content="unfilled slot: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/unfilled-slot.html">
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"unfilled slot \u2014 indexgap check","description":"unfilled slot: what indexgap reports, why it matters and how to fix it. Reported as info.",
+ "headline":"unfilled slot \u2014 indexgap check","description":"unfilled slot: what indexgap reports, why it matters and how to fix it. Reported as critical.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/unfilled-slot.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-10-02",
  "author":{"@type":"Person","name":"Alexey Borisov"},
@@ -87,7 +87,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>unfilled slot</h1>
 <div class="meta">
-  <span class="tag info">info</span>
+  <span class="tag critical">critical</span> <span class="tag warning">warning</span>
   <span class="tag">unfilled-slot</span>
   <span class="tag acc">Invented facts</span>
 </div>
@@ -95,12 +95,12 @@ font-size:.85rem;color:var(--ink3)}
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>info  unfilled-slot  —</code></pre>
+<pre><code>critical  unfilled-slot  —</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>Find where the empty value comes from: a dataset row missing the field, a typo in a template variable, or a field the generator does not fill. Fix the data or the template and rebuild — editing the built page is useless, the next build brings the seam back.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p>
+<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in invented facts</h2>
 <ul class="plain"><li><a href="unsupported-number.html">unsupported-number</a><span>unsupported number</span></li><li><a href="check-by-eye.html">check-by-eye</a><span>check by eye</span></li><li><a href="source-note.html">source-note</a><span>source note</span></li><li><a href="still-draft.html">still-draft</a><span>still draft</span></li><li><a href="brief-left.html">brief-left</a><span>brief left</span></li><li><a href="llm-leftover.html">llm-leftover</a><span>llm leftover</span></li><li><a href="mojibake.html">mojibake</a><span>mojibake</span></li></ul>

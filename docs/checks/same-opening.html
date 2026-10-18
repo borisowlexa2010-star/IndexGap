@@ -100,7 +100,7 @@ font-size:.85rem;color:var(--ink3)}
 <h2>How to fix it</h2><div class="fix"><p>Rewrite the opening paragraph so that it answers this page's query in particular.</p></div>
 
 <h2>How it behaves at scale</h2>
-<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — it is a property of the template and is reported once, with the count, instead of once per page.</p><p>Suppressed on JavaScript shells. A page with no text in its source HTML would trip this check for a reason that is already reported as <code>js-shell</code>, and repeating it four times is not four times as informative.</p>
+<p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p><p>Suppressed on JavaScript shells. A page with no text in its source HTML would trip this check for a reason that is already reported as <code>js-shell</code>, and repeating it four times is not four times as informative.</p>
 
 <h2>Finding it</h2>
 <pre><code>pipx install indexgap
@@ -108,8 +108,8 @@ cd your-project
 indexgap init
 indexgap check</code></pre>
 <p>Then <a href="../commands/brief.html"><code>indexgap brief</code></a> turns
-every finding on this page into a work order placed next to the page it belongs
-to, with the thresholds the result has to satisfy.</p>
+every finding on this page into a work order in <code>indexgap-briefs/</code>,
+with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in content quality at scale</h2>
 <ul class="plain"><li><a href="thin.html">thin</a><span>thin</span></li><li><a href="low-uniqueness.html">low-uniqueness</a><span>low uniqueness</span></li><li><a href="template-skeleton.html">template-skeleton</a><span>template skeleton</span></li><li><a href="near-duplicate.html">near-duplicate</a><span>near duplicate</span></li><li><a href="similar.html">similar</a><span>similar</span></li><li><a href="long-paragraph.html">long-paragraph</a><span>long paragraph</span></li></ul>

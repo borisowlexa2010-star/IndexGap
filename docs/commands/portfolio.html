@@ -88,7 +88,7 @@ font-size:.85rem;color:var(--ink3)}
 <h1>indexgap portfolio</h1>
 <div class="meta"><span class="tag acc">command</span></div>
 <p class="lede">One table across every project.</p>
-<p>Runs the audit over several sites at once and reports them side by side, so that a portfolio of generated sites can be triaged in one pass instead of one project at a time. Each row carries the same counts a single audit produces — critical findings, warnings, duplicate clusters, orphans — which makes the comparison meaningful rather than decorative: the site with three hundred warnings and no critical findings is in better shape than the one with two criticals, and the table says so at a glance. Projects are read from their own indexgap.json files, so each keeps its own thresholds and content profile; a catalogue and a blog are not forced onto one standard just because they are reported together.</p>
+<p>Runs the audit over several sites at once and reports them side by side, so that a portfolio of generated sites can be triaged in one pass instead of one project at a time. Each row carries the pages, critical findings, warnings and the profile, which makes the comparison meaningful rather than decorative: the site with three hundred warnings and no critical findings is in better shape than the one with two criticals, and the table says so at a glance. Each project names its own profile in projects.json, so a catalogue and a blog are not forced onto one standard just because they are reported together; findings that repeat across projects are listed as shared habits.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap portfolio [-h] [--out OUT] [--reports REPORTS] [--strict]
                           [--lang {en,ru}]
