@@ -83,6 +83,7 @@ def detect_content_dir(root: str) -> str:
     проекта, адреса сдвигаются на сегмент, и все страницы выглядят сиротами.
     Поэтому лучше угадать и показать, чем промолчать.
     """
+    found = {}
     for names in (LIKELY_CONTENT, LIKELY_BUILD):
         candidates = {}
         for name in names:
@@ -92,8 +93,20 @@ def detect_content_dir(root: str) -> str:
                 if count:
                     candidates[name] = count
         if candidates:
-            best = max(candidates.items(), key=lambda kv: (kv[1], -names.index(kv[0])))
-            return os.path.join(".", *best[0].split("/"))
+            found[names] = max(candidates.items(),
+                               key=lambda kv: (kv[1], -names.index(kv[0])))
+    sources, build = found.get(LIKELY_CONTENT), found.get(LIKELY_BUILD)
+    # Готовая сборка сильнее исходников: проверяется то, что увидит поисковик.
+    # На Hugo из исходников каждая страница была сиротой, а `no-h1` стоял на
+    # всех — ссылки и заголовки там появляются только при сборке. Сборка
+    # считается готовой, если в ней есть главная и страниц не меньше половины
+    # исходников; иначе это остаток старой сборки.
+    if build and _has_home(os.path.join(root, *build[0].split("/"))) and (
+            not sources or build[1] >= sources[1] / 2):
+        return os.path.join(".", *build[0].split("/"))
+    if sources or build:
+        best = sources or build
+        return os.path.join(".", *best[0].split("/"))
 
     # Ничего знакомого — берём подкаталог первого уровня с наибольшим числом страниц.
     best_name, best_count = "", 0
@@ -110,8 +123,44 @@ def detect_content_dir(root: str) -> str:
     return "." if _pages_in(root) else ""
 
 
+def _has_home(path: str) -> bool:
+    return any(os.path.isfile(os.path.join(path, name))
+               for name in ("index.html", "index.htm"))
+
+
+# Адреса в конфигах, которые сайтом не бывают: схемы, реестры, git-хостинги.
+_NOT_A_SITE = ("schema.org", "w3.org", "npmjs", "github.com", "gitlab.com", "bitbucket.org",
+               "localhost", "example.com", "json-schema", "vercel.sh", "unpkg.com",
+               "jsdelivr", "googleapis.com", "gstatic.com", "githubusercontent.com")
+
+
+def _declared_site(path: str) -> str:
+    """canonical или og:url главной собранного сайта — самый прямой ответ."""
+    for name in ("index.html", "index.htm"):
+        page = os.path.join(path, name)
+        if not os.path.isfile(page):
+            continue
+        try:
+            text, _ = read_text(page)
+        except SourceError:
+            continue
+        for pattern in (r'<link[^>]{0,200}rel=["\']canonical["\'][^>]{0,200}href=["\']([^"\']+)',
+                        r'<link[^>]{0,200}href=["\']([^"\']+)["\'][^>]{0,200}rel=["\']canonical',
+                        r'<meta[^>]{0,200}property=["\']og:url["\'][^>]{0,200}content=["\']([^"\']+)'):
+            found = re.search(pattern, text[:20000], re.I)
+            if found and found.group(1).startswith(("http://", "https://")):
+                origin = _origin(found.group(1))
+                if origin and not any(bad in origin for bad in _NOT_A_SITE):
+                    return origin
+    return ""
+
+
 def detect_site(root: str, content_dir: str = "") -> str:
-    """Адрес сайта из sitemap, robots.txt или конфига сборщика."""
+    """Адрес сайта из собранных страниц, sitemap, robots.txt или конфига сборщика."""
+    if content_dir:
+        declared = _declared_site(os.path.join(root, content_dir))
+        if declared:
+            return declared
     for rel in ("public/sitemap.xml", "sitemap.xml", "out/sitemap.xml",
                 "dist/sitemap.xml", "_site/sitemap.xml"):
         path = os.path.join(root, *rel.split("/"))
@@ -152,8 +201,11 @@ def detect_site(root: str, content_dir: str = "") -> str:
             continue
         for match in SITE_RE.finditer(text):
             url = match.group(0)
-            if any(bad in url for bad in ("schema.org", "w3.org", "npmjs", "github.com",
-                                          "localhost", "example.com", "json-schema")):
+            if any(bad in url for bad in _NOT_A_SITE):
+                continue
+            # `"$schema": "https://…"` — адрес схемы конфига, а не сайта.
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            if "$schema" in text[line_start:match.start()]:
                 continue
             return _origin(url)
     return ""
@@ -234,12 +286,14 @@ def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:
         return "catalog", tr("страниц не найдено, взят профиль по умолчанию")
     if dated / pages >= 0.4:
         return "events", tr("у {a0} из {a1} страниц есть дата события", a0=dated, a1=pages)
-    if pages <= 40 and html / pages >= 0.6:
-        return "product", tr("{a0} страниц, почти все собранный HTML — похоже на лендинги", a0=pages)
-    if not dataset and short / pages >= 0.5:
-        return "ugc", tr("датасета нет, {a0} из {a1} страниц короткие — похоже на ленту", a0=short, a1=pages)
+    # Датасет рядом — это каталог, даже если страниц мало и все они HTML:
+    # демо-сайт из README получал «лендинги», и один `thin` превращался в восемь.
     if dataset:
         return "catalog", tr("рядом лежит датасет {a0}", a0=os.path.basename(dataset))
+    if pages <= 40 and html / pages >= 0.6:
+        return "product", tr("{a0} страниц, почти все собранный HTML — похоже на лендинги", a0=pages)
+    if short / pages >= 0.5:
+        return "ugc", tr("датасета нет, {a0} из {a1} страниц короткие — похоже на ленту", a0=short, a1=pages)
     return "catalog", tr("{a0} страниц без явных признаков другого типа", a0=pages)
 
 
