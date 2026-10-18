@@ -49,7 +49,7 @@ def _ld_nodes(raw: str) -> list:
     from .aeo import _ld_items
     try:
         return _ld_items(json.loads(raw))
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
         return []
 
 

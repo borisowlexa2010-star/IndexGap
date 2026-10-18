@@ -671,6 +671,13 @@ def cmd_sitemap(args):
             "{a0} уже существует, и написал его не indexgap. Заменять без спроса не "
             "стал.\n    Если заменить нужно — добавь --force; если нет — укажи другой "
             "каталог через --out-dir.", a0=foreign))
+    # Манифест проверяется до sitemap: иначе sitemap записан, манифест — нет,
+    # и следующий запуск отказывается от «чужого» sitemap.
+    manifest_dir = os.path.dirname(os.path.abspath(manifest_path))
+    if not os.access(manifest_dir, os.W_OK) or (
+            os.path.exists(manifest_path) and not os.access(manifest_path, os.W_OK)):
+        raise SourceError(tr("{a0}: сюда нельзя записать манифест — sitemap не строился. "
+                             "Укажи другое место через --manifest.", a0=manifest_path))
     if first_run:
         _first_run_note(manifest_path)
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
@@ -1488,6 +1495,13 @@ def main(argv=None):
     except KeyboardInterrupt:
         print(tr("\nПрервано."), file=sys.stderr)
         return 130
+    except OSError as exc:
+        # Каталог только для чтения, диск полон, нет прав: одна строка с путём
+        # вместо трассировки. BrokenPipeError — тоже OSError, он выше.
+        where = exc.filename or ""
+        print(tr("\n{a0}: не удалось записать или прочитать ({a1}).", a0=where,
+                 a1=exc.strerror or exc), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -26,7 +26,9 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
+from collections import Counter
 from html import unescape as html_unescape
 from html.parser import HTMLParser
 from urllib.parse import (urljoin, urlparse, urldefrag, urlsplit, urlunsplit,
@@ -289,7 +291,7 @@ def url_key(url: str) -> str:
     if not url:
         return ""
     parts = urlsplit(url)
-    path = unquote(parts.path or "/")
+    path = unicodedata.normalize("NFC", unquote(parts.path or "/"))
     # `{{base}}/{{slug}}` в шаблоне даёт `/guides//visa/`. Сервер такую страницу
     # отдаёт, а сравнение по сырой строке объявляло её сиротой.
     path = re.sub(r"/{2,}", "/", path)
@@ -344,6 +346,8 @@ def normalize_url(url: str, directory: bool = None) -> str:
 def path_to_url(path: str, root: str, base_url: str) -> str:
     """out/guides/sg-arrival-card/index.html -> https://site.com/guides/sg-arrival-card/"""
     rel = os.path.relpath(path, root).replace(os.sep, "/")
+    # macOS пишет имена файлов в NFD, ссылки на сайте — в NFC. Адрес один.
+    rel = unicodedata.normalize("NFC", rel)
     rel = _INDEX_RE.sub(r"\1", rel)
     rel = _EXT_RE.sub("", rel)
     if rel in (".", ""):
@@ -404,6 +408,88 @@ def is_utf8(name: str) -> bool:
         n.replace("_", "-") for n in UTF8_NAMES}
 
 
+# Метки кодировок так, как их понимает браузер (WHATWG), а не Python:
+# `iso-8859-1` и `us-ascii` в браузере — windows-1252, а `utf-16` в мета-теге
+# значит UTF-8 (страница, которая смогла прочитать свой мета-тег, не UTF-16).
+_LABELS = {"iso-8859-1": "cp1252", "iso8859-1": "cp1252", "latin1": "cp1252",
+           "latin-1": "cp1252", "l1": "cp1252", "us-ascii": "cp1252", "ascii": "cp1252",
+           "windows-1252": "cp1252", "x-sjis": "cp932", "shift-jis": "cp932",
+           "shift_jis": "cp932", "sjis": "cp932", "windows-31j": "cp932",
+           "windows-874": "cp874", "x-cp1251": "cp1251", "utf-16": "utf-8",
+           "utf-16le": "utf-8", "utf-16be": "utf-8", "utf-16-le": "utf-8",
+           "utf-16-be": "utf-8"}
+_META_TAG = re.compile(rb"<meta\b[^>]{0,500}>", re.I)
+_HIGH = re.compile(rb"[\x80-\xff]")
+_LETTER_RUN = re.compile(rb"[\xc0-\xff]+")
+_ATTR = re.compile(rb"""([\w:-]+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
+_CHARSET_IN = re.compile(rb"charset\s*=\s*[\"']?\s*([\w.:-]+)", re.I)
+
+
+def _declared_charset(data: bytes) -> str:
+    """
+    Кодировка из `<meta charset>` или `<meta http-equiv="content-type">` —
+    только из них. Раньше бралось любое `charset=` внутри мета-тега, включая
+    description «How to set charset=iso-8859-1» и закомментированный тег.
+    """
+    head = data[:4096]
+    while True:                                   # комментарии вон, без регулярки
+        at = head.find(b"<!--")
+        if at < 0:
+            break
+        end = head.find(b"-->", at + 4)
+        head = head[:at] + (head[end + 3:] if end >= 0 else b"")
+    for tag in _META_TAG.findall(head):
+        attrs = {k.lower(): v.strip(b"\"'") for k, v in _ATTR.findall(tag)}
+        value = attrs.get(b"charset")
+        if value is None and attrs.get(b"http-equiv", b"").lower() == b"content-type":
+            found = _CHARSET_IN.search(attrs.get(b"content", b""))
+            value = found.group(1) if found else None
+        if value:
+            name = value.decode("ascii", "ignore").strip().lower()
+            return _LABELS.get(name, name)
+    return ""
+
+
+def _mostly_utf8(data: bytes) -> bool:
+    """UTF-8, кроме считанных байтов: меньше 0,1% или до восьми штук."""
+    bad = len(data.decode("utf-8", errors="replace")) - len(data.decode("utf-8", errors="ignore"))
+    if not bad:
+        return True
+    good = len(_HIGH.findall(data)) - bad
+    return good > 0 and (bad <= 8 or bad / len(data) < 0.001)
+
+
+def _bomless_utf16(data: bytes) -> str:
+    """UTF-16 без BOM: в начале файла каждый второй байт — ноль."""
+    head = data[:512]
+    if len(head) < 16:
+        return ""
+    even = head[0::2].count(0) / len(head[0::2])
+    odd = head[1::2].count(0) / len(head[1::2])
+    if odd > 0.4 and even < 0.05:
+        return "utf-16-le"
+    if even > 0.4 and odd < 0.05:
+        return "utf-16-be"
+    return ""
+
+
+def _cyrillic_or_latin(data: bytes) -> str:
+    """
+    cp1251 или cp1252 без объявления. В cp1251 байты 0xC0–0xFF — буквы
+    кириллицы, и они идут подряд: слово из них и состоит. Во французском или
+    немецком тексте такой байт стоит один среди латиницы: «détaillé».
+    Раньше cp1251 пробовался первым и читался из чего угодно — до cp1252
+    очередь не доходила никогда, и «café» становилось «cafй».
+    """
+    runs = _LETTER_RUN.findall(data)
+    high = sum(len(r) for r in runs)
+    paired = high - len(runs)
+    if not high:
+        return "cp1252"
+    return "cp1251" if paired / high > 0.4 else "cp1252"
+
+
+
 def read_text(path: str) -> tuple:
     """
     Читает текстовый файл, определяя кодировку. Возвращает (текст, кодировка).
@@ -425,25 +511,41 @@ def read_text(path: str) -> tuple:
             except UnicodeDecodeError:
                 break
 
-    # <meta charset> важнее угадывания — но именно из мета-тега.
-    # Раньше слово `charset=` бралось откуда угодно, включая адрес скрипта
-    # `/x.js?charset=koi8-r`, и валидный UTF-8 читался как кракозябры.
-    declared = re.search(
-        rb"""<meta[^>]{0,200}?charset\s*=\s*["']?\s*([\w.:-]+)""", data[:4096], re.I)
-    order = list(FALLBACK_ENCODINGS)
-    if declared:
-        name = declared.group(1).decode("ascii", "ignore").lower()
-        if name:
-            order = [name] + [e for e in order if e != name]
-
-    for encoding in order:
+    utf16 = _bomless_utf16(data)
+    if utf16:
         try:
-            text = data.decode(encoding)
+            return data.decode(utf16), utf16
+        except UnicodeDecodeError:
+            pass
+
+    # Строгий UTF-8 с не-ASCII — это UTF-8, что бы ни было объявлено: текст в
+    # cp1251 строгой проверки UTF-8 практически не проходит, а устаревший
+    # `<meta charset="windows-1251">` на перекодированном сайте встречается.
+    try:
+        return data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        pass
+
+    declared = _declared_charset(data)
+    if declared and is_utf8(declared) or not declared and _mostly_utf8(data):
+        # Один случайный байт — `\xa9` в подвале — не повод читать всю страницу
+        # как cp1251: браузер покажет UTF-8 с одним знаком замены.
+        if _mostly_utf8(data):
+            return data.decode("utf-8", errors="replace"), "utf-8"
+    if declared and not is_utf8(declared):
+        for errors in ("strict", "replace"):
+            try:
+                return data.decode(declared, errors=errors), _canonical_encoding(declared)
+            except (UnicodeError, LookupError):
+                # `<meta charset="undefined">` — такой кодек в Python есть, и он
+                # бросает голый UnicodeError: объявленная ерунда роняла весь прогон.
+                break
+
+    for encoding in (_cyrillic_or_latin(data), "cp1252", "cp1251"):
+        try:
+            return data.decode(encoding), _canonical_encoding(encoding)
         except (UnicodeError, LookupError):
-            # `<meta charset="undefined">` — такой кодек в Python есть, и он
-            # бросает голый UnicodeError: объявленная ерунда роняла весь прогон.
             continue
-        return text, _canonical_encoding(encoding)
     raise SourceError(
         tr("{a0}: не удалось определить кодировку. Пересохрани файл в UTF-8.", a0=path))
 
@@ -485,6 +587,8 @@ class _Extractor(HTMLParser):
         self._para_buf = []
         self._skip_depth = 0
         self._in_title = False
+        self._title_done = False
+        self._foreign = 0          # сколько из пропускаемых блоков — <svg>
         self._in_heading = 0
         self._heading_buf = ""
         self._in_anchor = False
@@ -514,6 +618,10 @@ class _Extractor(HTMLParser):
         # закрывать не обязательно, и счётчик уезжал на единицу с каждым таким
         # тегом — подвал попадал в текст страницы и в её хэш.
         self._open = []
+        # Сколько элементов каждого имени открыто. Без него каждый лишний
+        # закрывающий тег просматривал весь стек: 240 КБ `</span>` разбирались
+        # 77 секунд.
+        self._open_count = Counter()
 
     # -- служебное ------------------------------------------------------------
 
@@ -546,6 +654,8 @@ class _Extractor(HTMLParser):
 
     def _close_to(self, index: int):
         """Закрывает всё открытое выше `index` и то, что на этом держалось."""
+        for name in self._open[index:]:
+            self._open_count[name] -= 1
         del self._open[index:]
         self._depth = len(self._open)
         while self._main_stack and self._main_stack[-1][1] > self._depth:
@@ -572,7 +682,7 @@ class _Extractor(HTMLParser):
         и уносил с собой все абзацы после себя.
         """
         closes = _IMPLIED_END.get(tag)
-        if not closes:
+        if not closes or not any(self._open_count[name] for name in closes):
             return
         for index in range(len(self._open) - 1, -1, -1):
             name = self._open[index]
@@ -585,7 +695,11 @@ class _Extractor(HTMLParser):
     # -- разбор ---------------------------------------------------------------
 
     def handle_starttag(self, tag, attrs):
-        a = {k.lower(): (v or "") for k, v in attrs}
+        # Повторённый атрибут: браузер берёт первый. Последний делал из
+        # `<meta name="description" name="robots">` закрытую страницу.
+        a = {}
+        for k, v in attrs:
+            a.setdefault(k.lower(), v or "")
         if tag == "script" and "ld+json" in a.get("type", "").lower():
             self._in_ld = True
             self._ld_buf = ""
@@ -595,7 +709,14 @@ class _Extractor(HTMLParser):
             self._skip_depth += 1
             if tag == "script":
                 self.blocks["script"] += 1
+            elif tag == "svg":
+                self._foreign += 1
             return
+        # Незакрытый <svg> прятал всю страницу. По спецификации HTML абзац,
+        # заголовок или список выводят из «чужого» содержимого SVG.
+        if (self._skip_depth and self._foreign >= self._skip_depth
+                and tag in _BREAKOUT):
+            self._skip_depth = self._foreign = 0
         # Внутри пропускаемого блока не существует ни ссылок, ни мета-тегов:
         # ссылка в <template> не ведёт никуда, пока её не отрендерит скрипт.
         if self._skip_depth:
@@ -607,6 +728,7 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS:
             self._imply_end(tag)
             self._open.append(tag)
+            self._open_count[tag] += 1
             self._depth = len(self._open)
         if tag not in VOID_TAGS and (tag in MAIN_TAGS
                                      or a.get("role", "").lower() == "main"):
@@ -669,9 +791,10 @@ class _Extractor(HTMLParser):
 
         if tag == "html" and a.get("lang"):
             self.lang = a["lang"]
-        elif tag == "base" and a.get("href"):
+        elif tag == "base" and a.get("href") and not self.base:
             self.base = a["href"].strip()
-        elif tag == "title":
+        elif tag == "title" and not self._title_done:
+            # Второй <title> в теле страницы браузер не читает.
             self._in_title = True
         elif tag == "time" and a.get("datetime"):
             self.meta.setdefault("datemodified", a["datetime"].strip())
@@ -717,6 +840,8 @@ class _Extractor(HTMLParser):
         self.handle_starttag(tag, attrs)
         if tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
+            if tag == "svg":
+                self._foreign = max(0, self._foreign - 1)
         elif not skipping and tag not in VOID_TAGS and self._open:
             self._close_to(len(self._open) - 1)
 
@@ -729,6 +854,8 @@ class _Extractor(HTMLParser):
             return
         if tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
+            if tag == "svg":
+                self._foreign = max(0, self._foreign - 1)
             return
         if self._skip_depth:
             return
@@ -737,13 +864,16 @@ class _Extractor(HTMLParser):
         # Закрывается ближайший открытый элемент с этим именем и всё, что
         # осталось незакрытым внутри него. Закрывающий тег без пары не значит
         # ничего — как и в браузере.
-        for index in range(len(self._open) - 1, -1, -1):
-            if self._open[index] == tag:
-                self._close_to(index)
-                break
+        if self._open_count[tag]:
+            for index in range(len(self._open) - 1, -1, -1):
+                if self._open[index] == tag:
+                    self._close_to(index)
+                    break
         if tag not in INLINE_TAGS:
             self._glue = False
         if tag == "title":
+            if self._in_title:
+                self._title_done = True
             self._in_title = False
         elif tag in _HEADING_TAGS and self._in_heading:
             text = _clean(self._heading_buf)
@@ -854,6 +984,11 @@ _DATA_TAGS = {"table", "pre"}
 _CHROME_TAGS = {"aside", "footer", "nav"}
 _CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+_BREAKOUT = {"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
+             "dl", "dt", "em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head",
+             "hr", "i", "img", "li", "listing", "menu", "meta", "nobr", "ol", "p",
+             "pre", "ruby", "s", "small", "span", "strong", "strike", "sub", "sup",
+             "table", "tt", "u", "ul", "var"}
 # Блоки, которые абзац заканчивают и сами им становятся: подпись к рисунку
 # склеивалась с текстом до и после, цитата — тоже.
 _OWN_BLOCKS = {"figcaption", "blockquote"}
@@ -1243,6 +1378,44 @@ def _unquote_value(value: str) -> str:
     return value
 
 
+def _yaml_scalar(value: str) -> str:
+    """
+    Однострочное значение YAML: кавычки и комментарий после них.
+
+    `draft: true # flip before launch` раньше давал значение «true # flip…»,
+    черновик не узнавался и уходил в sitemap и IndexNow. `title: "A: B" # SEO`
+    давал заголовок с кавычками и комментарием.
+    """
+    value = value.strip()
+    if value[:1] == '"':
+        out, i = [], 1
+        while i < len(value):
+            ch = value[i]
+            if ch == "\\" and i + 1 < len(value):
+                out.append(value[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                return "".join(out)
+            out.append(ch)
+            i += 1
+        return value
+    if value[:1] == "'":
+        out, i = [], 1
+        while i < len(value):
+            if value[i] == "'":
+                if value[i + 1:i + 2] == "'":       # '' — это одна кавычка
+                    out.append("'")
+                    i += 2
+                    continue
+                return "".join(out)
+            out.append(value[i])
+            i += 1
+        return value
+    # Комментарий начинается с « #»; «C#» и «#42» без пробела перед — текст.
+    return re.split(r"\s#", value, 1)[0].strip() if " #" in value or "\t#" in value else value
+
+
 def _parse_toml_frontmatter(block: str) -> dict:
     """
     Верхний уровень TOML: `ключ = значение`. Таблицы (`[params]`) и всё, что
@@ -1319,6 +1492,8 @@ def _parse_frontmatter(block: str) -> dict:
             if not wrapped:
                 continue
             value = " ".join(wrapped)
+        else:
+            value = _yaml_scalar(value)
         value = _clean(_unquote_value(value))
         if value:
             out[key] = value
@@ -1332,6 +1507,9 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
     notes = []
     if not is_utf8(encoding):
         notes.append(tr("файл прочитан как {a0}, а не UTF-8", a0=encoding))
+    elif "\ufffd" in raw:
+        notes.append(tr("в файле {a0} байт(а) не в UTF-8 — на их месте знак замены; "
+                        "остальной текст прочитан как UTF-8", a0=raw.count("\ufffd")))
 
     url = path_to_url(os.path.join(os.path.dirname(path), "index.md") if as_index else path,
                       root, base_url)
@@ -1469,7 +1647,14 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
     jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
-    for dirpath, dirnames, filenames in os.walk(root):
+    def unreadable(exc):
+        # Каталог без прав на чтение или со слишком длинным путём раньше
+        # пропадал молча: «разобрано страниц: 1» — и ни слова о том, что ещё.
+        problems.append(tr("{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись",
+                           a0=getattr(exc, "filename", "") or root,
+                           a1=getattr(exc, "strerror", "") or exc))
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=unreadable):
         skip = set(ALWAYS_SKIP)
         if dirpath == root and source_repo:
             skip |= BUILD_DIRS
