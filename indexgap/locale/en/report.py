@@ -154,6 +154,10 @@ MESSAGES = {
     "Изображения без alt.": "Images without alt text.",
     "На странице нет заголовков — структуры нет.":
         "The page has no headings — there is no structure.",
+    "Ссылка ведёт на страницу, которой в сборке нет: на живом сайте это 404. Чаще всего шаблон ссылается на строку данных, которую фильтр не пропустил в генерацию. Убери ссылку из шаблона или верни страницу.":
+        "The link points at a page the build does not have: a 404 on the live "
+        "site. Most often the template links to a data row that a filter kept out "
+        "of generation. Remove the link from the template or bring the page back.",
     "На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела.":
         "No internal link points at this page. It is in the sitemap, but the "
         "crawler will not get there. Link to it from the section's hub pages.",

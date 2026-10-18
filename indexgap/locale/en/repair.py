@@ -31,6 +31,11 @@ MESSAGES = {
     "Проверь шаблон: canonical должен указывать на саму страницу. Сейчас она отдаёт вес другой и выпадает из индекса.":
         "Check the template: the canonical must point at the page itself. Right "
         "now it hands its weight to another page and drops out of the index.",
+    "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
+        "The links point at pages the build does not have. Find where the "
+        "template takes these addresses from, and either remove the link or "
+        "generate the page. If the server redirects these addresses, check that "
+        "the redirect really exists.",
     "Поставь ссылки на эту страницу с хабовых страниц раздела. Анкор — описательный, не «подробнее».":
         "Link to this page from the section's hub pages. Make the anchor "
         "descriptive, not “read more”.",
