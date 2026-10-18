@@ -576,6 +576,43 @@ def _guess_robots(args):
     return ""
 
 
+def _check_command(args) -> str:
+    """
+    Команда, которой проверяют починку, — та же, что нашла находки.
+
+    В наряде стояло `indexgap check --site …`: без indexgap.json она падала,
+    а дописанная очевидным образом — шла без `--dataset`, и выдуманные числа
+    «исчезали» из отчёта вместе с проверкой.
+    """
+    import shlex
+
+    def rel(path):
+        if not path:
+            return path
+        try:
+            out = os.path.relpath(path)
+        except ValueError:
+            return path
+        return path if out.startswith("..") else out.replace(os.sep, "/")
+
+    parts = ["indexgap", "check"]
+    if getattr(args, "root", None):
+        parts.append(rel(args.root))
+    if getattr(args, "site", None):
+        parts += ["--site", args.site]
+    if getattr(args, "config", None):
+        parts += ["--config", rel(args.config)]
+    if getattr(args, "dataset", None):
+        parts += ["--dataset", rel(args.dataset)]
+        if getattr(args, "keyword", "keyword") != "keyword":
+            parts += ["--keyword", args.keyword]
+    if getattr(args, "profile", None):
+        parts += ["--profile", args.profile]
+    if getattr(args, "robots", None):
+        parts += ["--robots", rel(args.robots)]
+    return " ".join(shlex.quote(p) for p in parts)
+
+
 def cmd_brief(args):
     """
     Наряды на починку: те же находки, но в виде заданий рядом со страницами.
@@ -594,7 +631,7 @@ def cmd_brief(args):
         template_notes=got["template_notes"],
         rows_by_key=(got["content"] or {}).get("matched"),
         profile_title=project.get("_profile_title", ""), site=args.site,
-        root=args.root)
+        root=args.root, verify=_check_command(args))
 
     by_kind = Counter(b["kind"] for b in briefs)
     page_briefs = by_kind.get("page", 0)

@@ -124,13 +124,17 @@ class TestPlacement(Fixture):
         self.assertEqual(groups[0]["count"], 3)          # p0, p1, p2 — один кластер
         self.assertNotIn("page", self.kinds(briefs))
 
-    def test_the_group_brief_forbids_linking_the_duplicates_to_each_other(self):
-        """Совет «свяжи их ссылками» превращает дубли в кластер дублей."""
+    def test_the_group_brief_keeps_ordinary_links(self):
+        """
+        Раньше наряд запрещал связывать дубли ссылками. В каталоге группа
+        почти-дублей — это и есть соседние страницы раздела: убери ссылки —
+        и получишь сирот. Ссылка не делает страницы разными, но и не вредит.
+        """
         pages = self.pages({f"p{i}/index.html": html("Виза", "текст " * 50)
                             for i in range(2)})
         briefs = repair.build(pages, {"issues": [], "duplicates":
                                       [(pages[0], pages[1], 0.99)]})
-        self.assertIn("Связывать их ссылками между собой нельзя",
+        self.assertIn("Обычные ссылки на соседние страницы и хабы оставь",
                       briefs[0]["body"])
 
     def test_site_level_findings_do_not_land_on_pages(self):

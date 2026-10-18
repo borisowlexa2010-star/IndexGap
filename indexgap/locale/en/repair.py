@@ -44,6 +44,24 @@ MESSAGES = {
         "Find the pipeline step where UTF-8 is read as Latin-1 or cp1252 (usually a CSV import or an API response) and set the encoding explicitly. Rebuild the pages.",
     "Найди правило Disallow, которое закрывает этот раздел, и реши: если раздел должен быть в поиске — убери правило; если нет — убери страницы из sitemap и поставь на них noindex (его поисковик увидит, только если обход разрешён).":
         "Find the Disallow rule that closes this section and decide: if the section belongs in search, remove the rule; if not, take the pages out of the sitemap and put noindex on them (the engine sees it only if crawling is allowed).",
+    "Хаб, листинг и главная ценны ссылками, а не словами: закрывать их нельзя. Страницу строки наполни фактами из её строки данных; если фактов нет — спроси, нужна ли эта страница. Порог — `checks.thin_words` в indexgap.json: понижай его, только если этот тип контента законно короткий, а не дописывай воду.":
+        "A hub, a listing or the home page is valuable for its links, not its words: never close them. Fill a row's page with facts from its data row; if there are none, ask whether the page should exist. The threshold is `checks.thin_words` in indexgap.json: lower it only if this content type is legitimately short, and do not pad the text.",
+    "Это собранный файл: правка в нём пропадёт при следующей сборке. Чини источник — шаблон, строку данных или генератор — и пересобери. Путь показывает, какой шаблон и какая строка дали эту страницу.":
+        "This is a built file: an edit in it is lost on the next build. Fix the source — the template, the data row or the generator — and rebuild. The path shows which template and which row produced this page.",
+    "Проверить результат (после пересборки, если страницы собираются):":
+        "Check the result (after rebuilding, if the pages are built):",
+    "страница не сопоставлена со строкой датасета — её числа НЕ проверялись. Если это страница строки, назови строку: `keyword:` во фронтматтере или <meta name=\"keyword\"> в шаблоне":
+        "the page is not matched to a dataset row — its numbers were NOT checked. If it is a row's page, name the row: `keyword:` in the front matter or <meta name=\"keyword\"> in the template",
+    "Что делать: страницы на разных языках совпадают текстом — перевод не сделан. Переведи каждую версию. Canonical на одну из них выбросит языковую версию из поиска.":
+        "What to do: pages in different languages share their text — the translation was not done. Translate each version. A canonical to one of them would drop a language version from search.",
+    "Что делать: страницы собраны из разных строк датасета — дублирует их шаблон, а не интент. Чини шаблон: больше данных своей строки, разделы, которые зависят от данных. Склеивать их canonical'ом нельзя — пропадут настоящие страницы.":
+        "What to do: the pages are built from different dataset rows — the template duplicates them, not the intent. Fix the template: more of each row's own data, sections that depend on the data. Never merge them with a canonical — real pages would disappear.",
+    "Что делать: выбери одну страницу как основную и разведи остальные по разным интентам — у каждой должен быть свой вопрос, на который она отвечает. Если развести нечем — это один интент: убери лишнюю строку из датасета (её покажет `indexgap plan`) или поставь с остальных страниц canonical на основную.":
+        "What to do: choose one page as the main one and move the rest to different intents — each needs its own question to answer. If there is nothing to separate them with, it is one intent: remove the extra row from the dataset (`indexgap plan` shows it) or point the others' canonical at the main page.",
+    "Обычные ссылки на соседние страницы и хабы оставь: ссылка не делает страницы разными, но и не вредит им.":
+        "Keep the ordinary links to neighbouring pages and hubs: a link does not make pages different, but it does not hurt them either.",
+    "Страницы группы (наибольшее совпадение с другой страницей группы):":
+        "Pages of the group (the highest similarity to another page of the group):",
     "Поставь ссылки на эту страницу с хабовых страниц раздела. Анкор — описательный, не «подробнее».":
         "Link to this page from the section's hub pages. Make the anchor "
         "descriptive, not “read more”.",
@@ -59,10 +77,6 @@ MESSAGES = {
         "Add what makes this page different from its neighbours: the specifics "
         "from its own data row. There should end up being less boilerplate than "
         "text of its own.",
-    "Наполни страницу или убери из индекса. Если порог не подходит этому типу контента — поправь его в indexgap.json, а не дописывай воду.":
-        "Fill the page out or take it out of the index. If the threshold does not "
-        "suit this kind of content, change it in indexgap.json rather than padding "
-        "the text.",
     "Поменяй структуру заголовков под данные этой строки. Одинаковый скелет на всех страницах читается как штамповка.":
         "Change the heading structure to follow this row's data. The same skeleton "
         "on every page reads as stamped out.",
@@ -180,12 +194,6 @@ MESSAGES = {
     "{a0} страниц почти совпадают друг с другом. Поисковик оставит в индексе одну.":
         "{a0} pages nearly coincide with one another. A search engine will keep "
         "one of them in the index.",
-    "Что делать: выбери одну страницу как основную и разведи остальные по разным интентам — у каждой должен быть свой вопрос, на который она отвечает. Если развести нечем, оставь одну, а с остальных поставь canonical на неё. Связывать их ссылками между собой нельзя.":
-        "What to do: pick one page as the main one and pull the rest apart by "
-        "intent — each should have its own question that it answers. If there is "
-        "nothing to pull them apart with, keep one and point the others' canonical "
-        "at it. Do not link them to one another.",
-    "Страницы группы:": "Pages in the group:",
     "Файл: `{a0}`": "File: `{a0}`",
     "Адрес: {a0}": "Address: {a0}",
     "Что не так:": "What is wrong:",
@@ -204,7 +212,6 @@ MESSAGES = {
         "not a single number that is absent from the dataset row",
     "Ничего не выдумывать. Если данных нет, раздел не пишем.":
         "Invent nothing. If the data is not there, the section is not written.",
-    "Проверить результат:": "Check the result:",
     "не указан каталог для нарядов": "no directory given for the briefs",
 
     # ── вывод команды ─────────────────────────────────────────────────────────

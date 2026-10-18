@@ -1843,6 +1843,8 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
     # а README.md становится главной, если своей главной в каталоге нет.
     jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
     def unreadable(exc):
+        if not os.path.isdir(root):
+            return                  # нет самого каталога — об этом скажут выше
         # Каталог без прав на чтение или со слишком длинным путём раньше
         # пропадал молча: «разобрано страниц: 1» — и ни слова о том, что ещё.
         problems.append(tr("{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись",
