@@ -152,7 +152,7 @@ indexgap check --out indexgap-baseline.json                # once; commit the fi
 indexgap check --baseline indexgap-baseline.json --strict  # fails only on new critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.13.1` with `root`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.14.0` with `root`,
 `site`, and optional `baseline` and `args`.
 
 ## Repair briefs
@@ -176,7 +176,7 @@ Order:
    share) — then the same code with the same message on most page briefs is
    still one template fix.
 2. `_site.md` — robots.txt, markup, the links between language versions.
-3. `_duplicates/group-NNN.md` — near-duplicate groups, see below.
+3. `_duplicates/<first-page>.md` — near-duplicate groups, one file per group named after its first address; see below.
 4. Page briefs, heaviest first (`--limit`, 50 by default; `0` means all).
 
 **Near-duplicates.** If the pages in a group come from *different* dataset rows

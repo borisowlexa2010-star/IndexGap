@@ -130,3 +130,23 @@ class Cli(Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StableGroupNames(Fixture):
+    def test_a_group_keeps_its_file_name_when_another_group_appears(self):
+        self.write("out/index.html", html("Главная", "текст " * 300))
+        for name in ("a", "b", "x", "y"):
+            self.write(f"out/{name}/index.html", html(f"Страница {name}", "текст шаблона " * 60))
+        pages = {p.url: p for p in self.pages()}
+        p = lambda n: pages[f"{SITE}/{n}/"]
+        root = os.path.join(self.project, "out")
+
+        def names(pairs):
+            briefs = repair.build(list(pages.values()), {"issues": [], "duplicates": pairs},
+                                  root=root)
+            return sorted(b["name"] for b in briefs if b["kind"] == "group")
+
+        before = names([(p("x"), p("y"), 0.95)])
+        after = names([(p("a"), p("b"), 0.95), (p("x"), p("y"), 0.95)])
+        # Новая группа a+b раньше сдвигала нумерацию: x+y из group-001 в group-002.
+        self.assertTrue(set(before) <= set(after), (before, after))

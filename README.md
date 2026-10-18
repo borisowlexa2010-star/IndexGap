@@ -107,8 +107,10 @@ indexgap cite --domain example.com --prompt "best visa service for Singapore"
 `indexgap.json`: when each page last changed and what has been submitted.
 **Commit it.** Without it a clean CI checkout sees every page as new — today's
 `lastmod` everywhere — and `notify --send` refuses to submit the whole site
-unless you say `--first`. On a 4,273-page Next.js build a full `check` takes
-about 40 seconds and under 1 GB of memory (Apple M1 Max).
+unless you say `--first`. On the 5,546-page Apache APISIX build a full `check`
+takes about 30 seconds and under 600 MB of memory (Apple M1 Max); on a generated
+50,000-page site, about 2.5 minutes and 5 GB. Pages are parsed in parallel —
+up to eight processes, `INDEXGAP_JOBS=1` for one.
 
 Output is English by default, Russian with `--lang ru` (or `INDEXGAP_LANG`, or
 your system locale). That includes the HTML report, every finding description,
@@ -153,7 +155,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.13.1
+- uses: borisowlexa2010-star/IndexGap@v1.14.0
   with:
     root: out
     site: https://example.com
@@ -439,7 +441,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-911 scenarios. Each one is a reproduced defect: from four waves of adversarial
+913 scenarios. Each one is a reproduced defect: from four waves of adversarial
 review (the latest by eight reviewers at once — new generators, a seeded
 catalogue measuring what is missed, messy input, scale, the truth of these
 docs, an agent following the skills, the competition), from runs against live
