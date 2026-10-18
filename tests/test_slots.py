@@ -96,7 +96,7 @@ class Slots(unittest.TestCase):
                       self.codes(html(f"<p>{TEXT}</p>", jsonld=ld)))
 
     def test_lorem_ipsum(self):
-        self.assertIn(("critical", "unfilled-slot"), self.codes(html(
+        self.assertIn(("warning", "unfilled-slot"), self.codes(html(
             f"<p>{TEXT}</p><p>Lorem ipsum dolor sit amet, consectetur adipiscing.</p>")))
 
     def test_column_names_of_the_dataset_in_brackets(self):
@@ -163,7 +163,17 @@ class Slots(unittest.TestCase):
 
     def test_markdown_sources_still_get_lorem_and_llm(self):
         md = "---\ntitle: Plumbers\n---\n# Plumbers\n\n" + TEXT + " Lorem ipsum dolor sit amet.\n"
-        self.assertEqual(self.codes(md, name="plumbers.md"), [("critical", "unfilled-slot")])
+        self.assertEqual(self.codes(md, name="plumbers.md"), [("warning", "unfilled-slot")])
+
+    def test_names_from_the_corpus_are_not_slots(self):
+        # graphql-dotnet, dplyr, supplychain-attack-data, evan-moon.github.io
+        for title in ("GraphQL for .NET", "Configuration in .editorconfig",
+                      "Use pick() or across() in group_by()"):
+            with self.subTest(title=title):
+                self.assertEqual(self.codes(html(f"<p>{TEXT}</p>", title=title, h1=title)), [])
+        body = (f"<p>{TEXT} The payload is written to %LOCALAPPDATA% and %TEMP%. "
+                "For sets {C} and {D} the union is {C, D}.</p>")
+        self.assertEqual(self.codes(html(body)), [])
 
     def test_a_clean_page(self):
         self.assertEqual(self.codes(html(f"<p>{TEXT}</p>")), [])

@@ -274,6 +274,7 @@ class Page:
 # ── URL ───────────────────────────────────────────────────────────────────────
 
 _EXT_RE = re.compile(r"\.(html?|md|markdown)$", re.I)
+_BARE_INDEX = re.compile(r"(^|/)index$", re.I)
 _INDEX_RE = re.compile(r"(^|/)index\.(html?|md|markdown)$", re.I)
 
 
@@ -308,6 +309,11 @@ def url_key(url: str) -> str:
         path = _CONTROL.sub(lambda m: "%%%02X" % ord(m.group()), path)
     path = _INDEX_RE.sub(r"\1", path)
     path = _EXT_RE.sub("", path)
+    # `/resource/index` без расширения — та же страница: VitePress с
+    # cleanUrls ссылается так на каждой странице, и вышло 307 «битых» ссылок.
+    if len(path) > 1:
+        path = path.rstrip("/")
+    path = _BARE_INDEX.sub(r"\1", path)
     if len(path) > 1:
         path = path.rstrip("/")
     if not path:
@@ -1200,7 +1206,9 @@ SLOT_TEMPLATE = re.compile(
     r"|\{%[^%\n]{1,80}%\}"                          # {% if city %}
     r"|\$\{[A-Za-z_][\w.]{0,40}\}"                   # ${city}
     # {city}: но не \frac{a}{b}, x^{n} и не {1, 2, 3}
-    r"|(?<![\w\\^_{}$])\{[A-Za-z_][\w.]{0,40}\}(?!\})"
+    # {city}: не меньше двух знаков — `{C}` и `{x}` это множества и переменные
+    # в математике (evan-moon.github.io), а не поля шаблона.
+    r"|(?<![\w\\^_{}$])\{[A-Za-z_][\w.]{1,40}\}(?!\})"
     r"|(?<![\w%])%[A-Z][A-Z0-9_]{1,30}%(?![\w%])")     # %CITY%
 SLOT_LEFTOVER = re.compile(r"\[object Object\]|\$\s?NaN\b|\bNaN\s?%|[$€£₽]\s?undefined\b")
 SLOT_LOREM = re.compile(r"\blorem ipsum\b", re.I)
@@ -1210,6 +1218,11 @@ LLM_PHRASES = re.compile(
     r"|\b(?:certainly|sure)! here(?: is|'s)\b|\bi hope this helps\b"
     r"|\bhere is a rewritten\b|\bi cannot fulfill\b"
     r"|как языковая модель|как ии-модель|конечно! вот\b|надеюсь, это поможет", re.I)
+_WINDOWS_ENV = {"APPDATA", "LOCALAPPDATA", "USERPROFILE", "TEMP", "TMP", "PROGRAMFILES",
+                "PROGRAMDATA", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "PATHEXT",
+                "HOMEPATH", "HOMEDRIVE", "COMPUTERNAME", "USERNAME", "USERDOMAIN", "COMSPEC",
+                "ALLUSERSPROFILE", "PUBLIC", "OS", "PROCESSOR_ARCHITECTURE", "ERRORLEVEL",
+                "CD", "DATE", "TIME", "RANDOM", "JAVA_HOME", "PYTHONPATH"}
 _LLM_HINTS = ("language model", "as an ai", "certainly!", "sure!", "hope this helps",
               "rewritten", "cannot fulfill", "языковая модель", "ии-модель", "конечно!",
               "надеюсь, это поможет")
@@ -1251,6 +1264,10 @@ def find_slots(text: str, markdown: bool = False) -> list:
                 sample = text[m.start():m.end() + 40].split("\n")[0].strip()
             else:
                 sample = m.group(0)
+            # %LOCALAPPDATA%, %USERPROFILE% — переменные окружения Windows в
+            # тексте о безопасности или настройке, а не поля шаблона.
+            if kind == "template" and sample.startswith("%") and sample.strip("%") in _WINDOWS_ENV:
+                continue
             if sample not in samples:
                 samples.append(sample)
             if len(samples) >= (12 if kind == "bracket" else 3):
