@@ -28,7 +28,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from collections import Counter
+from collections import Counter, defaultdict
 from html import unescape as html_unescape
 from html.parser import HTMLParser
 from urllib.parse import (urljoin, urlparse, urldefrag, urlsplit, urlunsplit,
@@ -290,7 +290,13 @@ def url_key(url: str) -> str:
     """
     if not url:
         return ""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # `https://x.org][1` — недописанная ссылка Markdown: `urlsplit` видит
+        # в ней IPv6 и бросает ValueError. Одна такая ссылка роняла прогон
+        # на 47 тысяч страниц.
+        return ""
     path = unicodedata.normalize("NFC", unquote(parts.path or "/"))
     # `{{base}}/{{slug}}` в шаблоне даёт `/guides//visa/`. Сервер такую страницу
     # отдаёт, а сравнение по сырой строке объявляло её сиротой.
@@ -361,7 +367,7 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
 
 def _file_url(path: str, root: str, base_url: str) -> str:
     """Адрес самого файла, с именем и расширением: от него считаются ссылки."""
-    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    rel = unicodedata.normalize("NFC", os.path.relpath(path, root).replace(os.sep, "/"))
     rel = "/".join(quote(seg, safe="~-._") for seg in rel.split("/"))
     return urljoin(base_url.rstrip("/") + "/", rel)
 
@@ -574,6 +580,10 @@ class _Extractor(HTMLParser):
         # eventiq.io это 40% подзаголовков медианной страницы.
         self.outline = []
         self._chrome_stack = []
+        # Видимый текст без кода — для поиска швов шаблона. Собирается тем же
+        # проходом: второй разбор исходника стоил пятую часть времени загрузки.
+        self._code_stack = []
+        self.visible = []
         self._br_run = False       # последним в тексте был <br>, а после него — ничего
         self.anchors = []
         self.jsonld = []
@@ -662,6 +672,8 @@ class _Extractor(HTMLParser):
             self._main_stack.pop()
         while self._chrome_stack and self._chrome_stack[-1] > self._depth:
             self._chrome_stack.pop()
+        while self._code_stack and self._code_stack[-1] > self._depth:
+            self._code_stack.pop()
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -737,6 +749,8 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and _is_aside(tag, a):
             self._flush_paragraph()
             self._aside_stack.append(self._depth)
+        if tag in _CODE_TAGS:
+            self._code_stack.append(self._depth)
         if tag not in VOID_TAGS and (tag in _CHROME_TAGS
                                      or a.get("role", "").lower() in _CHROME_ROLES):
             self._chrome_stack.append(self._depth)
@@ -912,6 +926,8 @@ class _Extractor(HTMLParser):
             self._glue = False
             return
         self._br_run = False
+        if not self._code_stack:
+            self.visible.append(data)
         # Пробел до или после куска означает границу слова.
         lead = data[:1].isspace()
         text = data.strip()
@@ -982,6 +998,7 @@ _PROSE, _DATA, _SERVICE = 0, 1, 2
 _DATA_TAGS = {"table", "pre"}
 # Шаблон вокруг статьи: врезки, подвал, меню. Их заголовки — не разделы текста.
 _CHROME_TAGS = {"aside", "footer", "nav"}
+_CODE_TAGS = {"code", "pre", "kbd", "samp", "textarea"}
 _CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _BREAKOUT = {"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
@@ -1192,6 +1209,9 @@ LLM_PHRASES = re.compile(
     r"|\b(?:certainly|sure)! here(?: is|'s)\b|\bi hope this helps\b"
     r"|\bhere is a rewritten\b|\bi cannot fulfill\b"
     r"|как языковая модель|как ии-модель|конечно! вот\b|надеюсь, это поможет", re.I)
+_LLM_HINTS = ("language model", "as an ai", "certainly!", "sure!", "hope this helps",
+              "rewritten", "cannot fulfill", "языковая модель", "ии-модель", "конечно!",
+              "надеюсь, это поможет")
 MOJIBAKE = re.compile(r"â€[\u0080-\u00bf\u2018-\u201e\u2122\u0153\u02dc]|Ã[\u0080-\u00bf]"
                       r"|Ð[\u0080-\u00bf]Ð|Ñ[\u0080-\u008f]")
 
@@ -1208,13 +1228,20 @@ def find_slots(text: str, markdown: bool = False) -> list:
     и Jekyll, а не шов: их там не ищем.
     """
     text = (text or "").replace("\u2019", "'")
+    lowered = text.lower()
     found = []
-    kinds = [("leftover", SLOT_LEFTOVER), ("lorem", SLOT_LOREM),
-             ("llm", LLM_PHRASES), ("mojibake", MOJIBAKE)]
+    # Дешёвая проверка подстроки до выражения: на обычной странице искать
+    # нечего, а регулярки с re.I по всему тексту стоили 9 мс на страницу.
+    kinds = [("leftover", SLOT_LEFTOVER, ("[object", "nan", "undefined")),
+             ("lorem", SLOT_LOREM, ("lorem",)),
+             ("llm", LLM_PHRASES, _LLM_HINTS),
+             ("mojibake", MOJIBAKE, ("ã", "â€", "ð", "ñ"))]
     if not markdown:
-        kinds.insert(0, ("template", SLOT_TEMPLATE))
-        kinds.append(("bracket", SLOT_BRACKET))
-    for kind, pattern in kinds:
+        kinds.insert(0, ("template", SLOT_TEMPLATE, ("{", "%")))
+        kinds.append(("bracket", SLOT_BRACKET, ("[",)))
+    for kind, pattern, hints in kinds:
+        if not any(h in lowered for h in hints):
+            continue
         samples = []
         for m in pattern.finditer(text):
             if kind == "mojibake":
@@ -1582,6 +1609,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             chrome=ex.chrome_text,
             headings=ex.headings,
             outline=ex.outline,
+            slots=find_slots(" ".join(ex.visible)),
             anchors=ex.anchors,
             raw=raw,
             encoding=encoding,
@@ -1602,19 +1630,29 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
     # (Sphinx, mdBook, MkDocs) получал сироту на каждой такой ссылке.
     location = _file_url(path, root, base_url)
     markdown = path.lower().endswith((".md", ".markdown"))
-    base_for_links = urljoin(location, base_href) if base_href else location
+    try:
+        base_for_links = urljoin(location, base_href) if base_href else location
+    except ValueError:
+        base_for_links = location
     if page.canonical:
-        page.canonical = urljoin(base_for_links, page.canonical)
+        try:
+            page.canonical = urljoin(base_for_links, page.canonical)
+        except ValueError:
+            page.notes.append(tr("canonical не разбирается как адрес: {a0}", a0=page.canonical))
+            page.canonical = ""
+    if page.canonical:
         # Адрес страницы — тот, который она сама объявляет, если это она же:
         # `about.html` с canonical на `/about.html` отдаётся именно так, а
         # `/about/` на GitHub Pages, S3 и обычном nginx — это 404, и раньше
         # в sitemap уезжал он.
         own = urlsplit(page.canonical)
-        if (url_key(page.canonical) == page.key and not own.query
-                and own.path != urlsplit(page.url).path):
-            site_parts = urlsplit(page.url)
-            page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own.path, "", ""))
+        if url_key(page.canonical) == page.key and not own.query:
+            page.__dict__["_url_declared"] = True
+            if own.path != urlsplit(page.url).path:
+                site_parts = urlsplit(page.url)
+                page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own.path, "", ""))
     seen = set()
+    forms = []
     for href in hrefs:
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
             continue
@@ -1622,18 +1660,58 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         # В Markdown живут две привычки. MkDocs и GitHub ссылаются на соседний
         # файл — `[b](b.md)`; Hugo и Jekyll пишут ссылку от адреса, по которому
         # страница выйдет, — `[b](../b/)`. Различает их расширение в ссылке.
-        if markdown and not base_href and not _EXT_RE.search(urlsplit(href).path):
-            base = url
-        absolute, _ = urldefrag(urljoin(base, href))
-        if urlsplit(url_key(absolute)).netloc != host:
+        try:
+            if markdown and not base_href and not _EXT_RE.search(urlsplit(href).path):
+                base = url
+            absolute, _ = urldefrag(urljoin(base, href))
+            if urlsplit(url_key(absolute)).netloc != host:
+                continue
+        except ValueError:
             continue
+        raw_path = urlsplit(absolute).path
+        form = ("file" if _EXT_RE.search(raw_path) else
+                "slash" if raw_path.endswith("/") else "bare")
         absolute = normalize_url(absolute)
         key = url_key(absolute)
         if key != page.key and key not in seen:
             seen.add(key)
             page.links.append(absolute)
+            forms.append((key, form))
+    page.__dict__["_link_forms"] = forms
 
     return page
+
+
+def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
+    """
+    Адрес плоской страницы `filter.html` — в той форме, в какой на неё
+    ссылается сам сайт.
+
+    Раньше каждая такая страница без canonical получала `/filter/`, и он же
+    уезжал в sitemap. На GitHub Pages, S3 и обычном nginx это 404: pkgdown,
+    Pelican, mdBook и Sphinx отдают `filter.html`. Next.js-экспорт кладёт
+    `about.html`, а ссылается на `/about` — тогда адрес `/about`. Если ссылок
+    нет, берётся `filter.html`: он работает на любом статическом хостинге.
+    """
+    votes = defaultdict(Counter)
+    for page in pages:
+        for key, form in page.__dict__.pop("_link_forms", ()):
+            votes[key][form] += 1
+    order = {"file": 0, "bare": 1, "slash": 2}
+    for page in pages:
+        name = os.path.basename(page.path or "").lower()
+        if (not name.endswith((".html", ".htm")) or name.startswith("index.")
+                or page.__dict__.get("_url_declared")):
+            continue
+        counted = votes.get(page.key)
+        form = (min(counted, key=lambda f: (-counted[f], order[f])) if counted else "file")
+        if form == "slash":
+            continue
+        file_url = _file_url(page.path, root, base_url)
+        if form == "bare":
+            file_url = _EXT_RE.sub("", file_url)
+        parts = urlsplit(file_url)
+        page.url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
@@ -1693,13 +1771,13 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
                 if _is_fragment(page.raw):
                     fragments.append(path)
                     continue
-                page.slots = find_slots(visible_text(page.raw))
                 page.raw = essence(page.raw)
             loaded.append(page)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
-    loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded)
+    loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded, root)
+    _settle_flat_urls(loaded, root, base_url)
     if fragments:
         problems.append(tr(
             "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; "
@@ -1726,8 +1804,8 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
             by_key[page.key] = page
     if raw_md:
         problems.append(tr(
-            "{a0} файл(ов) .md рядом с HTML без front matter — это файлы, а не "
-            "страницы (сайт отдаёт их как есть), не проверялись: {a1}",
+            "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт "
+            "как есть, а не страницы; не проверялись: {a1}",
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
     pages.sort(key=lambda p: p.url)
     return pages, problems
@@ -1762,15 +1840,29 @@ _ERROR_PAGE = re.compile(
     r"(\.html?|/index\.html?)$", re.I)
 
 
-def _drop_raw_markdown(pages: list) -> tuple:
+# Каталоги вложений: `.md` в них — пример или ресурс (Docsify `_media`), а не страница.
+_ASSET_DIRS = {"_media", "_assets", "assets", "_static", "static", "_images", "images",
+               "_files", "files", "_attachments", "_resources"}
+
+
+def _drop_raw_markdown(pages: list, root: str = None) -> tuple:
     """
     `.md` рядом со сборкой HTML без front matter — файл, а не исходник:
     `auth.md`, `llms.md`, markdown-двойники страниц для агентов. Jekyll и Hugo
     без front matter такой файл страницей не делают, и живой сайт отдаёт его
     как text/markdown. Где HTML нет, markdown — исходник, и он читается.
     """
-    if not any(p.path.lower().endswith((".html", ".htm")) for p in pages):
+    html = [p for p in pages if p.path.lower().endswith((".html", ".htm"))]
+    if not html:
         return pages, []
+    md = [p for p in pages if p.path.lower().endswith((".md", ".markdown"))]
+    # Сборка, а не исходники: HTML-страниц не меньше, чем markdown. Тогда .md —
+    # то, что генератор положил рядом: `index.source.md` Hugo у каждой
+    # страницы, двойники для агентов. Ничто в готовой сборке .md страницей
+    # не делает, с шапкой он или без.
+    built = len(html) >= len(md)
+    page_dirs = {os.path.dirname(p.path) for p in html
+                 if os.path.basename(p.path).lower().startswith("index.")}
     kept, dropped = [], []
     for page in pages:
         if page.path.lower().endswith((".md", ".markdown")):
@@ -1779,7 +1871,11 @@ def _drop_raw_markdown(pages: list) -> tuple:
                     head = fh.read(8).lstrip(b"\xef\xbb\xbf")
             except OSError:
                 head = b""
-            if not head.startswith((b"---", b"+++")):
+            folder = os.path.dirname(page.path)
+            asset = any(part.lower() in _ASSET_DIRS for part in
+                        os.path.relpath(folder, root or os.path.dirname(html[0].path)).split(os.sep))
+            if (built or folder in page_dirs or asset
+                    or not head.startswith((b"---", b"+++"))):
                 dropped.append(page.path)
                 continue
         kept.append(page)

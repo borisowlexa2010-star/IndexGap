@@ -188,6 +188,27 @@ def is_multilingual(pages: list) -> bool:
     return sum(1 for langs_here in seen.values() if len(langs_here) >= 2) >= 2
 
 
+def _canonical_to_a_sibling(page, keys) -> bool:
+    """
+    Закрыта ли страница тем, что canonical отдан версии на другом языке.
+
+    Это и есть конфликт, который губит кластер: поисковик выбрасывает перевод.
+    Печатная копия с canonical на основную страницу того же языка — не конфликт,
+    а вариант, и её hreflang поисковик просто не читает.
+    """
+    if page.noindex or not page.canonical:
+        return False
+    target = url_key(page.canonical)
+    if target not in keys:
+        return False
+    own = (page.lang or "").lower().split("-")[0]
+    for code, href in read_alternates(page):
+        if href and url_key(href) == target:
+            lang = code.lower().split("-")[0]
+            return lang not in (own, "x")
+    return False
+
+
 def check(pages: list, cfg: dict = None) -> dict:
     """Все проверки hreflang разом. Возвращает находки, заметки и пары-регионы."""
     issues, notes = [], []
@@ -257,11 +278,17 @@ def check(pages: list, cfg: dict = None) -> dict:
                               a0=len(members), a1=len(targets),
                               a2=", ".join(sample))))
 
+    from .publish import indexable
     for page in pages:
         keys = targets.get(page.key)
         if keys is None:
             continue
         if page.key in static_cluster:
+            continue
+        # hreflang закрытой или неканонической страницы поисковик не читает:
+        # печатные копии Hugo и старые версии документации Docusaurus давали
+        # тысячи «нет обратной ссылки» там, где связей и не должно быть.
+        if not indexable(page) and not _canonical_to_a_sibling(page, keys):
             continue
 
         if page.key not in keys:

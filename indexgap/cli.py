@@ -477,7 +477,7 @@ def cmd_check(args):
             sitemap_urls = sm["urls"]
         else:
             print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
-        _warn_undeclared(args.robots or _guess_robots(args), args.sitemap)
+        _warn_undeclared(args.robots or _guess_robots(args), args.sitemap, args.root, args.site)
     if sitemap_urls is not None or by_engine or by_source or cited:
         funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                       by_engine=by_engine, by_source=by_source,
@@ -784,7 +784,7 @@ def cmd_doctor(args):
         for error in sm["errors"]:
             print(tr("  ! sitemap не прочитан: {a0}", a0=error))
         sitemap_urls = sm["urls"]
-        _warn_undeclared(_guess_robots(args), args.sitemap)
+        _warn_undeclared(_guess_robots(args), args.sitemap, args.root, args.site)
     by_engine, by_source, cited, impressions = _collect_indexed(args)
     if sitemap_urls is None and not by_engine and not by_source and not cited:
         raise SourceError(
@@ -881,9 +881,31 @@ def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:
             print(tr("         … и ещё {a0}", a0=len(urls) - limit))
 
 
-def _warn_undeclared(robots_path: str, given) -> None:
+def _not_in_build(url: str, root: str, site: str) -> bool:
+    """Файл по этому адресу сайта в сборке отсутствует (адрес на хосте --site)."""
+    from urllib.parse import unquote, urlsplit
+    if not root or not site:
+        return False
+    if url_key(url).split("/")[2:3] != url_key(site).split("/")[2:3]:
+        return False
+    base = urlsplit(site).path.rstrip("/")
+    path = unquote(urlsplit(url).path)
+    if base and path.startswith(base + "/"):
+        path = path[len(base):]
+    return not os.path.isfile(os.path.join(root, path.lstrip("/")))
+
+
+def _warn_undeclared(robots_path: str, given, root: str = None, site: str = None) -> None:
     """robots.txt объявляет sitemap-файлы, которых сверке не передали."""
     missing = doctor.undeclared_sitemaps(robots_path, given)
+    absent = [u for u in missing if _not_in_build(u, root, site)]
+    missing = [u for u in missing if u not in absent]
+    for url in absent:
+        # evan-moon.github.io: robots.txt называет sitemap-index.xml, а в сборке
+        # его нет — живой сайт отвечает 404. Советовать «добавь --sitemap» нельзя.
+        print(tr("  ! robots.txt указывает на sitemap, которого нет в сборке: {a0} — "
+                 "на живом сайте это скорее всего 404. Исправь строку Sitemap: или "
+                 "собери этот файл", a0=url))
     if not missing:
         return
     print(tr("  ! robots.txt объявляет ещё {a0} sitemap-файл(а), которых нет в "

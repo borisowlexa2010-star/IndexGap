@@ -271,6 +271,9 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "  ! robots.txt указывает на sitemap, которого нет в сборке: {a0} — на живом сайте это скорее всего 404. Исправь строку Sitemap: или собери этот файл":
+        "  ! robots.txt points at a sitemap that is not in the build: {a0} — on the "
+        "live site it is most likely a 404. Fix the Sitemap: line or build that file",
     "{a0}: сюда нельзя записать манифест — sitemap не строился. Укажи другое место через --manifest.":
         "{a0}: the manifest cannot be written here — the sitemap was not built. "
         "Choose another place with --manifest.",

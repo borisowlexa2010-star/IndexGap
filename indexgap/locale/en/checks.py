@@ -67,6 +67,19 @@ MESSAGES = {
         "links to pages that are not in the build: {a0} — {a1}{a2}. On the live "
         "site they are 404s unless the server redirects them",
     "слишком глубокая вложенность": "nesting too deep",
+    "раздел {a0}: закрыто от индекса {a1} страниц из {a2}. Похоже на решение, а не на ошибку — старые версии документации, черновики, служебные копии. Если так и задумано, делать ничего не нужно; находки noindex там понижены до сведений":
+        "section {a0}: {a1} of {a2} pages are closed to indexing. That looks like a "
+        "decision, not a mistake — old documentation versions, drafts, service copies. "
+        "If it is intended, nothing needs doing; the noindex findings there are "
+        "lowered to info",
+    "копия страницы {a0}: canonical указывает на неё, и та в сборке открыта — так и должно быть, если это вариант (печатная версия, второй адрес)":
+        "a copy of {a0}: the canonical points there, and that page is open in the "
+        "build — as it should be if this is a variant (a print version, a second address)",
+    "ссылки на страницах не несут префикса {a0}: сайт живёт под ним, а ссылки ведут от корня домена — на живом сайте это 404. Задай базовый путь в генераторе (pathPrefix, baseURL, basePath) и пересобери. Из-за этого же все страницы выглядят сиротами.":
+        "the links on the pages lack the prefix {a0}: the site lives under it, but "
+        "the links start at the domain root — on the live site they are 404s. Set "
+        "the base path in the generator (pathPrefix, baseURL, basePath) and rebuild. "
+        "This is also why every page looks like an orphan.",
     "ни одна внутренняя ссылка не ведёт на страницу":
         "no internal link points at this page",
     "объём текста ≈ {a0} — тонкая страница":

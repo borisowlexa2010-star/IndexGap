@@ -14,9 +14,9 @@ MESSAGES = {
         "    Try: --site https://{a1}",
     "{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен":
         "{a0} and {a1} produce the same URL {a2} — kept {a3}, skipped the other",
-    "{a0} файл(ов) .md рядом с HTML без front matter — это файлы, а не страницы (сайт отдаёт их как есть), не проверялись: {a1}":
-        "{a0} .md file(s) beside the HTML have no front matter — they are files, "
-        "not pages (the site serves them as they are), and were not checked: {a1}",
+    "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт как есть, а не страницы; не проверялись: {a1}":
+        "{a0} .md file(s) beside the built HTML are files the site serves as they "
+        "are, not pages; not checked: {a1}",
     "{a0}: не удалось определить кодировку. Пересохрани файл в UTF-8.":
         "{a0}: could not determine the encoding. Re-save the file as UTF-8.",
     "{a0}: файл не читается ({a1}).":
@@ -28,6 +28,7 @@ MESSAGES = {
         "character; the rest of the text was read as UTF-8",
     "{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись":
         "{a0}: the directory could not be read ({a1}) — its pages were not checked",
+    "canonical не разбирается как адрес: {a0}": "the canonical cannot be parsed as an address: {a0}",
     "файл прочитан как {a0}, а не UTF-8":
         "read as {a0}, not UTF-8",
     "фронтматтер не распознан":
