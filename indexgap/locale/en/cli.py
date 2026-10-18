@@ -271,6 +271,7 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "{a0} {a1}: такого файла нет.": "{a0} {a1}: there is no such file.",
     "  Порядок: сначала деплой — и проверь, что изменённая страница и файл ключа уже открываются на сайте, — потом --send. Отправленное отмечается, и после раннего --send поисковик обойдёт старую версию.":
         "  Order: deploy first — and check that the changed page and the key file "
         "already open on the site — then --send. What is sent is marked, and after an "

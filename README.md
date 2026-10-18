@@ -45,7 +45,8 @@ pipx install indexgap
 PATH — `pip install` into a system Python is refused outright on most current
 distributions. If you do not have it: `python3 -m pip install --user pipx`.
 To work from the `main` branch instead: `git clone` the repository and
-`pip install -e .`
+`pipx install -e .` in it (or run it without installing:
+`PYTHONPATH=/path/to/IndexGap python3 -m indexgap`).
 
 **See it work before pointing it at your own site.** The repository carries a
 ten-page demo with one of each common failure planted in it:
@@ -136,6 +137,15 @@ indexgap check --baseline indexgap-baseline.json --strict
 A finding is matched by page, check and level, not by its wording, so a
 changed number in the message does not make it new. The run prints what
 appeared and what is gone, and both go into the JSON under `baseline`.
+
+Exit codes: `0` — the run finished (findings or not); `1` — `--strict` and there
+are critical findings (only new ones, with `--baseline`); `2` — the input is
+wrong: a directory or a file that is not there (a typo in `--sitemap` or
+`--robots` included), a site address without a scheme, a foreign file where a
+report would be written, or a portfolio where no project could be checked;
+`130` — interrupted. The JSON carries `"schema": 2`; it changes only when the
+meaning of a field does. Steps of the funnel and cross-engine rows have stable
+`id`s — the `name` beside them is translated. For machines, run with `--lang en`.
 
 On GitHub it is one step. The summary — counts, new critical findings, the most
 frequent checks — appears on the run page, and the HTML report is kept as an
