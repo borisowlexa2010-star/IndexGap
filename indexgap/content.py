@@ -176,10 +176,17 @@ def _numbers_in(text: str, fact_pattern) -> dict:
     return found
 
 
+_SCALE = re.compile(r"(?:\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|/\s?)(?:5|10|100)\b(?!\s?%)",
+                    re.I)
+
+
 def _generic_numbers_in(text: str) -> dict:
     """«Число + любое слово» — второй эшелон: слабее сигнал, но покрывает всё."""
     found = {}
-    for match in GENERIC_FACT.finditer(text or ""):
+    # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
+    # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
+    text = _SCALE.sub(" ", text or "")
+    for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
             continue

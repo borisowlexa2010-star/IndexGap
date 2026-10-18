@@ -170,6 +170,74 @@ _SEARCH_ENGINES = ("googlebot", "bingbot", "yandex", "yandexbot", "duckduckbot",
                    "baiduspider", "slurp", "applebot")
 
 
+def _robots_pattern(rule: str):
+    """Правило robots.txt по правилам Google: `*` — что угодно, `$` — конец адреса."""
+    anchored = rule.endswith("$")
+    body = rule[:-1] if anchored else rule
+    regex = "".join(".*" if ch == "*" else re.escape(ch) for ch in body)
+    return re.compile(regex + ("$" if anchored else ""))
+
+
+def _robots_group(robots: dict, agent: str = "googlebot") -> dict:
+    """Своя группа агента сильнее общей `*`: Google читает только одну."""
+    rules = robots.get("rules") or {}
+    return rules.get(agent) or rules.get("*") or {}
+
+
+def robots_allows(robots: dict, path: str, agent: str = "googlebot") -> bool:
+    """Пускает ли robots.txt агента по адресу."""
+    return not blocking_rule(robots, path, agent)
+
+
+def blocking_rule(robots: dict, path: str, agent: str = "googlebot") -> str:
+    """
+    Правило Disallow, которое закрывает адрес, или пустая строка. Самое
+    длинное совпавшее правило побеждает; при равной длине — Allow. Пустой
+    `Disallow:` не запрещает ничего.
+    """
+    group = _robots_group(robots, agent)
+    best, verdict = -1, True
+    for field, allowed in (("disallow", False), ("allow", True)):
+        for rule in group.get(field) or ():
+            rule = rule.strip()
+            if not rule:
+                continue
+            if _robots_pattern(rule).match(path):
+                length = len(rule)
+                if length > best or (length == best and allowed):
+                    best, verdict = length, ("" if allowed else rule)
+    return "" if verdict is True else verdict
+
+
+def check_blocked_pages(pages: list, robots: dict) -> list:
+    """
+    Страницы сборки, которые robots.txt не пускает обходить.
+
+    `Disallow: /compare/` при шестидесяти таких страницах в sitemap пакет
+    пропускал: правила он разбирал, но смотрел только на `Disallow: /`.
+    Страница, закрытая обходом, в индекс не попадёт с текстом — поисковик его
+    не прочитает, а noindex на ней не увидит. Закрытую noindex страницу и
+    полный запрет сайта (о нём отдельная находка) здесь не повторяем.
+    """
+    from urllib.parse import urlsplit
+    from .publish import indexable
+    if not robots.get("found") or _blocks_everything(_robots_group(robots)):
+        return []
+    issues = []
+    for page in sorted(pages, key=lambda p: p.url):
+        if not indexable(page):
+            continue
+        parts = urlsplit(page.url)
+        path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        verdict = blocking_rule(robots, path)
+        if verdict:
+            issues.append(("critical", page.url, "robots-blocks-page",
+                           tr("robots.txt не пускает поисковик на страницу (правило "
+                              "«Disallow: {a0}») — текст он не прочитает, ссылки и sitemap "
+                              "ведут сюда зря", a0=verdict)))
+    return issues
+
+
 def check_robots(robots: dict) -> list:
     """Находки по robots.txt: кого закрыли и что из-за этого теряется."""
     issues = []
@@ -213,6 +281,24 @@ def _first_sentence(text: str) -> str:
     return parts[0] if parts else ""
 
 
+_DATELINE = re.compile(
+    r"^\s*(?:last\s+)?(?:updated|published|posted|modified|reviewed|written|by\b|"
+    r"обновлено|опубликовано|дата|автор|aktualisiert|veröffentlicht|mis à jour|publié|"
+    r"actualizado|publicado)", re.I)
+_DATE_ONLY = re.compile(
+    r"^[\s\d.,/:\-–—·|]*(?:[A-Za-zА-Яа-яЁё]+[\s\d.,/:\-–—·|]*){0,4}$")
+
+
+def _is_dateline(text: str) -> bool:
+    """Строка даты или подписи над статьёй: короткая и про время, а не про суть."""
+    text = text.strip()
+    if len(text) > 100:
+        return False
+    if _DATELINE.match(text):
+        return True
+    return bool(re.search(r"\d{4}", text)) and bool(_DATE_ONLY.match(text)) and len(text) < 40
+
+
 def check_answer(page, cfg: dict = None) -> list:
     """
     Прямой ответ в первом абзаце.
@@ -222,7 +308,10 @@ def check_answer(page, cfg: dict = None) -> list:
     что первый абзац должен отвечать на запрос, а не разгоняться.
     """
     cfg = {**CONFIG, **(cfg or {})}
-    paragraphs = [p for p in (page.paragraphs or []) if len(p) > 20]
+    # Строка «Updated September 2026» или «Published 12 March · 5 min read»
+    # перед первым абзацем — не ответ: на 98% страниц каталога первым
+    # абзацем бралась она, и `answer-short` закрывал собой `answer-preamble`.
+    paragraphs = [p for p in (page.paragraphs or []) if len(p) > 20 and not _is_dateline(p)]
     if not paragraphs:
         return [("warning", page.url, "no-answer",
                  tr("не нашёл ни одного абзаца — цитировать нечего"))]
@@ -415,7 +504,7 @@ def run(pages: list, robots_path: str = "", cfg: dict = None) -> dict:
     """Все проверки машинной читаемости разом."""
     cfg = {**CONFIG, **(cfg or {})}
     robots = read_robots(robots_path)
-    issues = check_robots(robots)
+    issues = check_robots(robots) + check_blocked_pages(pages, robots)
     for page in sorted(pages, key=lambda p: p.url):
         # Пустую оболочку `checks` уже назвал по имени. Оценивать её прямой
         # ответ и извлекаемость бессмысленно: оценивать нечего.

@@ -164,6 +164,8 @@ MESSAGES = {
         "The model's reply was left in place of the page text: “As an AI language model…”, “Certainly! Here is…”. Such a page is obvious at a glance and must not be published.",
     "Часть текста прочитана не в той кодировке: «CafÃ©», «â€™». Обычно это данные, сохранённые в UTF-8 и прочитанные как Latin-1 где-то в конвейере.":
         "Part of the text was read in the wrong encoding: “CafÃ©”, “â€™”. Usually it is data saved as UTF-8 and read as Latin-1 somewhere in the pipeline.",
+    "robots.txt не пускает поисковик на эту страницу: она есть в сборке и, скорее всего, в sitemap, но текст её прочитан не будет.":
+        "robots.txt does not let the search engine into this page: it is in the build and most likely in the sitemap, but its text will not be read.",
     "На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела.":
         "No internal link points at this page. It is in the sitemap, but the "
         "crawler will not get there. Link to it from the section's hub pages.",

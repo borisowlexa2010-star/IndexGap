@@ -42,6 +42,8 @@ MESSAGES = {
         "Regenerate or rewrite this text. In the pipeline, drop model replies that refuse or open with a preamble before they reach the template.",
     "Найди шаг конвейера, где UTF-8 читается как Latin-1 или cp1252 (обычно импорт CSV или ответ API), и укажи кодировку явно. Пересобери страницы.":
         "Find the pipeline step where UTF-8 is read as Latin-1 or cp1252 (usually a CSV import or an API response) and set the encoding explicitly. Rebuild the pages.",
+    "Найди правило Disallow, которое закрывает этот раздел, и реши: если раздел должен быть в поиске — убери правило; если нет — убери страницы из sitemap и поставь на них noindex (его поисковик увидит, только если обход разрешён).":
+        "Find the Disallow rule that closes this section and decide: if the section belongs in search, remove the rule; if not, take the pages out of the sitemap and put noindex on them (the engine sees it only if crawling is allowed).",
     "Поставь ссылки на эту страницу с хабовых страниц раздела. Анкор — описательный, не «подробнее».":
         "Link to this page from the section's hub pages. Make the anchor "
         "descriptive, not “read more”.",

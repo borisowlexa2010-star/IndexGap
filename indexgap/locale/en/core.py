@@ -29,6 +29,8 @@ MESSAGES = {
     "{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись":
         "{a0}: the directory could not be read ({a1}) — its pages were not checked",
     "canonical не разбирается как адрес: {a0}": "the canonical cannot be parsed as an address: {a0}",
+    "{a0} закрывает от индекса {a1} страниц(ы) заголовком X-Robots-Tag: noindex — правило {a2}":
+        "{a0} closes {a1} page(s) to indexing with an X-Robots-Tag: noindex header — rule {a2}",
     "файл прочитан как {a0}, а не UTF-8":
         "read as {a0}, not UTF-8",
     "фронтматтер не распознан":

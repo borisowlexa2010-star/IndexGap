@@ -1682,6 +1682,123 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
     return page
 
 
+# ── X-Robots-Tag из файлов хостинга ──────────────────────────────────────────
+
+def _route_regex(pattern: str):
+    """`/glossary/*` (Netlify) или `/glossary/(.*)`, `/:slug*` (Vercel) → выражение."""
+    out, i = [], 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if pattern.startswith("(.*)", i):
+            out.append(".*")
+            i += 4
+            continue
+        if ch == "*":
+            out.append(".*")
+        elif ch == ":":
+            m = re.match(r":\w+(\*|\+)?", pattern[i:])
+            if m:
+                out.append(".*" if m.group(1) else "[^/]+")
+                i += len(m.group(0))
+                continue
+            out.append(re.escape(ch))
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return re.compile("".join(out) + "$")
+
+
+_TOML_FOR = re.compile(r"""^\s*for\s*=\s*["']([^"']+)["']""", re.M)
+_TOML_TAG = re.compile(r"""X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def _closes(value: str) -> bool:
+    directives = re.split(r"[,\s]+", (value or "").lower())
+    return "noindex" in directives or "none" in directives
+
+
+def header_noindex_rules(root: str) -> list:
+    """
+    Правила X-Robots-Tag: noindex из `_headers` (Netlify, Cloudflare Pages),
+    `netlify.toml` и `vercel.json` — в сборке и уровнем выше.
+
+    Тот же noindex, отданный заголовком, был невидим: 88 страниц глоссария
+    закрывались из `_headers`, а отчёт показывал их открытыми.
+    """
+    rules = []
+    near = [root, os.path.dirname(os.path.abspath(root))]
+    headers = os.path.join(root, "_headers")
+    if os.path.isfile(headers):
+        try:
+            text, _ = read_text(headers)
+        except SourceError:
+            text = ""
+        current = None
+        for line in text.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if not line[:1].isspace():
+                current = line.strip()
+                continue
+            name, _, value = line.strip().partition(":")
+            if current and name.strip().lower() == "x-robots-tag" and _closes(value):
+                path = urlsplit(current).path if "://" in current else current
+                rules.append((_route_regex(path), "_headers", current))
+    for folder in near:
+        toml = os.path.join(folder, "netlify.toml")
+        if not os.path.isfile(toml):
+            continue
+        try:
+            text, _ = read_text(toml)
+        except SourceError:
+            text = ""
+        for block in text.split("[[headers]]")[1:]:
+            block = block.split("[[", 1)[0]
+            where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)
+            if where and tag and _closes(tag.group(1)):
+                rules.append((_route_regex(where.group(1)), "netlify.toml", where.group(1)))
+        break
+    for folder in near:
+        vercel = os.path.join(folder, "vercel.json")
+        if not os.path.isfile(vercel):
+            continue
+        try:
+            data = json.loads(read_text(vercel)[0])
+        except (SourceError, ValueError, RecursionError):
+            data = {}
+        for entry in (data.get("headers") if isinstance(data, dict) else None) or []:
+            if not isinstance(entry, dict) or not isinstance(entry.get("source"), str):
+                continue
+            for header in entry.get("headers") or []:
+                if (isinstance(header, dict)
+                        and str(header.get("key", "")).lower() == "x-robots-tag"
+                        and _closes(str(header.get("value", "")))):
+                    rules.append((_route_regex(entry["source"]), "vercel.json", entry["source"]))
+        break
+    return rules
+
+
+def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -> None:
+    rules = header_noindex_rules(root)
+    if not rules:
+        return
+    base = urlsplit(base_url).path.rstrip("/")
+    hits = Counter()
+    for page in pages:
+        path = urlsplit(page.url).path
+        if base and path.startswith(base + "/"):
+            path = path[len(base):]
+        for regex, source, pattern in rules:
+            if regex.match(path) or regex.match(path.rstrip("/")):
+                if not page.noindex:
+                    page.robots = (page.robots + ",noindex").strip(",")
+                hits[(source, pattern)] += 1
+                break
+    for (source, pattern), n in sorted(hits.items()):
+        problems.append(tr("{a0} закрывает от индекса {a1} страниц(ы) заголовком "
+                           "X-Robots-Tag: noindex — правило {a2}", a0=source, a1=n, a2=pattern))
+
+
 def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     """
     Адрес плоской страницы `filter.html` — в той форме, в какой на неё
@@ -1778,6 +1895,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS) -> tuple:
     # сырой файл — и страница пропадала вовсе.
     loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded, root)
     _settle_flat_urls(loaded, root, base_url)
+    _apply_header_rules(loaded, root, base_url, problems)
     if fragments:
         problems.append(tr(
             "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; "
