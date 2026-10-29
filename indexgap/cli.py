@@ -945,6 +945,16 @@ def cmd_doctor(args):
             print(tr("         Выгрузка показывает прошлое. Что из этого уже исправлено, "
                      "покажет --live (проверит каждый адрес по сети)."))
 
+    specs = list(getattr(args, "indexed", None) or [])
+    if getattr(args, "gsc", None):
+        specs.append(f"google={args.gsc}")
+    near = doctor.near_page_one(specs, pages, args.site)
+    if near:
+        print(tr("\nУ первой страницы выдачи — {a0} страниц(ы): позиция 8–20 и показы есть. "
+                 "Доработать их дешевле, чем писать новые:", a0=len(near)))
+        for row in near[:10]:
+            print(f"  {row['position']:>5}  {row['impressions']:>7}  {row['url']}")
+
     if causes:
         print(tr("\nПочему у страниц нет показов:") if funnel_result.get("impressions_only")
               else tr("\nПочему страницы не в индексе:"))
@@ -961,7 +971,8 @@ def cmd_doctor(args):
     json_path = report_pair(args.out)[1]
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
-                            "foreign": foreign, "live": live, "notes": notes})
+                            "foreign": foreign, "live": live, "near_page_one": near,
+                            "notes": notes})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     print(tr("Проверки текста здесь не запускались — это делает `indexgap check`."))
     return 0
@@ -1144,6 +1155,12 @@ def cmd_plan(args):
         print(f"    {n:>5}  {reason}")
     for warning in audit["warnings"]:
         print(f"  ! {warning}")
+    intents = Counter(generate.query_intent(k) for _i, k, _s, _r in audit["keep"])
+    if audit["keep"]:
+        # Подсказка, с чего начинать: страницы под покупку приводят клиентов.
+        print(tr("Намерение запросов: покупка {a0}, выбор {a1}, информация {a2}, неясно {a3}",
+                 a0=intents["transactional"], a1=intents["commercial"],
+                 a2=intents["informational"], a3=intents[""]))
     if audit["near_synonyms"]:
         print(tr("\nОдин интент, разные формулировки (показаны первые 10 из {a0}):", a0=len(audit['near_synonyms'])))
         for a, b, _ in audit["near_synonyms"][:10]:
@@ -1153,7 +1170,8 @@ def cmd_plan(args):
     if args.json:
         _write_json(args.json, {
             "total": audit["total"],
-            "keep": [{"row": i + 2, "keyword": k, "slug": s} for i, k, s, _ in audit["keep"]],
+            "keep": [{"row": i + 2, "keyword": k, "slug": s, "intent": generate.query_intent(k)}
+                     for i, k, s, _ in audit["keep"]],
             "rejected": audit["rejected"],
             "near_synonyms": [{"kept": a, "dropped": b} for a, b, _ in audit["near_synonyms"]],
             "warnings": audit["warnings"],

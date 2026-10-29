@@ -791,6 +791,65 @@ def read_sources(specs: list, site: str = "") -> dict:
             "notes": notes, "unlabeled": sorted(unlabeled)}
 
 
+_POSITION_WORDS = ("position", "позиция", "posición", "posizione", "positie", "pozycja",
+                   "掲載順位", "排名", "순위")
+NEAR_FROM, NEAR_TO, NEAR_MIN_IMPRESSIONS = 8.0, 20.0, 50
+
+
+def _number(cell) -> float:
+    text = str(cell or "").strip().replace("\u00a0", "").replace(" ", "").rstrip("%")
+    if "," in text and "." not in text:
+        text = text.replace(",", ".")
+    text = text.replace(",", "")
+    try:
+        return float(text)
+    except ValueError:
+        return -1.0
+
+
+def near_page_one(specs: list, pages: list, site: str = "") -> list:
+    """
+    Страницы у первой страницы выдачи: средняя позиция 8–20 и заметные показы.
+
+    Берётся из выгрузки показов («Эффективность → Страницы»), где есть столбцы
+    показов и позиции. Страница там уже нравится поисковику: доработать её
+    дешевле, чем написать новую. Учитываются только страницы, которые есть в
+    сборке, — исчезнувшие этим списком не чинятся.
+    """
+    from urllib.parse import urljoin
+    built = {p.key: p.url for p in pages}
+    best = {}
+    for spec in specs or ():
+        _name, path = sources.parse_spec(spec)
+        try:
+            rows, _ = _read_rows(path)
+        except SourceError:
+            continue
+        if not rows:
+            continue
+        header = [str(h or "").strip().lower() for h in rows[0]]
+        imp = next((i for i, h in enumerate(header)
+                    if any(w in h for w in _IMPRESSION_WORDS)), None)
+        pos = next((i for i, h in enumerate(header)
+                    if any(w in h for w in _POSITION_WORDS)), None)
+        col, start = _url_column(rows)
+        if imp is None or pos is None or col is None:
+            continue
+        for row in rows[start:]:
+            if max(col, imp, pos) >= len(row):
+                continue
+            key = url_key(urljoin(site or "", str(row[col]).strip()))
+            if key not in built:
+                continue
+            impressions, position = _number(row[imp]), _number(row[pos])
+            if NEAR_FROM <= position <= NEAR_TO and impressions >= NEAR_MIN_IMPRESSIONS:
+                current = best.get(key)
+                if current is None or impressions > current["impressions"]:
+                    best[key] = {"url": built[key], "impressions": int(impressions),
+                                 "position": round(position, 1)}
+    return sorted(best.values(), key=lambda r: (-r["impressions"], r["url"]))
+
+
 _IMPRESSION_WORDS = ("impression", "impr", "показ", "impresion", "impress",
                      "affichage", "wyświetl", "vertoning", "gösterim", "visning",
                      "表示回数", "展示", "曝光", "노출", "การแสดงผล")

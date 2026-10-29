@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.15.0 — 2026-10-29
+
+Nine additions from a public list of 232 SEO tactics, sorted by one rule: what
+a build-time, offline tool can check honestly for a programmatic site. Most of
+the list is outreach, reviews and video — not this package's job. Twenty-odd
+items were already covered; these were not.
+
+* **`jsonld-mismatch`** (warning). The markup names an Offer price, an aggregate
+  rating or a review count the visible text does not contain, in any spelling —
+  `1,600`, `1 600` and `1600.00` are one number. Google's guidelines require
+  markup to describe what the reader sees; generated markup drifts when the
+  template takes it from one dataset column and the text from another.
+* **`hub-missing-links`** (warning). A section page — `/plumbing/` — that does
+  not link to some of its pages. One finding per section, naming them. Links
+  from the section's pagination and from listing pages inside it (five or more
+  links to the section's pages, as alphabetical indexes have) count. On dplyr's
+  built site: 32 of 116 reference pages that the reference index does not list.
+* **`stale-year`** (warning). "Best plumbers 2024" in 2026: a past year at the
+  end of a title or H1, after "in"/"for", or next to best/top/prices/guide. A
+  page with an earlier publication date, or with the year in its address, is
+  history and is not reported; neither are "Windows 2000" or "since 2015".
+* **`title-h1-mismatch`** (info): the title and the H1 share no word, with
+  word forms (`plumber`/`plumbers`) and article prefixes (`أدلة`/`الأدلة`) taken
+  into account.
+* **`no-og`** (info): no og:title or og:image. **`no-viewport`** (warning): no
+  meta viewport — Google indexes the mobile version.
+* **`heavy-html`** (warning): HTML over 2 MB — Googlebot reads the first 2 MB of
+  a file (Google's documentation, updated 2026-02-03). **`heavy-images`** (info,
+  one per site): images over 1 MB in the build, the heaviest named.
+* **`doctor`: near page one.** From a Search Console Performance → Pages export,
+  pages at average positions 8–20 with at least 50 impressions, most impressions
+  first — the cheapest pages to improve. Printed and written to the JSON as
+  `near_page_one`.
+* **`plan`: query intent.** Every kept keyword is labelled transactional (buy,
+  price, near me, купить, цена), commercial (best, vs, reviews, лучшие, отзывы),
+  informational (how, what, как, что) or left unlabelled; the counts are printed
+  and the label is in the JSON, so the pages that bring customers can be
+  generated first. Whole words only: "bestiary" is not "best".
+
+Checked against ten built sites (APISIX, dplyr, hugo-theme-relearn, Zola,
+MkDocs, eventiq.io, rumors.app, a 4,312-page visa catalogue, this package's own
+docs): `no-viewport` and `jsonld-mismatch` stayed silent, as they should; two
+false alarms the run found — a blog post about a past year, an Arabic article
+prefix — were fixed before release. The demo site's titles lost their "in 2026"
+so the demo does not age into `stale-year`, and gained a viewport. This
+package's own docs had no og:image on any of 85 pages; they have a card now.
+
+941 tests on 3.9, 3.12 and 3.15.
+
 ## 1.14.0 — 2026-10-19
 
 **Big sites fit.** The scale reviewer generated programmatic sites of 5,000 to

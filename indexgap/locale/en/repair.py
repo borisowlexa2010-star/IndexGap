@@ -62,6 +62,22 @@ MESSAGES = {
         "Keep the ordinary links to neighbouring pages and hubs: a link does not make pages different, but it does not hurt them either.",
     "Страницы группы (наибольшее совпадение с другой страницей группы):":
         "Pages of the group (the highest similarity to another page of the group):",
+    "Бери числа разметки из того же поля строки данных, что и текст страницы. Если на странице цены нет — убери её и из разметки, а не наоборот.":
+        "Take the markup's numbers from the same field of the data row as the page text. If the page shows no price, remove it from the markup too, not the other way round.",
+    "Пусть шаблон раздела выводит ссылки на все страницы раздела — списком, по алфавиту или с пагинацией. Ссылки только из sitemap и случайных блоков «похожие» не в счёт.":
+        "Make the section template link to every page of the section — as a list, alphabetically or with pagination. Links only from the sitemap and stray \"related\" blocks do not count.",
+    "Убери год из шаблона заголовка или подставляй текущий из данных сборки. Если страница — история того года, поставь ей дату публикации.":
+        "Drop the year from the heading template or fill in the current one from the build's data. If the page is that year's history, give it a publication date.",
+    "Своди title и H1 к одному обещанию: пусть оба берут главный запрос строки, а бренд остаётся в хвосте title.":
+        "Make the title and the H1 one promise: both take the row's main query, and the brand stays at the end of the title.",
+    "Добавь в шаблон og:title и og:image — картинку страницы или раздела, не логотип на все страницы.":
+        "Add og:title and og:image to the template — an image of the page or the section, not one logo for every page.",
+    "Добавь в шаблон <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">.":
+        "Add <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> to the template.",
+    "Найди, что раздувает HTML: встроенные данные для гидратации, inline-SVG, огромные таблицы. Вынеси их в отдельные файлы или разбей страницу.":
+        "Find what inflates the HTML: embedded hydration data, inline SVG, huge tables. Move them to separate files or split the page.",
+    "Сожми картинки и отдай WebP или AVIF; для превью — отдельные уменьшенные копии.":
+        "Compress the images and serve WebP or AVIF; make separate small copies for previews.",
     "Поставь ссылки на эту страницу с хабовых страниц раздела. Анкор — описательный, не «подробнее».":
         "Link to this page from the section's hub pages. Make the anchor "
         "descriptive, not “read more”.",

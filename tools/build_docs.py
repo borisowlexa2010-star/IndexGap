@@ -117,6 +117,22 @@ WHY = {
    "The page hands its accumulated weight to a different URL and drops out of "
    "the index itself. On a generated site this is nearly always one wrong line "
    "in the template, repeated across every page it produced.",
+ "jsonld-mismatch":
+   "Structured data that disagrees with the page: an Offer price, an aggregate rating or a review count in the JSON-LD that the visible text does not contain, in any spelling (`1,600`, `1 600`, `1600.00` are one number). Google's guidelines require markup to describe what the reader sees; on a generated site the two drift apart when the template takes the markup from one dataset column and the text from another. Ratings of individual reviews are not judged.",
+ "hub-missing-links":
+   "A section page — `/plumbing/` — that does not link to some of the pages under it. They are found only through the sitemap or a stray link, and the section passes them none of its weight. A link counts from the section page itself, from its pagination (`/plumbing/page/2/`) and from any listing page in the section that links to five or more of its pages, as alphabetical indexes do. One finding per section, naming the pages it misses.",
+ "stale-year":
+   "A past year in the title or the H1 presented as freshness — at the end of the title, after \"in\"/\"for\", or next to words like best, top, prices, guide. It is the template nobody updated in January. A page that carries a publication date in that same year is history, not staleness, and is not reported; neither are years that are names (\"Windows 2000\") or starting points (\"since 2015\").",
+ "title-h1-mismatch":
+   "The title and the H1 share no word once the brand segment and stop words are set aside. Search engines rewrite titles that do not match the page, and a generator that fills the two from different fields is the usual cause. Info: sometimes it is a deliberate choice.",
+ "no-og":
+   "No og:title or og:image on a built page. Search does not use them, but every share of the page in a messenger or a social network does, and a programmatic site is shared page by page. Info, collapsed when the template lacks them everywhere.",
+ "no-viewport":
+   "No `<meta name=\"viewport\">`: the page renders as a shrunken desktop on a phone. Google indexes the mobile version, so this is a warning, and on a generated site it is one line in the template.",
+ "heavy-html":
+   "An HTML file over 2 MB. Googlebot reads the first 2 MB of a supported file and indexes what it has read — Google's own documentation, updated 2026-02-03. Hydration payloads embedded in the page are the usual cause on modern frameworks.",
+ "heavy-images":
+   "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads.",
  "broken-link":
    "A link into a section of the build that points at a page the build does "
    "not have is a 404 on the live site. On a generated site it is usually a "
@@ -349,7 +365,8 @@ FAMILIES = [
  ("indexing", "Indexing and reachability",
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
-  ["noindex", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link", "deep", "js-shell"]),
+  ["noindex", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
+   "hub-missing-links", "deep", "js-shell", "heavy-html"]),
 
  ("content", "Content quality at scale",
   "The failures that only appear when pages are compared with each other. A "
@@ -364,7 +381,8 @@ FAMILIES = [
   "is therefore either right everywhere or wrong everywhere.",
   ["no-title", "title-short", "title-long", "duplicate-title",
    "no-description", "description-length", "duplicate-description",
-   "no-h1", "many-h1", "no-headings", "no-structure", "img-no-alt", "vague-anchor"]),
+   "no-h1", "many-h1", "no-headings", "title-h1-mismatch", "no-structure", "img-no-alt",
+   "vague-anchor", "no-og", "no-viewport", "heavy-images"]),
 
  ("hreflang", "hreflang and language versions",
   "hreflang is mutual, self-inclusive and per-page — three properties a "
@@ -379,6 +397,7 @@ FAMILIES = [
   "page contains anything that survives being lifted out of it.",
   ["no-question-headings", "no-answer", "answer-short", "answer-long",
    "answer-preamble", "jsonld-broken", "jsonld-no-type", "jsonld-faq-invisible",
+   "jsonld-mismatch",
    "no-author", "no-date", "ai-crawler-blocked"]),
 
  ("robots", "robots.txt",
@@ -388,7 +407,7 @@ FAMILIES = [
  ("freshness", "Freshness",
   "Pages whose usefulness has an expiry date, still open for indexing after it "
   "passed.",
-  ["stale-event", "stale-closed"]),
+  ["stale-event", "stale-closed", "stale-year"]),
 ]
 
 COMMANDS = [
@@ -531,6 +550,10 @@ def page(path: str, title: str, description: str, body: str,
 <meta property="og:title" content="{html.escape(title, quote=True)}">
 <meta property="og:description" content="{html.escape(description, quote=True)}">
 <meta property="og:url" content="{url}">
+<meta property="og:image" content="{SITE}/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="author" content="{AUTHOR}">
 <script type="application/ld+json">{{
  "@context":"https://schema.org","@type":"TechArticle",
@@ -762,6 +785,8 @@ def build() -> None:
     if OUT.exists():
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)
+    # Карточка превью для og:image: исходник — tools/assets/og-card.svg.
+    shutil.copyfile(ROOT / "tools" / "assets" / "og.png", OUT / "og.png")
 
     data = collect()
     known = {c for f in FAMILIES for c in f[3]}

@@ -245,6 +245,39 @@ def read_dataset(path: str) -> dict:
 
 # ── аудит семантики ───────────────────────────────────────────────────────────
 
+# Признаки намерения. Только целые слова: «bestiary» — не «best», «toprak» — не «top».
+_INTENTS = (
+    ("transactional", r"buy|order|price|prices|pricing|cost|costs|cheap|cheapest|discount|"
+                      r"coupon|deal|deals|hire|book|booking|rent|rental|quote|near\s+me|for\s+sale|"
+                      r"купить|куплю|заказать|закажу|цена|цены|стоимость|сколько\s+стоит|недорого|"
+                      r"дешево|дёшево|аренда|арендовать|снять|доставка|скидка|скидки|промокод|"
+                      r"записаться|оформить"),
+    ("commercial", r"best|top|vs|versus|alternative|alternatives|compare|comparison|review|"
+                   r"reviews|rating|ratings|лучший|лучшие|лучшая|лучшее|топ|сравнение|сравнить|"
+                   r"отзывы|отзыв|рейтинг|аналог|аналоги|альтернатива|альтернативы|или"),
+    ("informational", r"how|what|why|when|where|guide|tutorial|ideas|meaning|definition|"
+                      r"как|что|зачем|почему|когда|где|инструкция|своими\s+руками|что\s+такое|"
+                      r"руководство|пошагово"),
+)
+_INTENT_RE = [(name, re.compile(r"(?<![\w])(?:" + words + r")(?![\w])", re.I | re.UNICODE))
+              for name, words in _INTENTS]
+
+
+def query_intent(keyword: str) -> str:
+    """
+    Намерение запроса: transactional (купить, заказать, цена), commercial
+    (выбрать: лучшие, vs, отзывы), informational (узнать: как, что) или пусто.
+
+    Покупка сильнее выбора, выбор сильнее вопроса: «лучшая цена на визу» —
+    покупка. Это подсказка для порядка генерации, а не приговор ключу.
+    """
+    text = keyword or ""
+    for name, pattern in _INTENT_RE:
+        if pattern.search(text):
+            return name
+    return ""
+
+
 def audit_dataset(rows: list, fields: list, keyword_field: str,
                   cfg: dict = None) -> dict:
     """
