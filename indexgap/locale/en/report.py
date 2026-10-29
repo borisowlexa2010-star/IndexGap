@@ -166,6 +166,22 @@ MESSAGES = {
         "Part of the text was read in the wrong encoding: “CafÃ©”, “â€™”. Usually it is data saved as UTF-8 and read as Latin-1 somewhere in the pipeline.",
     "robots.txt не пускает поисковик на эту страницу: она есть в сборке и, скорее всего, в sitemap, но текст её прочитан не будет.":
         "robots.txt does not let the search engine into this page: it is in the build and most likely in the sitemap, but its text will not be read.",
+    "Разметка называет цену, рейтинг или число отзывов, которых нет в видимом тексте. Google требует, чтобы структурированные данные повторяли страницу.":
+        "The markup names a price, a rating or a review count the visible text does not show. Google requires structured data to repeat the page.",
+    "Страница раздела не ссылается на часть своих страниц: до них доходят только через sitemap, и вес раздела до них не доходит.":
+        "The section page does not link to some of its pages: they are reached only through the sitemap, and the section's weight does not reach them.",
+    "В заголовке прошлый год: страница обещает свежесть, а выглядит заброшенной.":
+        "A past year in the heading: the page promises freshness and looks abandoned.",
+    "title и H1 говорят о разном — поисковик может переписать заголовок в выдаче.":
+        "The title and the H1 talk about different things — the search engine may rewrite the title in results.",
+    "Нет og:title или og:image — ссылка на страницу в соцсетях и мессенджерах выходит без превью.":
+        "No og:title or og:image — a link to the page in social networks and messengers shows without a preview.",
+    "Нет meta viewport — на телефоне страница не адаптирована, а Google индексирует мобильную версию.":
+        "No meta viewport — the page is not adapted to phones, and Google indexes the mobile version.",
+    "HTML тяжелее 2 МБ: Googlebot читает первые 2 МБ, хвост страницы в индекс не попадает.":
+        "HTML heavier than 2 MB: Googlebot reads the first 2 MB, the tail of the page does not reach the index.",
+    "Картинки тяжелее 1 МБ замедляют загрузку на телефоне.":
+        "Images heavier than 1 MB slow loading down on a phone.",
     "На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела.":
         "No internal link points at this page. It is in the sitemap, but the "
         "crawler will not get there. Link to it from the section's hub pages.",

@@ -68,6 +68,11 @@ output: the command prints its top three causes by count, not by importance.
 | `canonical-elsewhere` | the canonical points at another page | check the template |
 | `orphan`, `unreachable` | no inbound links / cannot be reached from home | link from the section's hubs; if the hubs are generated, fix the link list in the generator |
 | `broken-link` | an internal link to a page the build does not have | remove the link from the template or generate the page |
+| `hub-missing-links` | a section page does not link to some of its pages (one finding per section) | make the section template list every page: a list, alphabetical, or paginated |
+| `jsonld-mismatch` | a price, rating or review count in JSON-LD that the page does not show | take markup and text from the same data field |
+| `stale-year` | a past year in the title or H1, presented as freshness | drop the year from the template or fill in the current one |
+| `title-h1-mismatch` (info), `no-og` (info), `no-viewport` | title vs H1, link previews, phones | one line each in the template |
+| `heavy-html`, `heavy-images` | HTML over 2 MB (Googlebot reads 2 MB), images over 1 MB | move embedded data out of the page; compress images |
 | `near-duplicate` | overlap above the duplicate threshold | see "Near-duplicates" below |
 | `similar` | alike, but below the duplicate threshold | worth a look, **not a finding**: do not set a canonical from it |
 | `low-uniqueness` | the template crowded out the content | add the page's own row data |
@@ -152,7 +157,7 @@ indexgap check --out indexgap-baseline.json                # once; commit the fi
 indexgap check --baseline indexgap-baseline.json --strict  # fails only on new critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.14.0` with `root`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.15.0` with `root`,
 `site`, and optional `baseline` and `args`.
 
 ## Repair briefs

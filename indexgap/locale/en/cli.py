@@ -271,6 +271,11 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "Намерение запросов: покупка {a0}, выбор {a1}, информация {a2}, неясно {a3}":
+        "Query intent: buying {a0}, choosing {a1}, learning {a2}, unclear {a3}",
+    "\nУ первой страницы выдачи — {a0} страниц(ы): позиция 8–20 и показы есть. Доработать их дешевле, чем писать новые:":
+        "\nNear page one — {a0} page(s) at positions 8–20 with impressions. Improving "
+        "them is cheaper than writing new ones:",
     "{a0}: у проекта «{a1}» поле `{a2}` должно быть строкой.": "{a0}: project “{a1}”: `{a2}` must be a string.",
     "{a0}: у проекта «{a1}» поле `indexed` должно быть списком строк.": "{a0}: project “{a1}”: `indexed` must be a list of strings.",
     "{a0}: значение `{a1}` должно быть строкой, а там {a2}.": "{a0}: `{a1}` must be a string, and it is {a2}.",

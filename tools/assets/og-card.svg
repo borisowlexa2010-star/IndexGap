@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <rect width="1200" height="1200" fill="#141D1C"/>
+  <g transform="translate(0,285)">
+  <rect x="0" y="0" width="14" height="630" fill="#2E9E6F"/>
+  <text x="96" y="200" font-family="Menlo, monospace" font-size="96" font-weight="700" fill="#F6F8F7">indexgap</text>
+  <text x="96" y="292" font-family="Helvetica, Arial, sans-serif" font-size="42" fill="#C9D3D0">Lint your programmatic SEO pipeline —</text>
+  <text x="96" y="348" font-family="Helvetica, Arial, sans-serif" font-size="42" fill="#C9D3D0">from keywords to indexed pages.</text>
+  <text x="96" y="458" font-family="Menlo, monospace" font-size="30" fill="#2E9E6F">$ indexgap check</text>
+  <text x="96" y="514" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="#7D8B87">invented facts · near-duplicates · unfilled slots · orphans · hreflang</text>
+  </g>
+</svg>

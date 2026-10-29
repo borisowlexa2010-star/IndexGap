@@ -155,7 +155,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.14.0
+- uses: borisowlexa2010-star/IndexGap@v1.15.0
   with:
     root: out
     site: https://example.com
@@ -170,6 +170,8 @@ artifact:
 **Before generating** — exact duplicate keys, slug collisions and *same-intent*
 keys. That last one matters most: two keywords meaning the same thing will
 produce two competing pages, and it is cheaper never to create the second.
+Each key is also labelled by intent — buying, choosing, learning — so the pages
+that bring customers can be generated first.
 
 **After generating — the text**
 
@@ -178,6 +180,9 @@ produce two competing pages, and it is cheaper never to create the second.
 | **Numbers absent from your data** | prices, terms and counts are verified against the source row. A price, or a number with one of your project's units, that is not in the data is a critical finding; a number with any other word ("12 years", "3,500 orders") is listed for you to check by eye. Neither is forgiven for being repeated on many pages |
 | Identical heading skeletons | different words, same structure — a stamping tell |
 | Identical opening sentences | the second tell |
+| Unfilled template slots | `{{city}}`, `%CITY%`, `undefined`, `NaN`, `Plumbers in , TX`, lorem ipsum, a model's "Certainly! Here is…" left in the text |
+| JSON-LD that disagrees with the page | a price, rating or review count in the markup that the visible text does not show |
+| A past year in the title | "Best plumbers 2024" in 2026: the template nobody updated |
 | Leftover brief, `status: draft` | unfinished pages never reach the sitemap or the IndexNow queue |
 | "Click here" anchors | a link with no meaning in it |
 
@@ -185,8 +190,12 @@ produce two competing pages, and it is cheaper never to create the second.
 
 Near-duplicates (exact pairwise below 400 pages, MinHash + LSH above), share of
 unique text measured *by bigrams* rather than words, thin pages, orphans,
-click depth, `noindex`, `nosnippet`, foreign canonicals, missing or duplicate
-H1, duplicate titles and descriptions.
+broken internal links, section pages that do not link to their own pages, click
+depth, `noindex` (also from `_headers`, `netlify.toml`, `vercel.json`),
+`nosnippet`, foreign canonicals, pages robots.txt does not let Googlebot crawl,
+missing or duplicate H1, a title and an H1 that share no word, duplicate titles
+and descriptions, missing viewport, missing og:title / og:image, HTML over the
+2 MB Googlebot reads, images over 1 MB.
 
 **Machine readability for AI search**
 
@@ -441,7 +450,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-913 scenarios. Each one is a reproduced defect: from four waves of adversarial
+941 scenarios. Each one is a reproduced defect: from four waves of adversarial
 review (the latest by eight reviewers at once — new generators, a seeded
 catalogue measuring what is missed, messy input, scale, the truth of these
 docs, an agent following the skills, the competition), from runs against live

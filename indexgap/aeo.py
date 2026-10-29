@@ -399,6 +399,11 @@ def check_jsonld(page) -> list:
                            tr("блок JSON-LD не парсится ({a0}) — для поисковика его просто нет",
                               a0=getattr(exc, "msg", None) or tr("слишком глубокая вложенность"))))
             continue
+        mismatch = _ld_numbers_missing(data, page)
+        if mismatch:
+            issues.append(("warning", page.url, "jsonld-mismatch", tr(
+                "в JSON-LD {a0}, а на странице таких чисел нет — разметка должна повторять "
+                "видимое, иначе это риск ручных санкций", a0=", ".join(mismatch[:3]))))
         for item in _ld_items(data):
             # Контейнер `@graph` сам по себе типа не имеет — это обёртка,
             # а не сущность. Раньше каждая страница с разметкой Yoast
@@ -426,6 +431,64 @@ def check_jsonld(page) -> list:
                     issues.append(("warning", page.url, "jsonld-faq-invisible",
                                    tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
     return issues
+
+
+# Числа разметки, которые читатель обязан видеть: цена предложения, рейтинг и
+# число отзывов. Google требует, чтобы разметка повторяла страницу; сгенерированная
+# разметка расходится с текстом, когда шаблон берёт поле из одной колонки
+# датасета, а текст — из другой.
+_LD_NUMBERS = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice",
+               "ratingvalue": "ratingValue", "reviewcount": "reviewCount",
+               "ratingcount": "ratingCount"}
+
+
+def _ld_numbers(node, depth=0, inside_rating=False):
+    """(поле, число) из разметки, вглубь, но только предложения и общий рейтинг."""
+    if depth > 8:
+        return
+    if isinstance(node, list):
+        for value in node:
+            yield from _ld_numbers(value, depth + 1, inside_rating)
+        return
+    if not isinstance(node, dict):
+        return
+    types = {str(t).lower() for t in (node.get("@type") if isinstance(node.get("@type"), list)
+                                      else [node.get("@type")]) if t}
+    for key, value in node.items():
+        low = str(key).lower()
+        if low in ("review", "reviews"):
+            continue                       # оценки отдельных отзывов на странице не обязаны быть
+        if low in _LD_NUMBERS and not isinstance(value, (dict, list)):
+            rating_field = low in ("ratingvalue", "reviewcount", "ratingcount")
+            if rating_field and not (inside_rating or "aggregaterating" in types):
+                continue
+            yield _LD_NUMBERS[low], value
+        elif isinstance(value, (dict, list)):
+            yield from _ld_numbers(value, depth + 1,
+                                   inside_rating or low == "aggregaterating")
+
+
+def _ld_numbers_missing(data, page) -> list:
+    from .content import NUMBER, _norm_number
+    seen = set()
+    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    for raw in re.findall(r"(?<![\d.,])(" + NUMBER + r")", text):
+        try:
+            seen.add(round(float(_norm_number(raw)), 4))
+        except ValueError:
+            continue
+    out = []
+    for field, value in _ld_numbers(data):
+        try:
+            number = round(float(_norm_number(str(value).replace(" ", ""))), 4)
+        except ValueError:
+            continue
+        if number <= 0 or number in seen:
+            continue
+        shown = f"{field} {value}"
+        if shown not in out:
+            out.append(shown)
+    return out
 
 
 _TYPOGRAPHY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "«": '"', "»": '"',

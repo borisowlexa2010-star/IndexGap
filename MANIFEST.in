@@ -9,3 +9,4 @@ recursive-include indexgap/skills *.md
 recursive-include tools *.py
 recursive-include skills *.md
 recursive-include .claude-plugin *
+recursive-include tools/assets *

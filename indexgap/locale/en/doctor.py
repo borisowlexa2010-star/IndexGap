@@ -188,6 +188,9 @@ MESSAGES = {
     "приняты одними поисковиками и не приняты несколькими другими — страница доступна, а решения поисковиков расходятся":
         "accepted by some engines and not by several others — the page is reachable, "
         "the engines' decisions differ",
+    "в JSON-LD {a0}, а на странице таких чисел нет — разметка должна повторять видимое, иначе это риск ручных санкций":
+        "the JSON-LD says {a0}, and the page shows no such numbers — markup has to repeat "
+        "what is visible, otherwise it risks a manual action",
     "robots.txt не прочитан: {a0}": "robots.txt was not read: {a0}",
     "{a0} абзац(ев) длиннее {a1} символов — такой блок трудно процитировать целиком":
         "{a0} paragraph(s) longer than {a1} characters — a block like that is hard "

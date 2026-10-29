@@ -924,7 +924,8 @@ CODE_WEIGHT = {
     "hreflang-no-self": 5, "hreflang-no-return": 6,
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
     "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19,
-    "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "near-duplicate": 8, "low-uniqueness": 9,
+    "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
+    "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
     "similar": 17, "broken-link": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
@@ -1434,6 +1435,11 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             "заглушек-редиректов: {a0}. Как страницы они не проверялись — "
             "поисковик видит то, куда они ведут.", a0=len(stubs)))
 
+    from . import signals
+    living = [p for p in pages if p.url not in shells]
+    issues += signals.page_signals(living)
+    issues += signals.hub_links(pages, graph, skip=spared)
+    issues += signals.heavy_images(pages)
     issues = _collapse_parked(issues, notes, pages, cfg)
     issues = _closed_sections(issues, notes, pages)
     issues = drop_closed_noise(issues, pages)
