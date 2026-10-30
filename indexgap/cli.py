@@ -467,6 +467,10 @@ def _analyse(args):
             print(tr("Сверено с датасетом: {a0} из {a1}", a0=content_result['matched_rows'], a1=len(pages)))
             if content_result["unmatched"]:
                 print(tr("  не сопоставлено: {a0} (проверь keyword во фронтматтере или имена папок)", a0=len(content_result['unmatched'])))
+            orphan_rows = content_result.get("rows_without_page") or []
+            if orphan_rows:
+                print(tr("  строк датасета без страницы: {a0} — например: {a1}",
+                         a0=len(orphan_rows), a1=", ".join(orphan_rows[:3])))
 
     if project["_checks_freshness"]:
         fresh = freshness.check(pages)
@@ -563,6 +567,7 @@ def cmd_check(args):
         "cross_engine": cross,
         "repeated_skeletons": (content_result or {}).get("repeated_skeletons"),
         "unmatched": (content_result or {}).get("unmatched"),
+        "rows_without_page": (content_result or {}).get("rows_without_page"),
         "robots": (aeo_result or {}).get("robots"),
         **({"baseline": dict(path=args.baseline, **diff)} if baseline is not None else {}),
     })

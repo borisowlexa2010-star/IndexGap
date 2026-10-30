@@ -271,6 +271,8 @@ MESSAGES = {
         "the IndexNow key: 8–128 latin characters and digits that you invent yourself",
     "колонка с ключом": "the keyword column",
     "колонка с ключом в датасете": "the keyword column in the dataset",
+    "  строк датасета без страницы: {a0} — например: {a1}":
+        "  dataset rows without a page: {a0} — for example: {a1}",
     "Принято намеренно (ignore в indexgap.json): {a0} — в счёт и в наряды не идут":
         "Accepted on purpose (ignore in indexgap.json): {a0} — not counted and no briefs",
     "Намерение запросов: покупка {a0}, выбор {a1}, информация {a2}, неясно {a3}":

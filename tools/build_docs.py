@@ -133,6 +133,8 @@ WHY = {
    "An HTML file over 2 MB. Googlebot reads the first 2 MB of a supported file and indexes what it has read — Google's own documentation, updated 2026-02-03. Hydration payloads embedded in the page are the usual cause on modern frameworks.",
  "heavy-images":
    "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads.",
+ "dataset-unbound":
+   "The dataset was given, but fewer than half of the pages were bound to its rows \u2014 so the numbers on the rest were never checked against anything, and a clean fact check means nothing. A page is bound by `keyword:` in its front matter, by `<meta name=\"keyword\">`, by a `slug`/`url`/`path` column in the dataset matching its address, by its folder name, or by its title. The run also lists the dataset rows that have no page at all: a generation failure or a filter.",
  "broken-link":
    "A link into a section of the build that points at a page the build does "
    "not have is a 404 on the live site. On a generated site it is usually a "
@@ -359,7 +361,7 @@ FAMILIES = [
   "it. This is the part of the package that has no equivalent in a general site "
   "auditor, and the reason indexgap will not write page text for you: a "
   "generator that supplied the numbers could not then check them.",
-  ["unsupported-number", "check-by-eye", "source-note", "still-draft", "brief-left",
+  ["unsupported-number", "check-by-eye", "dataset-unbound", "source-note", "still-draft", "brief-left",
    "unfilled-slot", "llm-leftover", "mojibake"]),
 
  ("indexing", "Indexing and reachability",

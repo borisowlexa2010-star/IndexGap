@@ -276,6 +276,31 @@ def _slug_of(page, root: str) -> str:
     return rel.rsplit("/", 1)[-1] if rel else ""
 
 
+# Колонка, в которой генератор хранит адрес страницы строки.
+SLUG_COLUMNS = ("slug", "url", "path", "permalink", "page", "uri", "handle", "url_path",
+                "page_url", "адрес", "ссылка", "урл")
+
+
+def _slug_column(rows: list, keyword_field: str) -> str:
+    fields = [f for f in (rows[0].keys() if rows else ()) if f and f != keyword_field]
+    for name in SLUG_COLUMNS:
+        for field in fields:
+            if field.strip().lower() == name:
+                return field
+    return ""
+
+
+def _path_forms(value: str) -> tuple:
+    """`berlin`, `/rent/berlin/`, `rent/berlin.html`, `https://x.com/rent/berlin` → (полный путь, последний сегмент)."""
+    from urllib.parse import urlsplit
+    text = (value or "").strip()
+    if "://" in text:
+        text = urlsplit(text).path
+    text = re.sub(r"(^|/)index\.(html?|md|markdown)$", r"\1", text, flags=re.I)
+    text = re.sub(r"\.(html?|md|markdown)$", "", text, flags=re.I).strip("/").lower()
+    return text, text.rsplit("/", 1)[-1] if text else ""
+
+
 def match_rows(pages: list, rows: list, keyword_field: str, root: str,
                cfg: dict = None) -> dict:
     """
@@ -302,6 +327,21 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
             slug_clash.add(slug)
         by_slug.setdefault(slug, row)
 
+    # Колонка адреса — самая надёжная связь после ключа во фронтматтере:
+    # демо с колонками `query` и `slug` давало «сверено 0 из 10», и выдуманная
+    # цена пропадала из отчёта.
+    slug_field = _slug_column(rows, keyword_field)
+    by_path, by_last, last_clash = {}, {}, set()
+    if slug_field:
+        for row in rows:
+            full, last = _path_forms(row.get(slug_field) or "")
+            if not last:
+                continue
+            by_path.setdefault(full, row)
+            if last in by_last and by_last[last] is not row:
+                last_clash.add(last)
+            by_last.setdefault(last, row)
+
     matched, ambiguous = {}, []
     # Сначала надёжные связи — по ключу во фронтматтере и по slug, для всех
     # страниц. Строка, у которой так нашлась своя страница, приблизительному
@@ -312,6 +352,10 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
     for page in pages:
         key = (page.meta.get("keyword") or "").strip().lower()
         row = by_keyword.get(key) if key else None
+        if row is None and slug_field:
+            rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+            full, last = _path_forms(rel)
+            row = by_path.get(full) or (by_last.get(last) if last not in last_clash else None)
         if row is None:
             slug = _slug_of(page, root)
             if slug in slug_clash:
@@ -350,7 +394,7 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
 
         if row is not None:
             matched[page.url] = row
-    return {"matched": matched, "ambiguous": sorted(set(ambiguous))}
+    return {"matched": matched, "ambiguous": sorted(set(ambiguous)), "slug_field": slug_field}
 
 
 def _shown(number: str, unit: str) -> str:
@@ -678,6 +722,14 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
         # на датасете без валют, то есть на большинстве проектов.
         issues += check_facts(pages, matched, rows, cfg, fact_units)
         facts_checked = bool(matched)
+        # Сверка, которая молча покрыла треть сайта, хуже отсутствия сверки:
+        # человек видит «критичных 0» и думает, что числа проверены.
+        if len(pages) >= 5 and len(matched) < len(pages) * 0.5:
+            issues.append(("warning", "", "dataset-unbound", tr(
+                "сверка с датасетом покрыла {a0} из {a1} страниц — числа остальных не "
+                "проверялись. Свяжи страницы со строками: колонка slug или url в датасете, "
+                "`keyword:` во фронтматтере или <meta name=\"keyword\"> в шаблоне",
+                a0=len(matched), a1=len(pages))))
 
     seams = check_template_seams(pages, cfg)
     issues += seams["issues"]
@@ -703,4 +755,8 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
         "fact_units": sorted(fact_units or []),
         "notes": notes,
         "unmatched": sorted(p.url for p in pages if p.url not in matched) if rows else [],
+        # В обратную сторону: строка без страницы — сбой генерации или фильтр.
+        "rows_without_page": sorted(
+            str(r.get(keyword_field) or "") for r in (rows or [])
+            if id(r) not in {id(v) for v in matched.values()}),
     }
