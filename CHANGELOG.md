@@ -11,10 +11,11 @@ Everything 1.17.0 listed as "not yet", closed.
   with the page they came from. Output is the same whatever `--jobs` is.
 * **`indexgap fetch --render`** saves the DOM an installed Chrome, Chromium or
   Edge draws, for pages JavaScript builds (`--browser PATH` if it is not found).
-  The browser reaches only the site: its names are pinned to the address
-  resolved once, so DNS cannot be switched mid-run; other names do not
-  resolve; IP literals, loopback and the cloud metadata address go to a proxy
-  sink the package itself listens on; WebRTC does not go around it. The
+  The browser reaches only the site: all its traffic, loopback included, goes
+  through a proxy the package runs, which connects only to the site's host and
+  port at the address resolved once — no other host, no DNS switch mid-run, no
+  neighbouring port on your own machine, no cloud metadata address; WebRTC
+  does not go around it. The
   sandbox stays on — as root on Linux it refuses until `--browser-no-sandbox`
   accepts the risk. A browser that hangs is killed after 60 s and the raw HTML
   is kept. Without `--render`, pages that look like empty JS shells are counted
@@ -39,7 +40,7 @@ Everything 1.17.0 listed as "not yet", closed.
   copy. A 3,000-page build peaks 20% lower in one process and 32% lower in
   parallel, with the same wall time and byte-identical output.
 
-1,196 tests on 3.9, 3.12 and 3.15.
+1,194 tests on 3.9, 3.12 and 3.15.
 
 ## 1.17.0 — 2026-10-30
 

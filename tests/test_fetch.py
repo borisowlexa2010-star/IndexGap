@@ -79,6 +79,21 @@ def routes(base):
     }
 
 
+
+import http.server as _http_server
+
+
+class _Hello(_http_server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"hello"
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
 class Server:
     def __init__(self, make=routes):
         self.log, self.agents = [], []
@@ -798,43 +813,49 @@ class TestRenderUnits(unittest.TestCase):
         self.assertIn("--browser-no-sandbox", str(caught.exception))
 
     def test_the_browser_may_only_reach_the_site(self):
-        args = fetch.browser_args("/bin/chrome", "https://www.e.com/a/", site="https://e.com/")
+        args = fetch.browser_args("/bin/chrome", "https://www.e.com/a/", site="https://e.com/",
+                                  proxy_port=4321)
         rules = next(a for a in args if a.startswith("--host-resolver-rules="))
         self.assertIn("MAP * ~NOTFOUND", rules)
         self.assertIn("EXCLUDE e.com", rules)
-        self.assertIn("EXCLUDE www.e.com", rules)
-        self.assertIn("--proxy-server=127.0.0.1:9", args)
-        bypass = next(a for a in args if a.startswith("--proxy-bypass-list="))
-        self.assertIn("<-loopback>", bypass)
-        self.assertNotIn("169.254", bypass)
+        self.assertIn("--proxy-server=127.0.0.1:4321", args)
+        # loopback тоже идёт через шлюз: прямого обхода нет ни для чего.
+        self.assertIn("--proxy-bypass-list=<-loopback>", args)
         self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", args)
 
-    def test_the_site_is_pinned_to_the_address_resolved_once(self):
-        args = fetch.browser_args("/bin/chrome", "https://e.com/", site="https://e.com/",
-                                  proxy_port=4321, pins={"e.com": "93.184.215.14"})
-        rules = next(a for a in args if a.startswith("--host-resolver-rules="))
-        self.assertIn("MAP e.com 93.184.215.14", rules)
-        self.assertTrue(rules.endswith("MAP * ~NOTFOUND"))
-        self.assertIn("--proxy-server=127.0.0.1:4321", args)
-        self.assertEqual(fetch._pin_hosts("http://127.0.0.1:8000/"), {})
-
-    def test_a_local_site_keeps_loopback_direct(self):
-        # С `<-loopback>` Chromium не пускает напрямую и явно названный 127.0.0.1.
-        args = fetch.browser_args("/bin/chrome", "http://127.0.0.1:8000/",
-                                  site="http://127.0.0.1:8000/")
-        bypass = next(a for a in args if a.startswith("--proxy-bypass-list="))
-        self.assertEqual(bypass, "--proxy-bypass-list=127.0.0.1")
-
-    def test_the_proxy_sink_closes_every_connection(self):
+    def test_the_gate_lets_through_only_the_sites_host_and_port(self):
         import socket
-        sink = fetch._Sink()
-        try:
-            conn = socket.create_connection(("127.0.0.1", sink.port), timeout=2)
-            conn.settimeout(2)
-            self.assertEqual(conn.recv(10), b"")
+        import http.server
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Hello)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        other = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Hello)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(other.shutdown)
+        port, other_port = server.server_address[1], other.server_address[1]
+        gate = fetch._Gate(fetch._site_targets(f"http://127.0.0.1:{port}/"))
+        self.addCleanup(gate.close)
+
+        def ask(target):
+            conn = socket.create_connection(("127.0.0.1", gate.port), timeout=5)
+            conn.sendall(f"GET {target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+                         .encode())
+            data = b""
+            while True:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
             conn.close()
-        finally:
-            sink.close()
+            return data
+
+        self.assertIn(b"hello", ask(f"http://127.0.0.1:{port}/"))
+        self.assertEqual(ask(f"http://127.0.0.1:{other_port}/"), b"")
+        self.assertEqual(ask("http://169.254.169.254/latest/meta-data/"), b"")
+        conn = socket.create_connection(("127.0.0.1", gate.port), timeout=5)
+        conn.sendall(f"CONNECT 127.0.0.1:{other_port} HTTP/1.1\r\n\r\n".encode())
+        self.assertEqual(conn.recv(100), b"")
+        conn.close()
 
     def test_a_batch_browser_gets_only_plain_urls(self):
         for url in ("https://e.com/a&calc/", "https://e.com/%PATH%/", "https://e.com/(x)/"):
