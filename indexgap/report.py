@@ -220,7 +220,8 @@ def _first_things(issues: list, graph: dict, dupes: list) -> str:
     return (tr("<div class=\"first\"><strong>Начни с этого</strong><ol>") + "".join(lines) + '</ol></div>')
 
 
-def _groups_html(issues: list, per_group: int = 25) -> str:
+def _groups_html(issues: list, per_group: int = 25, helper=None) -> str:
+    helper = helper or _help
     if not issues:
         return tr("<div class=\"empty\">Ничего не найдено.</div>")
     grouped = defaultdict(list)
@@ -242,7 +243,7 @@ def _groups_html(issues: list, per_group: int = 25) -> str:
         items = "".join(
             f'<li><span class="mono">{_esc(url)}</span> — {_esc(msg)}</li>'
             for url, msg in shown)
-        help_text = _help(code, "")
+        help_text = helper(code, "")
         blocks.append(
             f'<details class="grp"{" open" if level == "critical" else ""}>'
             f'<summary><span class="pill {cls}">{_esc(label)}</span>'
@@ -253,9 +254,34 @@ def _groups_html(issues: list, per_group: int = 25) -> str:
     return "".join(blocks)
 
 
+def _templates_html(templates: list) -> str:
+    """Таблица риска по шаблонам. Шаблонов нет — нет и раздела."""
+    if not templates:
+        return ""
+    rows = []
+    for t in templates:
+        cls = " bad" if t["risk"] >= 50 else " warn" if t["risk"] >= 20 else ""
+        codes = ", ".join(c["code"] for c in t["top_codes"])
+        rows.append(
+            f'<tr><td class="mono">{_esc(t["pattern"])}</td><td class="n">{t["pages"]}</td>'
+            f'<td class="n">{t["critical_share"]:.0%}</td>'
+            f'<td class="n">{t["warning_share"]:.0%}</td>'
+            f'<td class="mono">{_esc(codes)}</td><td class="n{cls}">{t["risk"]}</td></tr>')
+    return (tr("<h2>Риск по шаблонам</h2><div class=\"scroll\"><table><thead><tr>"
+               "<th>шаблон</th><th class=\"n\">страниц</th><th class=\"n\">критично</th>"
+               "<th class=\"n\">внимание</th><th>частые коды</th><th class=\"n\">риск</th>"
+               "</tr></thead><tbody>")
+            + "".join(rows)
+            + tr("</tbody></table></div><p class=\"note\">Риск 0–100 — средняя по страницам "
+                 "шаблона тяжесть самой тяжёлой находки: критичная весит от 0,5 до 1 "
+                 "в зависимости от кода, внимание — от 0,15 до 0,3. В «other» сложены "
+                 "шаблоны меньше десяти страниц.</p>"))
+
+
 def build(analysis: dict, funnel_result: dict = None, causes: list = None,
           out_path: str = "indexgap-report.html", site: str = "",
-          cross: list = None, notes: list = None, title: str = tr("Отчёт конвейера")) -> str:
+          cross: list = None, notes: list = None, title: str = tr("Отчёт конвейера"),
+          templates: list = None) -> str:
     pages = analysis.get("pages") or []
     issues = analysis.get("issues") or []
     graph = analysis.get("graph") or {}
@@ -299,7 +325,7 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
         funnel_block = (tr("<h2>Воронка конвейера</h2>") + _funnel_html(funnel_result) +
                         tr("<p class=\"note\">Каждый переход теряет страницы. Потери на разных переходах лечатся по-разному, поэтому важно видеть, где именно они происходят. Учти: экспорт «Страницы» из Search Console — это отчёт о показах, и страница в индексе без показов в него не попадает.</p>"))
 
-    doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=len(graph.get('orphans') or []), a12=len(dupes), a13=_first_things(issues, graph, dupes), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
+    doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=len(graph.get('orphans') or []), a12=len(dupes), a13=_first_things(issues, graph, dupes) + _templates_html(templates), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
 
     directory = os.path.dirname(os.path.abspath(out_path)) or "."
     os.makedirs(directory, exist_ok=True)
@@ -442,6 +468,83 @@ def build_portfolio(results: list, patterns: list, uniques: list = None,
                            + _pattern_rows(patterns, results, "site"))
 
     doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Портфель — сводный отчёт</title>\n<style>{a0}{a1}</style></head><body><div class=\"wrap\">\n<h1>Портфель</h1>\n<p class=\"sub\">{a2} проектов · {a3} страниц · {a4} критичных\n· {a5}</p>\n\n{a6}\n{a7}\n{a8}\n{a9}\n{a10}\n{a11}\n</div></body></html>", a0=CSS, a1=PORTFOLIO_CSS, a2=len(ok), a3=total_pages, a4=total_critical, a5=datetime.now().strftime('%d.%m.%Y %H:%M'), a6=_portfolio_cards(results), a7=failed_block, a8=patterns_block, a9=unique_block, a10=profiles_block, a11=notes_block)
+
+    directory = os.path.dirname(os.path.abspath(out_path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(doc)
+    return out_path
+
+
+# ── сравнение двух сборок ─────────────────────────────────────────────────────
+
+DIFF_HELP = {
+    "page-removed": N_("Страница была в старой сборке и пропала из новой. Если она была открыта для индекса и редиректа на неё нет — на живом сайте по адресу с показами будет 404. Верни страницу или поставь 301 на ближайшую замену."),
+    "page-redirected": N_("Страница пропала или стала заглушкой, но адрес переведён редиректом — посетители и вес уйдут по нему. Проверь, что цель редиректа существует."),
+    "page-closed": N_("Страница была открыта для индекса и закрылась: появился noindex, canonical стал вести на другую страницу или она стала черновиком. Если это сделал шаблон — закроется весь раздел."),
+    "nosnippet-added": N_("Появился запрет сниппета: страница останется в индексе, но пропадёт из ответов ИИ-поиска и расширенной выдачи."),
+    "text-shrunk": N_("Текст сократился больше чем вдвое. Обычно это поломка генератора или данных, а не правка редактора."),
+    "template-change": N_("title, H1 или description поменялись у многих страниц одного шаблона сразу — это правка шаблона. Убедись, что она намеренная: поисковик переоценит все эти страницы."),
+    "new-finding": N_("Критичная находка `check`, которой в старой сборке не было."),
+    "page-opened": N_("Страница была закрыта от индекса и открылась."),
+    "pages-added": N_("Новые страницы по шаблонам адресов."),
+}
+
+
+def _diff_help(code, default=""):
+    found = DIFF_HELP.get(code)
+    return tr(found) if found else default
+
+
+def build_diff(result: dict, items: list, findings: dict = None,
+               out_path: str = "indexgap-diff.html", site: str = "",
+               old_root: str = "", new_root: str = "", redirect_files: list = None) -> str:
+    """Отчёт `diff`: изменения сгруппированы по виду, как находки в `check`."""
+    counts = Counter(i[0] for i in items)
+    changes = [c for c in result.get("template_changes") or [] if c.get("template")]
+    rows = "".join(
+        f'<tr><td class="mono">{_esc(c["pattern"])}</td><td>{_esc(c["field"])}</td>'
+        f'<td class="n">{c["changed"]} / {c["pages"]}</td>'
+        f'<td>{_esc(c["examples"][0]["old"])} → {_esc(c["examples"][0]["new"])}</td></tr>'
+        for c in changes)
+    template_block = (
+        tr("<h2>Правки шаблонов</h2><div class=\"scroll\"><table><thead><tr><th>шаблон</th>"
+           "<th>поле</th><th class=\"n\">страниц</th><th>например</th></tr></thead><tbody>")
+        + rows + "</tbody></table></div>") if rows else ""
+    findings_block = ""
+    if findings is not None:
+        findings_block = tr(
+            "<p class=\"note\">Проверки check по обеим сборкам: новых критичных {a0}, "
+            "новых «внимание» {a1}, исчезло критичных {a2}. Полные списки — в JSON.</p>",
+            a0=findings["new_critical"], a1=findings["new_warning"],
+            a2=findings["fixed_critical"])
+    redirects = (tr("Редиректы учтены: {a0}.", a0=", ".join(redirect_files))
+                 if redirect_files else
+                 tr("Файлов редиректов рядом с новой сборкой нет: исчезнувшая страница "
+                    "считается 404."))
+    doc = tr(
+        "<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+        "<title>Что сломает деплой{a0}</title>\n<style>{a1}</style></head><body><div class=\"wrap\">\n"
+        "<h1>Что сломает деплой</h1>\n<p class=\"sub\">{a2} · было {a3} → стало {a4} · {a5}</p>\n"
+        "<div class=\"cards\">\n"
+        "  <div class=\"card\"><div class=\"n\">{a6}</div><div class=\"l\">страниц было</div></div>\n"
+        "  <div class=\"card\"><div class=\"n\">{a7}</div><div class=\"l\">страниц стало</div></div>\n"
+        "  <div class=\"card\"><div class=\"n bad\">{a8}</div><div class=\"l\">критично</div></div>\n"
+        "  <div class=\"card\"><div class=\"n warn\">{a9}</div><div class=\"l\">внимание</div></div>\n"
+        "  <div class=\"card\"><div class=\"n\">{a10}</div><div class=\"l\">исчезло страниц</div></div>\n"
+        "  <div class=\"card\"><div class=\"n\">{a11}</div><div class=\"l\">новых страниц</div></div>\n"
+        "</div>\n<p class=\"note\">{a12}</p>\n{a13}\n<h2>Изменения по видам</h2>\n{a14}\n{a15}\n"
+        "</div></body></html>",
+        a0=" — " + _esc(site) if site else "", a1=CSS, a2=_esc(site),
+        a3=_esc(old_root), a4=_esc(new_root), a5=datetime.now().strftime('%d.%m.%Y %H:%M'),
+        a6=result.get("old_pages", 0), a7=result.get("new_pages", 0),
+        a8=counts.get("critical", 0), a9=counts.get("warning", 0),
+        a10=len(result.get("removed") or []), a11=(result.get("added") or {}).get("total", 0),
+        a12=_esc(redirects), a13=findings_block,
+        a14=(_groups_html(items, helper=_diff_help) if items else
+             tr("<div class=\"empty\">Сборки не различаются ничем, что видит поисковик.</div>")),
+        a15=template_block)
 
     directory = os.path.dirname(os.path.abspath(out_path)) or "."
     os.makedirs(directory, exist_ok=True)

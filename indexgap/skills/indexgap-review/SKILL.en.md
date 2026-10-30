@@ -55,6 +55,11 @@ The report is written to `indexgap-check.html` and `indexgap-check.json`.
 Start with `unsupported-number` and `unfilled-slot`, wherever they stand in the
 output: the command prints its top three causes by count, not by importance.
 
+If the summary is followed by "Riskiest templates", start the fix with the top
+one: risk 0–100 is the average severity of the worst finding over the pages of
+a URL template (`/plumbing/*/`), and one template fix clears it from all of
+them. The same table is in the report; the data is `templates` in the JSON.
+
 | Code | What it means | What to do |
 |---|---|---|
 | `unsupported-number` | a number with a project unit that is not in the data | almost always invented — remove it or back it with a source |
@@ -159,6 +164,20 @@ indexgap check --baseline indexgap-baseline.json --strict  # fails only on new c
 
 GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.16.0` with `root`,
 `site`, and optional `baseline` and `args`.
+
+## Before a deploy
+
+```bash
+indexgap diff ./prod-build ./out --site https://example.com --strict
+```
+
+Compares the build in production with the new one: pages that disappear
+(`page-removed` — critical if it was indexable and no rule in `_redirects`,
+netlify.toml or vercel.json covers it), pages that close (`page-closed`),
+title/H1/description changed on most pages of a template (`template-change`),
+text cut by more than half (`text-shrunk`), new pages, and new critical `check`
+findings (`new-finding`). Do not "fix" a missing page by deleting the links to
+it: ask the person whether to bring it back or add a 301.
 
 A finding the person accepts on purpose goes into `indexgap.json` as
 `"ignore": {"no-viewport": ["/print/*"]}` — never silence a finding

@@ -269,4 +269,69 @@ MESSAGES = {
         "<h2>Why pages have no impressions</h2>",
     "\nПочему у страниц нет показов:":
         "\nWhy pages have no impressions:",
+
+    # ── риск по шаблонам ──────────────────────────────────────────────────────
+    '<h2>Риск по шаблонам</h2><div class="scroll"><table><thead><tr><th>шаблон</th><th class="n">страниц</th><th class="n">критично</th><th class="n">внимание</th><th>частые коды</th><th class="n">риск</th></tr></thead><tbody>':
+        '<h2>Risk by template</h2><div class="scroll"><table><thead><tr><th>template</th>'
+        '<th class="n">pages</th><th class="n">critical</th><th class="n">warnings</th>'
+        '<th>frequent codes</th><th class="n">risk</th></tr></thead><tbody>',
+    '</tbody></table></div><p class="note">Риск 0–100 — средняя по страницам шаблона тяжесть самой тяжёлой находки: критичная весит от 0,5 до 1 в зависимости от кода, внимание — от 0,15 до 0,3. В «other» сложены шаблоны меньше десяти страниц.</p>':
+        '</tbody></table></div><p class="note">Risk 0–100 is the average, over the '
+        'template\'s pages, of the severity of each page\'s worst finding: a critical '
+        'one weighs 0.5 to 1 depending on the code, a warning 0.15 to 0.3. Templates '
+        'under ten pages are folded into “other”.</p>',
+
+    # ── diff ──────────────────────────────────────────────────────────────────
+    "Страница была в старой сборке и пропала из новой. Если она была открыта для индекса и редиректа на неё нет — на живом сайте по адресу с показами будет 404. Верни страницу или поставь 301 на ближайшую замену.":
+        "The page was in the old build and is missing from the new one. If it was open "
+        "to indexing and nothing redirects it, the live site will answer 404 at an "
+        "address that had impressions. Bring the page back or add a 301 to the closest "
+        "replacement.",
+    "Страница пропала или стала заглушкой, но адрес переведён редиректом — посетители и вес уйдут по нему. Проверь, что цель редиректа существует.":
+        "The page is gone or became a stub, but the address is redirected — visitors "
+        "and link equity follow it. Make sure the redirect target exists.",
+    "Страница была открыта для индекса и закрылась: появился noindex, canonical стал вести на другую страницу или она стала черновиком. Если это сделал шаблон — закроется весь раздел.":
+        "The page was open to indexing and is now closed: noindex appeared, the "
+        "canonical points to another page, or it became a draft. If the template did "
+        "this, the whole section closes.",
+    "Появился запрет сниппета: страница останется в индексе, но пропадёт из ответов ИИ-поиска и расширенной выдачи.":
+        "A snippet ban appeared: the page stays indexed but disappears from AI-search "
+        "answers and rich results.",
+    "Текст сократился больше чем вдвое. Обычно это поломка генератора или данных, а не правка редактора.":
+        "The text shrank by more than half. Usually that is a broken generator or "
+        "dataset, not an editor's change.",
+    "title, H1 или description поменялись у многих страниц одного шаблона сразу — это правка шаблона. Убедись, что она намеренная: поисковик переоценит все эти страницы.":
+        "title, H1 or description changed on many pages of one template at once — a "
+        "template change. Make sure it is intended: the engine will re-evaluate all "
+        "these pages.",
+    "Критичная находка `check`, которой в старой сборке не было.":
+        "A critical `check` finding that the old build did not have.",
+    "Страница была закрыта от индекса и открылась.":
+        "The page was closed to indexing and is now open.",
+    "Новые страницы по шаблонам адресов.": "New pages by URL template.",
+    '<!doctype html><!-- indexgap-report --><html lang="ru"><head><meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Что сломает деплой{a0}</title>\n<style>{a1}</style></head><body><div class="wrap">\n<h1>Что сломает деплой</h1>\n<p class="sub">{a2} · было {a3} → стало {a4} · {a5}</p>\n<div class="cards">\n  <div class="card"><div class="n">{a6}</div><div class="l">страниц было</div></div>\n  <div class="card"><div class="n">{a7}</div><div class="l">страниц стало</div></div>\n  <div class="card"><div class="n bad">{a8}</div><div class="l">критично</div></div>\n  <div class="card"><div class="n warn">{a9}</div><div class="l">внимание</div></div>\n  <div class="card"><div class="n">{a10}</div><div class="l">исчезло страниц</div></div>\n  <div class="card"><div class="n">{a11}</div><div class="l">новых страниц</div></div>\n</div>\n<p class="note">{a12}</p>\n{a13}\n<h2>Изменения по видам</h2>\n{a14}\n{a15}\n</div></body></html>':
+        '<!doctype html><!-- indexgap-report --><html lang="en"><head><meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+        '<title>What the deploy breaks{a0}</title>\n<style>{a1}</style></head><body><div class="wrap">\n'
+        '<h1>What the deploy breaks</h1>\n<p class="sub">{a2} · before {a3} → after {a4} · {a5}</p>\n'
+        '<div class="cards">\n'
+        '  <div class="card"><div class="n">{a6}</div><div class="l">pages before</div></div>\n'
+        '  <div class="card"><div class="n">{a7}</div><div class="l">pages after</div></div>\n'
+        '  <div class="card"><div class="n bad">{a8}</div><div class="l">critical</div></div>\n'
+        '  <div class="card"><div class="n warn">{a9}</div><div class="l">warnings</div></div>\n'
+        '  <div class="card"><div class="n">{a10}</div><div class="l">pages gone</div></div>\n'
+        '  <div class="card"><div class="n">{a11}</div><div class="l">new pages</div></div>\n'
+        '</div>\n<p class="note">{a12}</p>\n{a13}\n<h2>Changes by kind</h2>\n{a14}\n{a15}\n'
+        '</div></body></html>',
+    '<p class="note">Проверки check по обеим сборкам: новых критичных {a0}, новых «внимание» {a1}, исчезло критичных {a2}. Полные списки — в JSON.</p>':
+        '<p class="note">check findings on both builds: {a0} new critical, {a1} new '
+        'warnings, {a2} critical gone. The full lists are in the JSON.</p>',
+    "Редиректы учтены: {a0}.": "Redirects taken into account: {a0}.",
+    "Файлов редиректов рядом с новой сборкой нет: исчезнувшая страница считается 404.":
+        "No redirect files next to the new build: a page that disappears counts as a 404.",
+    '<h2>Правки шаблонов</h2><div class="scroll"><table><thead><tr><th>шаблон</th><th>поле</th><th class="n">страниц</th><th>например</th></tr></thead><tbody>':
+        '<h2>Template changes</h2><div class="scroll"><table><thead><tr><th>template</th>'
+        '<th>field</th><th class="n">pages</th><th>for example</th></tr></thead><tbody>',
+    '<div class="empty">Сборки не различаются ничем, что видит поисковик.</div>':
+        '<div class="empty">The builds differ in nothing a search engine sees.</div>',
 }

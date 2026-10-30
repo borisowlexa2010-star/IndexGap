@@ -92,7 +92,8 @@ OWN_DIRS = {"indexgap-briefs"}
 REPORT_MARK = "<!-- indexgap-report -->"
 
 OWN_FILES = {"indexgap-report.html", "indexgap-report.json", "indexgap-check.html",
-             "indexgap-check.json", "indexgap-doctor.html", "indexgap-doctor.json"}
+             "indexgap-check.json", "indexgap-doctor.html", "indexgap-doctor.json",
+             "indexgap-diff.html", "indexgap-diff.json"}
 
 # Каталоги сборки пропускаются: иначе `indexgap check .` в обычном репозитории
 # статического генератора разбирает и исходники, и собранный сайт, и каждая

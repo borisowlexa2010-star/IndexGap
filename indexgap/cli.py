@@ -5,6 +5,7 @@
     indexgap init                                    ← первое, что делает человек
     indexgap plan    keywords.csv --keyword keyword
     indexgap check   ./content --site https://example.com
+    indexgap diff    ./prod ./out --site https://example.com
     indexgap sitemap ./content --site https://example.com --out-dir ./public
     indexgap notify  ./content --site https://example.com --key <свой-ключ>
     indexgap doctor  ./content --site https://example.com --sitemap ./public/sitemap.xml
@@ -28,6 +29,7 @@ from urllib.parse import urlsplit
 from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
                install, portfolio, profiles, publish, repair, report, settings,
                sources)
+from . import diff as diffs
 from . import i18n
 from .i18n import tr
 from .core import (SourceError, check_site_url, default_jobs, load_manifest, load_pages,
@@ -476,17 +478,19 @@ def _sitemap_hreflang(args, pages) -> None:
                  "его нет", a0=given))
 
 
-def _analyse(args):
+def _analyse(args, pages=None):
     """
-    Общая часть `check` и `brief`: загрузить страницы, применить профиль,
-    прогнать все локальные проверки.
+    Общая часть `check`, `brief` и `diff`: загрузить страницы, применить
+    профиль, прогнать все локальные проверки.
 
     Наряды выписываются по тем же находкам, что попадают в отчёт. Считай
     `brief` их сам — он бы со временем разошёлся с `check`, и человек получил
-    бы задание чинить то, чего в отчёте нет.
+    бы задание чинить то, чего в отчёте нет. `diff` приносит страницы уже
+    загруженными: обе сборки он читает сам, для сравнения страниц.
     """
     apply_project_defaults(args)
-    pages = _load(args)
+    if pages is None:
+        pages = _load(args)
     rows = _read_rows(args)
     project = settings.resolve(args.root, pages, rows, args.keyword, args.config)
     project = profiles.apply(project, args.profile or project.get("profile"))
@@ -558,6 +562,7 @@ def _analyse(args):
             "analysis": analysis, "notes": notes,
             "template_notes": checks.template_wide(analysis["issues"],
                                                    len(pages), pages=pages),
+            "templates": checks.template_risk(analysis["issues"], pages),
             "content": content_result, "aeo": aeo_result}
 
 
@@ -611,7 +616,8 @@ def cmd_check(args):
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
                              cross=cross, notes=notes,
-                             title=tr("Проверка перед публикацией"))
+                             title=tr("Проверка перед публикацией"),
+                             templates=got["templates"])
     json_path = report_pair(args.out)[1]
     diff = compare_baseline(analysis["issues"], baseline) if baseline is not None else None
     _write_json(json_path, {
@@ -634,6 +640,7 @@ def cmd_check(args):
         "unmatched": (content_result or {}).get("unmatched"),
         "rows_without_page": (content_result or {}).get("rows_without_page"),
         "robots": (aeo_result or {}).get("robots"),
+        "templates": got["templates"],
         **({"baseline": dict(path=args.baseline, **diff)} if baseline is not None else {}),
     })
 
@@ -648,6 +655,7 @@ def cmd_check(args):
     reported = sum(1 for i in analysis["issues"] if i[2] == "orphan")
     print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
     _print_first_things(analysis["issues"])
+    _print_templates(got["templates"])
     print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
     if diff is not None:
         _print_baseline(args.baseline, diff)
@@ -689,6 +697,19 @@ def _print_first_things(issues):
         # восьмидесятом символе, он кончался ровно перед тем, что делать.
         for line in textwrap.wrap(report._help(code), width=68):
             print(f"         {line}")
+
+
+def _print_templates(templates: list, limit: int = 5) -> None:
+    """Пять самых рискованных шаблонов. Шаблон без риска не печатается."""
+    risky = [t for t in templates if t["risk"] > 0][:limit]
+    if not risky:
+        return
+    print(tr("Самые рискованные шаблоны (риск 0–100):"))
+    for t in risky:
+        top = ", ".join(c["code"] for c in t["top_codes"])
+        print(tr("  {a0:>3}  {a1}  — {a2} стр., критично на {a3:.0%}, внимание на {a4:.0%}; {a5}",
+                 a0=t["risk"], a1=t["pattern"], a2=t["pages"], a3=t["critical_share"],
+                 a4=t["warning_share"], a5=top))
 
 
 def _guess_robots(args):
@@ -1543,6 +1564,145 @@ def cmd_profiles(args):
     return 0
 
 
+# Находки, которые `diff` уже назвал своими словами: noindex на странице,
+# которая закрылась, — это `page-closed`, а не ещё и новая находка `noindex`.
+_DIFF_SAID = {"noindex", "canonical-elsewhere", "still-draft", "nosnippet"}
+
+
+def _build_findings(root: str, pages: list, site: str, args, config: str) -> list:
+    """
+    Находки `check` по одной сборке — тем же `_analyse`, что и у `check`,
+    иначе «новая находка» в diff значила бы не то же, что в базовой линии.
+    Вывод анализа глушится: обе сборки рассказали бы о себе по разу,
+    а нужна одна разница.
+    """
+    ns = argparse.Namespace(root=root, site=site, home=args.home, config=config,
+                            profile=args.profile, dataset=None, keyword="keyword",
+                            no_content=False, no_aeo=False, robots=None, sitemap=None)
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        got = _analyse(ns, pages=pages)
+    return got["analysis"]["issues"]
+
+
+def cmd_diff(args):
+    """
+    Две сборки одного сайта до деплоя: что этот деплой сломает.
+
+    Исчезнувшие страницы, закрывшиеся от индекса, правки шаблона на многих
+    страницах сразу, срезанный текст, новые страницы и — если не `--no-checks`
+    — новые находки `check` в NEW против OLD.
+    """
+    _check_report_pair(args.out)
+    for root in (args.old, args.new):
+        if not os.path.isdir(root):
+            raise SourceError(tr("Каталога {a0} нет. Проверь путь.", a0=root)
+                              if not os.path.exists(root) else
+                              tr("{a0} — это файл, а нужен каталог со страницами.", a0=root))
+    if os.path.realpath(args.old) == os.path.realpath(args.new):
+        raise SourceError(tr("OLD и NEW — один и тот же каталог {a0}: сравнивать нечего. "
+                             "Нужны две сборки — та, что на проде, и новая.", a0=args.old))
+    probe = argparse.Namespace(root=args.new, site=args.site, config=args.config,
+                               profile=args.profile, dataset=None)
+    config = apply_project_defaults(probe)
+    if not probe.site:
+        raise SourceError(tr("Не указан адрес сайта: добавь --site https://… — или запиши "
+                             "`site` в indexgap.json."))
+    site = check_site_url(probe.site)
+    args.site = site
+    profile = args.profile or probe.profile
+
+    print(tr("Было — {a0}", a0=args.old))
+    old_pages = _load(argparse.Namespace(root=args.old, site=site))
+    print(tr("Стало — {a0}", a0=args.new))
+    new_pages = _load(argparse.Namespace(root=args.new, site=site))
+
+    rules, redirect_files = diffs.read_redirects(args.new)
+    if redirect_files:
+        print(tr("Редиректы новой сборки: {a0} — правил {a1}",
+                 a0=", ".join(redirect_files), a1=len(rules)))
+    else:
+        print(tr("Файлов редиректов (_redirects, netlify.toml, vercel.json) рядом с новой "
+                 "сборкой нет: исчезнувшая страница считается 404"))
+    result = diffs.compare(old_pages, new_pages, rules)
+    items = diffs.items(result)
+
+    findings = None
+    if not args.no_checks:
+        args.profile = profile
+        before = _build_findings(args.old, old_pages, site, args, config)
+        after = _build_findings(args.new, new_pages, site, args, config)
+        delta = compare_baseline(after, _serialize_issues(before))
+        said = {i[1] for i in items if i[2] in ("page-closed", "nosnippet-added")}
+        shown = 0
+        for item in delta["new"]:
+            if item["level"] != "critical":
+                continue
+            if item["code"] in _DIFF_SAID and item["url"] in said:
+                continue
+            items.append(("critical", item["url"], "new-finding",
+                          f"{item['code']} — {item['message']}"))
+            shown += 1
+        findings = {
+            "new": delta["new"], "fixed": delta["fixed"],
+            # Без тех, что уже названы как закрывшиеся страницы: счёт сходится
+            # с числом строк `new-finding` в отчёте.
+            "new_critical": shown,
+            "new_warning": sum(1 for i in delta["new"] if i["level"] == "warning"),
+            "fixed_critical": sum(1 for i in delta["fixed"] if i.get("level") == "critical"),
+        }
+    items = checks.sort_issues(items)
+    counts = Counter(i[0] for i in items)
+    summary = {level: counts.get(level, 0) for level in ("critical", "warning", "info")}
+
+    html_path = report.build_diff(result, items, findings,
+                                  out_path=check_out_path(report_pair(args.out)[0]),
+                                  site=site, old_root=args.old, new_root=args.new,
+                                  redirect_files=redirect_files)
+    json_path = report_pair(args.out)[1]
+    _write_json(json_path, {
+        "site": site,
+        "old": {"root": args.old, "pages": result["old_pages"]},
+        "new": {"root": args.new, "pages": result["new_pages"]},
+        "redirects": redirect_files,
+        "summary": summary,
+        "items": _serialize_issues(items),
+        **{k: result[k] for k in ("removed", "closed", "opened", "nosnippet", "shrunk",
+                                  "template_changes", "added")},
+        "findings": findings,
+    })
+
+    print(tr("Страниц было {a0}, стало {a1}: исчезло {a2}, новых {a3}",
+             a0=result["old_pages"], a1=result["new_pages"], a2=len(result["removed"]),
+             a3=result["added"]["total"]))
+    if result["added"]["by_pattern"]:
+        print(tr("  новые по шаблонам: {a0}", a0=", ".join(
+            f"{a['pattern']} {a['pages']}" for a in result["added"]["by_pattern"][:5])))
+    for change in result["template_changes"]:
+        if change["template"]:
+            example = change["examples"][0]
+            print(tr("  правка шаблона {a0}: {a1} изменился на {a2} из {a3} — «{a4}» → «{a5}»",
+                     a0=change["pattern"], a1=diffs.FIELD_LABEL[change["field"]],
+                     a2=change["changed"], a3=change["pages"], a4=example["old"][:60],
+                     a5=example["new"][:60]))
+    if findings is not None:
+        print(tr("Находки check: новых критичных {a0}, новых «внимание» {a1}; "
+                 "исчезло критичных {a2}", a0=findings["new_critical"],
+                 a1=findings["new_warning"], a2=findings["fixed_critical"]))
+    print(tr("Критично: {a0}   Внимание: {a1}   К сведению: {a2}",
+             a0=summary["critical"], a1=summary["warning"], a2=summary["info"]))
+    grouped = defaultdict(list)
+    for level, url, code, _ in items:
+        if level != "info":
+            grouped[(level, code)].append(url)
+    for (level, code), urls in grouped.items():
+        more = tr(" и ещё {a0}", a0=len(urls) - 3) if len(urls) > 3 else ""
+        print(f"  {level:<8} {code:<18} {len(urls):>5}  {', '.join(urls[:3])}{more}")
+    print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
+    return 1 if (summary["critical"] and args.strict) else 0
+
+
 # ── разбор аргументов ─────────────────────────────────────────────────────────
 
 def preset_language(argv=None):
@@ -1631,6 +1791,24 @@ def build_parser():
                    help=tr("данные прошлого прогона: находки, которые в них уже были, "
                            "считаются долгом, и --strict валит сборку только на новых"))
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("diff", help=tr("две сборки до деплоя: что этот деплой сломает"))
+    p.add_argument("old", help=tr("каталог сборки, которая сейчас на проде"))
+    p.add_argument("new", help=tr("каталог новой сборки"))
+    p.add_argument("--site", default="",
+                   help=tr("адрес сайта целиком; по умолчанию из indexgap.json"))
+    p.add_argument("--home", help=tr("URL главной; по умолчанию — сам --site"))
+    p.add_argument("--config", default="",
+                   help=tr("путь к indexgap.json; по умолчанию ищется рядом с новой сборкой"))
+    p.add_argument("--profile", default="",
+                   help=tr("тип контента: catalog, events, ugc, product. Меняет пороги и набор проверок — см. `indexgap profiles`"))
+    p.add_argument("--out", default="indexgap-diff.html",
+                   help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
+    p.add_argument("--no-checks", action="store_true",
+                   help=tr("не прогонять проверки check по обеим сборкам — только сравнение страниц"))
+    p.add_argument("--strict", action="store_true",
+                   help=tr("ненулевой код возврата при критичных находках — для CI"))
+    p.set_defaults(func=cmd_diff)
 
     p = sub.add_parser("brief",
                        help=tr("наряды на починку: находки проверки — заданиями рядом со страницами"))

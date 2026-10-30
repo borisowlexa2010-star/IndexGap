@@ -46,6 +46,7 @@ one with `indexgap init --key`.
 | before generation | `indexgap-plan` | someone brought a CSV of keywords |
 | after generation | `indexgap-review` | the pages are written but not published |
 | fixing what was found | `indexgap-review` → `indexgap brief` | work orders for the fixes, page by page |
+| before a deploy | `indexgap-review` → `indexgap diff` | the new build against the one in production |
 | publishing and diagnosis | `indexgap-publish` | sitemap, IndexNow, "why is there no traffic" |
 | several sites | `indexgap-portfolio` | the person has a portfolio, not one project |
 

@@ -26,6 +26,8 @@ description: >
 
 1. `indexgap check --strict` passes — or the person has accepted each remaining critical finding.
 2. Build, then `indexgap sitemap`: the generator may have wiped `sitemap.xml` along with its output directory.
+   With a copy of what is in production, `indexgap diff ./prod-build ./out --strict` lists pages
+   that disappear or close and template changes. Show anything critical to the person before deploying.
 3. Deploy. Confirm that `https://site/<key>.txt` and one changed page are live.
 4. `indexgap notify` as a dry run → show the person → `--send` once they explicitly agree.
 
