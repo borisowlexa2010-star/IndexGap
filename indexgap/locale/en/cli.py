@@ -28,8 +28,9 @@ MESSAGES = {
         "whole site must not be resubmitted on every deploy.",
     "Принято, ключ ещё проверяется (202). Очередь очищена.":
         "Accepted, key validation pending (202). The queue is clear.",
-    "заменить sitemap.xml, даже если его написал не indexgap":
-        "replace sitemap.xml even if indexgap did not write it",
+    "заменить sitemap.xml, даже если его написал не indexgap, и записать его, даже если все страницы закрыты":
+        "replace sitemap.xml even if indexgap did not write it, and write it even "
+        "when every page is closed",
     "первая отправка: манифеста ещё нет, и уйти должен весь сайт":
         "first submission: there is no manifest yet and the whole site should go",
     "принято, ключ ещё проверяется — убедись, что файл ключа открывается по своему адресу":
@@ -429,4 +430,8 @@ MESSAGES = {
         "open to indexing: answers 200 without noindex. A login page is still a page — close the host with X-Robots-Tag: noindex",
     "проверить вживую адреса, которые поисковик знает, а на сайте их нет: стоит ли редирект, закрыт ли хост. Ходит в сеть":
         "check live the addresses the engine knows but the site does not contain: is there a redirect, is the host closed. Uses the network",
+    "Все {a0} страниц закрыты от индекса (noindex, canonical, черновики) — пустой sitemap не записан.\n    Проверь noindex в шаблоне и X-Robots-Tag в _headers, netlify.toml, vercel.json. Если так и задумано — добавь --force.":
+        "All {a0} pages are closed to indexing (noindex, canonical, drafts) — an empty "
+        "sitemap was not written.\n    Check noindex in the template and X-Robots-Tag in "
+        "_headers, netlify.toml, vercel.json. If this is intended, add --force.",
 }

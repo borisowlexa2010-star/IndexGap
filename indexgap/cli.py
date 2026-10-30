@@ -819,6 +819,13 @@ def cmd_sitemap(args):
             os.path.exists(manifest_path) and not os.access(manifest_path, os.W_OK)):
         raise SourceError(tr("{a0}: сюда нельзя записать манифест — sitemap не строился. "
                              "Укажи другое место через --manifest.", a0=manifest_path))
+    if pages and not args.force and not any(publish.indexable(p) for p in pages):
+        # Пустой sitemap, уехавший на прод, говорит поисковику «здесь ничего
+        # нет». Чаще всего так выглядит правило хостинга, закрывшее всё.
+        raise SourceError(tr(
+            "Все {a0} страниц закрыты от индекса (noindex, canonical, черновики) — пустой "
+            "sitemap не записан.\n    Проверь noindex в шаблоне и X-Robots-Tag в _headers, "
+            "netlify.toml, vercel.json. Если так и задумано — добавь --force.", a0=len(pages)))
     if first_run:
         _first_run_note(manifest_path)
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
@@ -1622,7 +1629,7 @@ def build_parser():
     common(p)
     p.add_argument("--out-dir", help=tr("куда писать; по умолчанию рядом со страницами"))
     p.add_argument("--force", action="store_true",
-                   help=tr("заменить sitemap.xml, даже если его написал не indexgap"))
+                   help=tr("заменить sitemap.xml, даже если его написал не indexgap, и записать его, даже если все страницы закрыты"))
     p.add_argument("--manifest", help=tr("путь к манифесту; по умолчанию рядом с indexgap.json"))
     p.add_argument("--public-prefix", default="",
                    help=tr("путь, по которому файлы будут доступны на сайте, если --out-dir не корень публикации"))
