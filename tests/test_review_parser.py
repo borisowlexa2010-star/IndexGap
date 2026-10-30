@@ -275,5 +275,33 @@ class TestSourceIsNotKept(Site):
                          [i[0] for i in content.check_slots([short])])
 
 
+class TestRepeatsAreShared(Site):
+    """
+    Сайдбар mdBook и rustdoc — сотни одинаковых ссылок на каждой странице.
+    Их тексты и списки слов хранятся один раз, а не по копии на страницу.
+    """
+
+    def test_anchor_texts_of_a_shared_menu_are_one_object(self):
+        menu = "<nav>" + "".join(f'<a href="/p{i}/">Глава {i}</a>' for i in range(5)) + "</nav>"
+        files = {f"p{i}/index.html": f"<html><head><title>Глава {i}</title></head><body>"
+                                     f"{menu}<main><p>{BODY}</p></main></body></html>"
+                 for i in range(3)}
+        pages = self.site(files)[0]
+        first, second = pages[0].anchors, pages[1].anchors
+        self.assertEqual(first, second)
+        self.assertTrue(all(a is b for a, b in zip(first, second)))
+
+    def test_trimmed_words_do_not_copy_untrimmed_pages(self):
+        from indexgap import checks
+        files = {f"p{i}/index.html": f"<html><head><title>Глава {i}</title></head><body>"
+                                     f"<nav><a href=\"/\">Главная</a></nav>"
+                                     f"<main><p>{BODY} {i}</p></main></body></html>"
+                 for i in range(3)}
+        pages = self.site(files)[0]
+        words = checks.trimmed_words(pages)
+        for page in pages:
+            self.assertIs(words[page.url], page.words)
+
+
 if __name__ == "__main__":
     unittest.main()

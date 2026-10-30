@@ -2214,6 +2214,8 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
         elif kind == "fragment":
             fragments.append(path)
         elif kind == "page":
+            # Строки, пришедшие из разных процессов, — разные объекты.
+            value.anchors = list(map(sys.intern, value.anchors))
             loaded.append(value)
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
@@ -2276,6 +2278,8 @@ def _parse_one(job):
         if _is_fragment(page.raw):
             return "fragment", path, None
         page.raw = essence(page.raw)
+    # Меню mdBook и rustdoc — сотни одинаковых подписей на каждой странице.
+    page.anchors = list(map(sys.intern, page.anchors))
     return "page", path, page
 
 
