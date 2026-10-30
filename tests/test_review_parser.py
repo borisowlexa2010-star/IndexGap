@@ -251,6 +251,29 @@ class TestSourceIsNotKept(Site):
                         f"<pre>// TODO: refactor</pre>{self.FILLER}</main></body></html>")
         self.assertEqual([i[2] for i in content.check_brief([code]) if i[2] == "brief-left"], [])
 
+    def test_a_large_page_reads_the_same_as_a_small_one(self):
+        # Выжимка делается только у страниц длиннее 4 КБ: короткая страница
+        # проверялась по исходнику, длинная — по выжимке, и вердикты расходились.
+        from indexgap import content
+
+        def both(body):
+            short = self.one(f"<html><head><title>Справка</title></head><body><main>"
+                             f"<p>{BODY}</p>{body}</main></body></html>")
+            long = self.one(f"<html><head><title>Справка</title></head><body><main>"
+                            f"<p>{BODY}</p>{body}{self.FILLER}</main></body></html>")
+            self.assertLess(len(long.raw), 2_000)
+            return short, long
+
+        # `TODO:` в атрибуте кнопки «копировать» — не текст страницы.
+        for page in both('<button data-code="// TODO: handle errors">Copy</button>'):
+            self.assertEqual([i for i in content.check_brief([page]) if i[2] == "brief-left"], [])
+        # Страница с примерами кода: `{FOLDER_NAME}` на ней — нотация автора.
+        short, long = both("<p>Положи файл в {FOLDER_NAME}.</p><pre>cp a b</pre>")
+        self.assertTrue(content._docs_page(short))
+        self.assertTrue(content._docs_page(long))
+        self.assertEqual([i[0] for i in content.check_slots([long])],
+                         [i[0] for i in content.check_slots([short])])
+
 
 if __name__ == "__main__":
     unittest.main()

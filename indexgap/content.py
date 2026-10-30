@@ -36,8 +36,8 @@ import json
 import os
 import re
 from collections import Counter, defaultdict
-from .core import (BRIEF_MARKERS, NOT_PROSE, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, _strip_fences,
-                   drop_spans, find_slots, tokenize, visible_text)
+from .core import (BRIEF_MARKERS, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, brief_prose,
+                   find_slots, tokenize, visible_text)
 from .i18n import tr
 
 CONFIG = {
@@ -724,21 +724,12 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
     return issues
 
 
-_ATTRIBUTE = re.compile(r"""\s[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*')""")
-
-
 def check_brief(pages: list, cfg: dict = None) -> list:
     """Выполнен ли бриф: не остались ли следы заготовки и вменяемы ли анкоры."""
     cfg = {**CONFIG, **(cfg or {})}
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
-        # `TODO:` в скрипте или в примере кода — заметка разработчика, а не
-        # недописанная страница.
-        raw = _strip_fences(drop_spans(page.raw or "", NOT_PROSE))
-        # Атрибуты — не текст: кнопка «копировать» Starlight держит весь пример
-        # кода с его `TODO:` в `data-code` (devtut: 17 ложных находок из 21).
-        if "TODO" in raw:
-            raw = _ATTRIBUTE.sub("", raw)
+        raw = brief_prose(page.raw)
         if any(marker in raw for marker in OWN_BRIEF_MARKERS):
             issues.append(("critical", page.url, "brief-left",
                            tr("в файле остался блок брифа или TODO — страница не дописана")))
