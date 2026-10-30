@@ -35,7 +35,12 @@ def _is_html(page) -> bool:
 
 # ── год в заголовке ──────────────────────────────────────────────────────────
 
-_YEAR = re.compile(r"(?<![\d.,])(20\d\d)(?![\d.,])")
+_YEAR = re.compile(r"(?<![\w.,])(20\d\d)(?![\d.,])")
+# Год в имени продукта — версия, а не дата: «SQL Server 2019», «Office 2016»,
+# «Windows 2000». «ES2017» отсекает уже граница слова.
+_PRODUCT = re.compile(
+    r"\b(?:server|windows|office|studio|excel|word|outlook|exchange|sharepoint|"
+    r"autocad|revit|photoshop|ecmascript|es|sql|dynamics|navision|1с|1c)\s+$", re.I)
 # Диапазон, который доходит до текущего года, — не прошлое: «2025–2026»,
 # «2025/26», «2025-26».
 _RANGE_AFTER = re.compile(r"^\s*[–—/-]\s*(\d{2,4})\b")
@@ -70,7 +75,7 @@ def _past_years(text: str, current: int) -> set:
         if not 2000 <= year < current:
             continue
         before, after = text[:m.start()], text[m.end():]
-        if _SINCE.search(before):
+        if _SINCE.search(before) or _PRODUCT.search(before):
             continue
         tail = _RANGE_AFTER.match(after)
         if tail:
