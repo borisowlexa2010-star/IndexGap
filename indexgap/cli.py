@@ -1003,9 +1003,16 @@ def cmd_doctor(args):
     pages = _load(args)
     _sitemap_hreflang(args, pages)
     project = settings.resolve(args.root, pages, explicit=args.config)
+    # Та же достижимость, что у check: ссылки закрытых в robots.txt страниц
+    # поисковик не читает.
+    robots_path = getattr(args, "robots", None) or _guess_robots(args)
+    blocked = set()
+    if robots_path and not (urlsplit(args.site or "").path.strip("/")
+                            and not getattr(args, "robots", None)):
+        blocked = aeo.blocked_urls(pages, aeo.read_robots(robots_path))
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
-                              language=project.get("language", ""))
+                              language=project.get("language", ""), blocked=blocked)
     notes = list(analysis.get("notes") or [])
 
     sitemap_urls = None
