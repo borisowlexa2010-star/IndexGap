@@ -100,6 +100,23 @@ class Hubs(Site):
             "</title>", '</title><link rel="canonical" href="https://example.com/products/alpha/">')
         self.assertEqual(self.missing(files), [])
 
+    def test_a_site_wide_table_of_contents_links_the_section(self):
+        # mdBook 0.5: навигация — в toc.html (noindex) и toc.js, хаб без ссылок.
+        kids = [f"ch{i}" for i in range(6)]
+        files = self.hub(kids, [])
+        files["toc.html"] = ('<!doctype html><html><head><title>TOC</title>'
+                             '<meta name="robots" content="noindex"></head><body>' + "".join(
+                                 f'<a href="/products/{k}/">{k}</a>' for k in kids)
+                             + "</body></html>")
+        self.assertEqual(self.missing(files), [])
+
+    def test_sphinx_module_listings_are_not_sections(self):
+        files = {"index.html": html("Home", '<a href="/_modules/pkg/">m</a>'),
+                 "_modules/pkg/index.html": html("Module pkg", "")}
+        for k in ("a", "b", "c"):
+            files[f"_modules/pkg/{k}/index.html"] = html(f"Module {k}", "")
+        self.assertEqual(self.missing(files), [])
+
     def test_real_pagination_still_counts(self):
         kids = ["alpha", "beta", "gamma"]
         files = self.hub(kids, kids[:2])

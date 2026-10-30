@@ -96,7 +96,9 @@ class TestDuplicateIndexability(unittest.TestCase):
         pages = self.pages([("/id/", "id", "", "/id/", alternates),
                             ("/ms/", "ms", "", "/ms/", alternates)])
         codes = self.codes(pages)
-        self.assertEqual(codes.count("duplicate-title"), 2)
+        # Одинаковый текст двух языков ловит near-duplicate; общий title у
+        # переводов сам по себе не соперничество — они в выдаче разных стран.
+        self.assertEqual(codes.count("duplicate-title"), 0)
         self.assertEqual(codes.count("near-duplicate"), 2)
 
     def test_existing_regional_hreflang_exception_is_unchanged(self):

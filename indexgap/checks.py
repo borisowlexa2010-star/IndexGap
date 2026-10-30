@@ -883,10 +883,16 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         # консолидацию URL и не делают её дублем индексируемой страницы.
         if not indexable(p):
             continue
+        # Перевод с тем же заголовком — не соперник: `/de/` и `/fr/` в выдаче
+        # разных стран не конкурируют (Congo: 147 «дублей» из пяти языков).
+        language = (p.lang or "").lower().split("-")[0]
+        if not language:
+            first = urlsplit(p.url).path.strip("/").split("/")[0].lower()
+            language = first if _is_locale(first) else ""
         if p.title:
-            titles[p.title.strip().lower()].append(p.url)
+            titles[(language, p.title.strip().lower())].append(p.url)
         if p.description:
-            descriptions[p.description.strip().lower()].append(p.url)
+            descriptions[(language, p.description.strip().lower())].append(p.url)
 
     for p in pages:
         for note in p.notes:

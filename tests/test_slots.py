@@ -175,6 +175,31 @@ class Slots(unittest.TestCase):
                 "For sets {C} and {D} the union is {C, D}.</p>")
         self.assertEqual(self.codes(html(body)), [])
 
+    def test_documentation_topics_in_headings_are_not_slots(self):
+        # Корпус: 44 страницы на пяти сайтах про JS, TS, SQL и Python.
+        for title in ("null vs undefined in TypeScript", "Handling None values",
+                      "Why NaN !== NaN", "IS NULL and IS NOT NULL"):
+            with self.subTest(title=title):
+                self.assertNotIn(("critical", "unfilled-slot"),
+                                 self.codes(html(f"<p>{TEXT}</p>", title=title, h1=title)))
+
+    def test_placeholder_notation_on_a_documentation_page(self):
+        # `{FOLDER_NAME}`, `${period}`, `{{ft^2}}`, `%C6H6%` — авторская нотация
+        # на странице с примерами кода, а не шов генератора.
+        for slot in ("{FOLDER_NAME}", "${period}", "%C6H6%"):
+            with self.subTest(slot=slot):
+                page = html(f"<p>{TEXT} Replace {slot} with yours.</p><pre>cp a b</pre>")
+                self.assertNotIn(("critical", "unfilled-slot"), self.codes(page))
+        page = html(f"<p>{TEXT} Units like {{{{ft^2}}}} render as superscript.</p>")
+        self.assertEqual(self.codes(page), [])
+
+    def test_the_dataset_decides_whose_variable_it_is(self):
+        page = html(f"<p>{TEXT} Replace {{FOLDER_NAME}} with yours.</p>")
+        self.assertNotIn(("critical", "unfilled-slot"),
+                         self.codes(page, fields=["city", "service"]))
+        page = html(f"<p>{TEXT} Call our {{{{city}}}} team.</p><pre>x</pre>")
+        self.assertIn(("critical", "unfilled-slot"), self.codes(page, fields=["city"]))
+
     def test_a_clean_page(self):
         self.assertEqual(self.codes(html(f"<p>{TEXT}</p>")), [])
 
