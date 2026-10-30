@@ -100,7 +100,21 @@ indexgap doctor ./content --site https://example.com \
 
 # 6. Прогнать сразу все свои сайты и найти общие грабли
 indexgap portfolio projects.json --reports ./reports
+
+# 7. Сборки нет — скачать живой сайт и проверить его
+indexgap fetch https://example.com --out-dir ./live
+indexgap check ./live --site https://example.com/ --sitemap live/sitemap.xml
 ```
+
+**Сборки нет, есть только адрес** — чужой сайт на аудите, CMS, которую не
+собрать у себя. `fetch` скачивает страницы из sitemap (`--sitemap`, иначе
+строки `Sitemap:` из robots.txt, иначе `/sitemap.xml`) в каталог, который
+`check` читает как сборку, и печатает готовую команду проверки. robots.txt
+соблюдается, на другой хост запрос не уходит даже по редиректу, по умолчанию
+не больше 500 страниц (`--limit 0` — все, только вместе с `--all`). Коды
+ответов и редиректы — в `fetch.json`, `X-Robots-Tag` — в `_headers`, страницы
+больше 2 МБ отмечены. Чего он не видит: то, что рисует JavaScript, адреса
+с параметрами и страницы, которых нет в sitemap.
 
 `--site` — адрес сайта целиком, со схемой. Он же определяет главную страницу.
 

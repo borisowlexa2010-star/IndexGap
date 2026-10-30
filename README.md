@@ -102,7 +102,35 @@ indexgap portfolio projects.json    # every site you own, in one run
 indexgap profiles                   # what the content-type presets change
 indexgap cite --domain example.com --prompt "best visa service for Singapore"
                                     # do AI answers cite you? (your own API keys)
+indexgap fetch https://example.com --out-dir ./live
+                                    # no build? download the live site for check
 ```
+
+### No build? Fetch the live site
+
+`check` reads files. When all you have is a URL — a client's site, a
+competitor, a CMS you cannot build locally — `fetch` downloads the pages listed
+in the sitemap into a directory that `check` reads as if it were the build:
+
+```bash
+indexgap fetch https://example.com --out-dir ./live        # 500 pages by default
+indexgap check ./live --site https://example.com/ --sitemap live/sitemap.xml
+```
+
+The sitemap comes from `--sitemap`, else the `Sitemap:` lines of robots.txt,
+else `/sitemap.xml`. robots.txt is obeyed for the `indexgap` user agent (a
+5xx on robots.txt stops the crawl, as it stops Googlebot); no request ever goes
+to another host, redirects included; `--limit` caps the pages (`--limit 0`
+means every page and only works with `--all`); `--delay` and `--jobs` keep it
+polite. `/a/b/` is saved as `a/b/index.html`, `/a/b` as `a/b.html`, and
+`fetch.json` records each page's URL, status, redirects, size and type, so
+`check` reports every page under the exact URL it came from. `X-Robots-Tag`
+headers land in `_headers`, which `check` already reads; robots.txt and the
+sitemap files are saved next to the pages. Pages over 2 MB (where Googlebot
+stops reading) are flagged; 4xx/5xx and non-HTML responses are recorded but not
+saved. The summary prints the exact `check` command to run next. What it
+cannot see: anything rendered by JavaScript, URLs with query strings, and pages
+that are not in the sitemap.
 
 `sitemap` and `notify` keep their state in `.indexgap-manifest.json`, next to
 `indexgap.json`: when each page last changed and what has been submitted.

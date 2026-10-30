@@ -466,6 +466,12 @@ COMMANDS = [
   "a Bing Webmaster Tools AI Performance export, it adds the step after the "
   "index: which pages Microsoft Copilot actually cites, which of them you have "
   "closed from search, and which you left out of the sitemap."),
+ ("fetch", "Download a live site for check when there is no build",
+  "Reads the sitemap (from --sitemap, robots.txt or /sitemap.xml), obeys "
+  "robots.txt, never leaves the host, stops at --limit, and saves each page "
+  "where check reads it back under the same URL. Status codes and redirects go "
+  "to fetch.json, X-Robots-Tag headers to _headers, and robots.txt and the "
+  "sitemap files alongside — then it prints the check command to run next."),
  ("cite", "Measure whether AI search cites you",
   "Asks Perplexity, the OpenAI Responses API, Gemini and Grok a set of real "
   "user questions and counts how often your domain comes back among the "

@@ -1934,6 +1934,45 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         page.url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
+FETCH_MANIFEST = "fetch.json"
+FETCH_GENERATOR = "indexgap fetch"
+
+
+def _apply_fetch_manifest(pages: list, root: str, base_url: str) -> None:
+    """
+    Каталог, скачанный `indexgap fetch`: адрес страницы — тот, с которого она
+    пришла, а не тот, что угадывается по имени файла.
+
+    По имени угадывается не всё: `/flat` и `/flat.html` лежат одним файлом
+    `flat.html`, а `/page.php` — файлом `page.php.html`. Ключи сходятся и без
+    манифеста; точную форму адреса знает только он.
+    """
+    path = os.path.join(root, FETCH_MANIFEST)
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return
+    if not isinstance(data, dict) or data.get("generator") != FETCH_GENERATOR:
+        return
+    where = {}
+    for entry in data.get("pages") or ():
+        if (isinstance(entry, dict) and isinstance(entry.get("file"), str)
+                and isinstance(entry.get("final_url"), str)):
+            where[unicodedata.normalize("NFC", entry["file"])] = entry["final_url"]
+    if not where:
+        return
+    site = urlsplit(base_url)
+    for page in pages:
+        rel = unicodedata.normalize(
+            "NFC", os.path.relpath(page.path, root).replace(os.sep, "/"))
+        url = where.get(rel)
+        if url:
+            page.url = urlunsplit((site.scheme, site.netloc, urlsplit(url).path or "/", "", ""))
+
+
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
     """
     Возвращает (страницы, проблемы). Проблемы — это файлы, которые не прочитались,
@@ -1994,6 +2033,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     # сырой файл — и страница пропадала вовсе.
     loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded, root)
     _settle_flat_urls(loaded, root, base_url)
+    _apply_fetch_manifest(loaded, root, base_url)
     _apply_header_rules(loaded, root, base_url, problems)
     if fragments:
         problems.append(tr(
