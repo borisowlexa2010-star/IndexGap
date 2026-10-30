@@ -570,20 +570,39 @@ _BATCH_URL = re.compile(r"https?://[A-Za-z0-9.:/_~\-]+", re.ASCII)
 
 
 def _site_hosts(site: str) -> list:
+    import ipaddress
     host = (urlsplit(site).hostname or "").lower()
+    try:
+        ipaddress.ip_address(host)
+        return [host]                      # у IP-адреса нет www-двойника
+    except ValueError:
+        pass
     bare = host[4:] if host.startswith("www.") else host
     return sorted({host, bare, "www." + bare} - {"", "www."})
 
 
+def _loopback(host: str) -> bool:
+    import ipaddress
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def browser_args(browser: str, url: str, profile: str = "", site: str = "",
-                 no_sandbox: bool = False) -> list:
+                 no_sandbox: bool = False, proxy_port: int = 9, pins: dict = None) -> list:
     """
     Список аргументов, не строка: shell между пакетом и браузером нет.
 
     Страница сама тянет скрипты, шрифты и API — в том числе с чужих хостов,
     из внутренней сети и с 169.254.169.254. Браузер выпускается только на
-    сайт: остальные имена не разрешаются, а всё, что идёт не на сайт, в том
-    числе по IP и на loopback, уходит в мёртвый прокси.
+    сайт: имена сайта закреплены за адресами, которые пакет разрешил сам
+    (`pins`), — подменить DNS посреди обхода нельзя; остальные имена не
+    разрешаются, а всё, что идёт не на сайт, в том числе по IP и на
+    loopback, уходит в прокси-ловушку пакета, которая молча закрывает
+    соединение. WebRTC мимо прокси не ходит.
     """
     args = [browser, "--headless=new", "--disable-gpu"]
     if no_sandbox:
@@ -592,16 +611,75 @@ def browser_args(browser: str, url: str, profile: str = "", site: str = "",
     args += ["--no-first-run", "--no-default-browser-check"]
     hosts = _site_hosts(site or url)
     if hosts:
-        args.append("--host-resolver-rules=MAP * ~NOTFOUND, "
-                    + ", ".join(f"EXCLUDE {h}" for h in hosts))
-        args += ["--proxy-server=127.0.0.1:9",
-                 "--proxy-bypass-list=" + ";".join(hosts + ["<-loopback>"])]
+        pins = pins or {}
+        rules = [f"MAP {h} {pins[h]}" if h in pins else f"EXCLUDE {h}" for h in hosts]
+        args.append("--host-resolver-rules=" + ", ".join(rules + ["MAP * ~NOTFOUND"]))
+        # `<-loopback>` отбирает у loopback обход прокси — и Chromium тогда
+        # не пускает напрямую даже явно названный 127.0.0.1. Для сайта на
+        # своей машине loopback и есть сайт.
+        local = any(_loopback(h) for h in hosts)
+        args += [f"--proxy-server=127.0.0.1:{proxy_port}",
+                 "--proxy-bypass-list=" + ";".join(hosts + ([] if local else ["<-loopback>"])),
+                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]
     if profile:
         # Свой профиль на каждый вызов: открытый Chrome человека не трогается.
         args.append("--user-data-dir=" + profile)
     args += ["--user-agent=" + core.USER_AGENT, "--dump-dom",
              f"--virtual-time-budget={RENDER_BUDGET_MS}", url]
     return args
+
+
+def _pin_hosts(site: str) -> dict:
+    """Имена сайта → один адрес, разрешённый здесь и сейчас. IP-адрес сайта не трогаем."""
+    import ipaddress
+    import socket
+    pins = {}
+    for host in _site_hosts(site):
+        try:
+            ipaddress.ip_address(host)
+            continue
+        except ValueError:
+            pass
+        try:
+            info = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except OSError:
+            continue
+        if info:
+            address = info[0][4][0]
+            pins[host] = f"[{address}]" if ":" in address else address
+    return pins
+
+
+class _Sink:
+    """
+    Прокси-ловушка на свободном порту: принимает соединение и сразу закрывает.
+    Свой слушатель, а не «заведомо пустой» порт 9: на чужой машине на нём
+    может сидеть что угодно.
+    """
+
+    def __init__(self):
+        import socket
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(16)
+        self.sock.settimeout(0.5)
+        self.port = self.sock.getsockname()[1]
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread.start()
+
+    def _loop(self):
+        while not self.done.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                continue
+            conn.close()
+
+    def close(self):
+        self.done.set()
+        self.sock.close()
+        self.thread.join(timeout=2)
 
 
 def needs_no_sandbox() -> bool:
@@ -647,9 +725,11 @@ def render(browser: str, url: str, site: str, no_sandbox: bool = False) -> tuple
                         "передаётся", a0=site)
     profile = tempfile.mkdtemp(prefix="indexgap-render-")
     extra = {} if os.name == "nt" else {"start_new_session": True}
+    sink = _Sink()
     try:
         try:
-            proc = subprocess.Popen(browser_args(browser, url, profile, site, no_sandbox),
+            proc = subprocess.Popen(browser_args(browser, url, profile, site, no_sandbox,
+                                                 sink.port, _pin_hosts(site)),
                                     shell=False,
                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, **extra)
@@ -661,6 +741,7 @@ def render(browser: str, url: str, site: str, no_sandbox: bool = False) -> tuple
             _stop(proc)
             return None, tr("браузер не уложился в {a0} с — остановлен", a0=RENDER_TIMEOUT)
     finally:
+        sink.close()
         shutil.rmtree(profile, ignore_errors=True)
     if proc.returncode != 0:
         return None, tr("браузер завершился с кодом {a0}", a0=proc.returncode)

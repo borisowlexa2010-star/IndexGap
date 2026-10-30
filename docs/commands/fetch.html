@@ -92,37 +92,48 @@ font-size:.85rem;color:var(--ink3)}
 <h1>indexgap fetch</h1>
 <div class="meta"><span class="tag acc">command</span></div>
 <p class="lede">Download a live site for check when there is no build.</p>
-<p>Reads the sitemap (from --sitemap, robots.txt or /sitemap.xml), obeys robots.txt, never leaves the host, stops at --limit, and saves each page where check reads it back under the same URL. Status codes and redirects go to fetch.json, X-Robots-Tag headers to _headers, and robots.txt and the sitemap files alongside — then it prints the check command to run next.</p>
+<p>Reads the sitemap (from --sitemap, robots.txt or /sitemap.xml), obeys robots.txt, never leaves the host, stops at --limit, and saves each page where check reads it back under the same URL. Status codes and redirects go to fetch.json, X-Robots-Tag headers to _headers, and robots.txt and the sitemap files alongside — then it prints the check command to run next. --crawl also follows links and names pages missing from the sitemap; --render saves what an installed Chromium draws, kept to the site's host.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap fetch [-h] --out-dir OUT_DIR [--sitemap SITEMAP]
                       [--limit LIMIT] [--all] [--delay DELAY] [--jobs JOBS]
-                      [--lang {en,ru}]
+                      [--crawl] [--render] [--browser PATH]
+                      [--browser-no-sandbox] [--lang {en,ru}]
                       site
 
 positional arguments:
-  site               the full site address, with the scheme
+  site                  the full site address, with the scheme
 
 options:
-  -h, --help         show this help message and exit
-  --out-dir OUT_DIR  where to put the pages; the directory must be new or
-                     empty
-  --sitemap SITEMAP  sitemap URL; by default from robots.txt, otherwise
-                     /sitemap.xml
-  --limit LIMIT      how many pages to fetch, 500 by default; 0 means all,
-                     only together with --all
-  --all              fetch every page in the sitemap, with no cap
-  --delay DELAY      pause between requests of one worker, in seconds
-  --jobs JOBS        how many requests run at once, 1 to 16
-  --lang {en,ru}     output language: en or ru. By default from INDEXGAP_LANG
-                     or the system locale, otherwise English</code></pre>
+  -h, --help            show this help message and exit
+  --out-dir OUT_DIR     where to put the pages; the directory must be new or
+                        empty
+  --sitemap SITEMAP     sitemap URL; by default from robots.txt, otherwise
+                        /sitemap.xml
+  --limit LIMIT         how many pages to fetch, 500 by default; 0 means all,
+                        only together with --all
+  --all                 fetch every page in the sitemap, with no cap
+  --delay DELAY         pause between requests of one worker, in seconds
+  --jobs JOBS           how many requests run at once, 1 to 16
+  --crawl               follow links too: from the home page and the sitemap
+                        addresses, breadth first; shows pages missing from the
+                        sitemap and sitemap addresses no link leads to
+  --render              save the DOM an installed Chrome or Chromium rendered
+                        instead of the raw HTML — for pages that JavaScript
+                        draws
+  --browser PATH        path to the browser for --render when it is not found
+                        on its own
+  --browser-no-sandbox  run the browser without its sandbox — only in a
+                        throwaway container as root
+  --lang {en,ru}        output language: en or ru. By default from
+                        INDEXGAP_LANG or the system locale, otherwise English</code></pre>
 <h2>The rest of the pipeline</h2>
-<ul class="plain"><li><a href="init.html">init</a><span>Read the project and record what makes it different</span></li><li><a href="plan.html">plan</a><span>Audit the dataset before a single page is generated</span></li><li><a href="check.html">check</a><span>The full audit of generated pages</span></li><li><a href="brief.html">brief</a><span>Turn findings into work orders</span></li><li><a href="sitemap.html">sitemap</a><span>Build a sitemap from what actually exists</span></li><li><a href="notify.html">notify</a><span>Push new and changed URLs to IndexNow</span></li><li><a href="portfolio.html">portfolio</a><span>One table across every project</span></li><li><a href="profiles.html">profiles</a><span>Show the built-in content profiles</span></li><li><a href="doctor.html">doctor</a><span>The crawl-to-index funnel</span></li><li><a href="cite.html">cite</a><span>Measure whether AI search cites you</span></li></ul>
-<p><a href="doctor.html">← doctor</a> · <a href="cite.html">cite →</a></p>
+<ul class="plain"><li><a href="init.html">init</a><span>Read the project and record what makes it different</span></li><li><a href="plan.html">plan</a><span>Audit the dataset before a single page is generated</span></li><li><a href="check.html">check</a><span>The full audit of generated pages</span></li><li><a href="brief.html">brief</a><span>Turn findings into work orders</span></li><li><a href="sitemap.html">sitemap</a><span>Build a sitemap from what actually exists</span></li><li><a href="notify.html">notify</a><span>Push new and changed URLs to IndexNow</span></li><li><a href="portfolio.html">portfolio</a><span>One table across every project</span></li><li><a href="profiles.html">profiles</a><span>Show the built-in content profiles</span></li><li><a href="doctor.html">doctor</a><span>The crawl-to-index funnel</span></li><li><a href="diff.html">diff</a><span>What a deploy breaks: two builds compared</span></li><li><a href="cite.html">cite</a><span>Measure whether AI search cites you</span></li></ul>
+<p><a href="doctor.html">← doctor</a> · <a href="diff.html">diff →</a></p>
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-10-30">2026-10-30</time>,
-  for indexgap 1.17.0.</p>
-  <p>indexgap 1.17.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.18.0.</p>
+  <p>indexgap 1.18.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

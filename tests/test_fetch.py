@@ -807,6 +807,34 @@ class TestRenderUnits(unittest.TestCase):
         bypass = next(a for a in args if a.startswith("--proxy-bypass-list="))
         self.assertIn("<-loopback>", bypass)
         self.assertNotIn("169.254", bypass)
+        self.assertIn("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", args)
+
+    def test_the_site_is_pinned_to_the_address_resolved_once(self):
+        args = fetch.browser_args("/bin/chrome", "https://e.com/", site="https://e.com/",
+                                  proxy_port=4321, pins={"e.com": "93.184.215.14"})
+        rules = next(a for a in args if a.startswith("--host-resolver-rules="))
+        self.assertIn("MAP e.com 93.184.215.14", rules)
+        self.assertTrue(rules.endswith("MAP * ~NOTFOUND"))
+        self.assertIn("--proxy-server=127.0.0.1:4321", args)
+        self.assertEqual(fetch._pin_hosts("http://127.0.0.1:8000/"), {})
+
+    def test_a_local_site_keeps_loopback_direct(self):
+        # С `<-loopback>` Chromium не пускает напрямую и явно названный 127.0.0.1.
+        args = fetch.browser_args("/bin/chrome", "http://127.0.0.1:8000/",
+                                  site="http://127.0.0.1:8000/")
+        bypass = next(a for a in args if a.startswith("--proxy-bypass-list="))
+        self.assertEqual(bypass, "--proxy-bypass-list=127.0.0.1")
+
+    def test_the_proxy_sink_closes_every_connection(self):
+        import socket
+        sink = fetch._Sink()
+        try:
+            conn = socket.create_connection(("127.0.0.1", sink.port), timeout=2)
+            conn.settimeout(2)
+            self.assertEqual(conn.recv(10), b"")
+            conn.close()
+        finally:
+            sink.close()
 
     def test_a_batch_browser_gets_only_plain_urls(self):
         for url in ("https://e.com/a&calc/", "https://e.com/%PATH%/", "https://e.com/(x)/"):
