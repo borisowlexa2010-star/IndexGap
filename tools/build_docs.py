@@ -72,6 +72,36 @@ OUT = ROOT / "docs"
 # не пересказ сообщения, а причина, по которой за неё стоит браться.
 
 WHY = {
+ "page-removed":
+   "A page that had impressions and is gone without a redirect becomes a 404 at "
+   "an address the engine still sends people to. Its ranking does not move to a "
+   "neighbour by itself; a 301 to the closest replacement carries most of it.",
+ "page-closed":
+   "A template change that adds noindex or a foreign canonical closes every page "
+   "built from it at once. It is the most expensive deploy mistake and the easiest "
+   "to miss, because the pages still render.",
+ "page-redirected":
+   "Informational: the page is gone but its address is redirected. It becomes a "
+   "warning when the redirect points at a path the new build does not have.",
+ "template-change":
+   "Titles and H1s changed on hundreds of pages at once are a template edit. That "
+   "can be the intended rewrite or a broken variable; either way it resets how "
+   "the engine reads those pages, so it should be a decision, not an accident.",
+ "text-shrunk":
+   "A page that lost more than half of its words between builds usually lost a "
+   "data block or a template section, not editorial text.",
+ "nosnippet-added":
+   "nosnippet keeps a page in the index but out of snippets and AI answers. Added "
+   "by a template, it silently removes a section from AI search.",
+ "page-opened":
+   "Informational: a page that was closed is open again. Worth a look when it was "
+   "closed on purpose.",
+ "pages-added":
+   "Informational: new pages per URL template, so a generator that suddenly "
+   "produced ten thousand pages is noticed before they reach the sitemap.",
+ "new-finding":
+   "A critical finding of the ordinary check that the old build did not have: the "
+   "deploy introduces it.",
  "unsupported-number":
    "A generated page that states a number absent from its own data row is not "
    "a traffic problem — it is a page that misinforms a reader who came looking "
@@ -418,6 +448,11 @@ FAMILIES = [
   "Pages whose usefulness has an expiry date, still open for indexing after it "
   "passed.",
   ["stale-event", "stale-closed", "stale-year"]),
+ ("deploy", "What a deploy breaks (indexgap diff)",
+  "Found by comparing two builds of the same site, before the new one goes "
+  "live: pages that disappear, pages that close, templates whose titles changed "
+  "everywhere at once, text that was cut in half.",
+  ['page-removed', 'page-closed', 'page-redirected', 'template-change', 'text-shrunk', 'nosnippet-added', 'page-opened', 'pages-added', 'new-finding']),
 ]
 
 COMMANDS = [
@@ -614,6 +649,19 @@ _RANK = {"info": 0, "warning": 1, "critical": 2}
 # Проверки, чей уровень или текст собирается из переменных: регулярка по
 # исходникам их не находит. Список короткий и проверяется тестом на покрытие.
 LEVEL_OVERRIDES = {
+    "page-removed": {"levels": {"critical", "warning"},
+                     "message": "the page was in the old build and is gone from the new one, "
+                                "and no redirect covers it"},
+    "page-closed": {"levels": {"critical"},
+                    "message": "the page was open for indexing and is now closed: noindex, a "
+                               "canonical to another page, or a draft"},
+    "page-redirected": {"levels": {"info", "warning"},
+                        "message": "the page is gone, and a redirect sends its address on"},
+    "template-change": {"levels": {"warning", "info"},
+                        "message": "titles, H1s or descriptions changed on most pages of one "
+                                   "URL template at once"},
+    "new-finding": {"levels": {"critical"},
+                    "message": "a critical finding that the old build did not have"},
     "ai-crawler-blocked": {"levels": {"critical", "info"},
                            "message": "OAI-SearchBot is closed: … (critical for the "
                                       "AI-search crawlers, info for training crawlers)"},
