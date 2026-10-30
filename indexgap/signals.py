@@ -206,7 +206,10 @@ def page_signals(pages: list, today: datetime.date = None) -> list:
 
 # ── хабы ─────────────────────────────────────────────────────────────────────
 
-_PAGINATION = re.compile(r"^(?:page|p|seite|страница)/?\d+$|^\d+$", re.I)
+# Пагинация — `page/2`, `p/2`, `page-2`, `seite/2`, `strona/2`, `страница/2`.
+# Голое число (`/products/1001/`, `/archive/2019/`) — адрес страницы, а не
+# номер листа: раньше такие разделы не проверялись вовсе.
+_PAGINATION = re.compile(r"^(?:page|p|seite|strona|pagina|страница)[/-]?\d+$", re.I)
 
 
 def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
@@ -218,6 +221,10 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
     неё не доходит. Ссылка засчитывается и со страниц пагинации раздела
     (`/plumbing/page/2/`), и с любой страницы-списка внутри раздела, где
     ссылок на детей раздела пять и больше — алфавитные указатели так и устроены.
+
+    Один проход по страницам: каждая встаёт под своих предков-разделов. Раньше
+    каждый раздел перебирал весь сайт, и на 40 тысячах страниц это были
+    одиннадцать секунд.
     """
     by_key = {p.key: p for p in pages}
     inbound = graph.get("inbound") or {}
@@ -230,20 +237,26 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
         parent = key[:key.rfind("/")] if key.count("/") > 2 else ""
         if parent and parent in by_key and by_key[parent].url not in skip:
             children[parent].append(page)
+    hubs = {k: kids for k, kids in children.items() if len(kids) >= 2}
+    kid_urls = {k: {p.url for p in kids} for k, kids in hubs.items()}
+    listing = {k: {by_key[k].url} for k in hubs}
+    for page in pages:
+        key = page.key
+        cut = key.rfind("/")
+        while key.count("/", 0, cut) >= 2:
+            hub_key = key[:cut]
+            if hub_key in hubs:
+                tail = key[len(hub_key) + 1:]
+                if (_PAGINATION.match(tail)
+                        or len(set(outbound.get(page.url, ())) & kid_urls[hub_key]) >= 5):
+                    listing[hub_key].add(page.url)
+            cut = key.rfind("/", 0, cut)
+
     issues = []
-    for hub_key, kids in sorted(children.items()):
-        if len(kids) < 2:
-            continue
+    for hub_key, kids in sorted(hubs.items()):
         hub = by_key[hub_key]
-        kid_urls = {k.url for k in kids}
-        section = [p for p in pages if p.key.startswith(hub_key + "/")]
-        listing = {hub.url}
-        for p in section:
-            tail = p.key[len(hub_key) + 1:]
-            if _PAGINATION.match(tail) or len(set(outbound.get(p.url, ())) & kid_urls) >= 5:
-                listing.add(p.url)
         missing = sorted(k.url for k in kids
-                         if not set(inbound.get(k.url, ())) & listing
+                         if not set(inbound.get(k.url, ())) & listing[hub_key]
                          and not _PAGINATION.match(k.key[len(hub_key) + 1:]))
         if missing:
             shown = ", ".join(urlsplit(u).path for u in missing[:3])
