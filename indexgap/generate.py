@@ -321,6 +321,7 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
         key = (row.get(keyword_field) or "").strip().lower()
         exact[key].append(i)
 
+    # `reason` — для человека и переводится; `code` — для CI, один на всех языках.
     rejected, warnings = [], []
     seen_slugs = {}
     kept = []
@@ -328,11 +329,13 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     for key, idxs in sorted(exact.items()):
         if not key:
             for i in idxs:
-                rejected.append({"row": i + 2, "reason": tr("пустой ключ"), "keyword": ""})
+                rejected.append({"row": i + 2, "code": "empty-keyword",
+                                 "reason": tr("пустой ключ"), "keyword": ""})
             continue
         if len(idxs) > 1:
             for i in idxs[1:]:
-                rejected.append({"row": i + 2, "reason": tr("точный дубль ключа"), "keyword": key})
+                rejected.append({"row": i + 2, "code": "exact-duplicate",
+                                 "reason": tr("точный дубль ключа"), "keyword": key})
         kept.append(idxs[0])
 
     empty_columns = Counter()
@@ -348,18 +351,18 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
         filled = sum(1 for f in variables if (row.get(f) or "").strip())
         share = filled / len(variables) if variables else 1.0
         if variables and cfg["min_fields_filled"] and share < cfg["min_fields_filled"]:
-            rejected.append({"row": i + 2, "keyword": key,
+            rejected.append({"row": i + 2, "keyword": key, "code": "too-few-fields",
                              "reason": tr("заполнено {a0} из {a1} полей", a0=filled, a1=len(variables))})
             continue
 
         if not re.search(r"\w", key, flags=re.UNICODE):
-            rejected.append({"row": i + 2, "keyword": key,
+            rejected.append({"row": i + 2, "keyword": key, "code": "no-letters-or-digits",
                              "reason": tr("ключ не содержит ни одной буквы или цифры")})
             continue
 
         slug = slugify(key)
         if slug in seen_slugs:
-            rejected.append({"row": i + 2, "keyword": key,
+            rejected.append({"row": i + 2, "keyword": key, "code": "slug-collision",
                              "reason": tr("slug совпадает с «{a0}»", a0=seen_slugs[slug])})
             continue
         seen_slugs[slug] = key
@@ -388,7 +391,7 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     final = [s for pos, s in enumerate(survivors) if pos not in drop]
     for pos, (i, key, slug, row) in enumerate(survivors):
         if pos in drop:
-            rejected.append({"row": i + 2, "keyword": key,
+            rejected.append({"row": i + 2, "keyword": key, "code": "same-intent",
                              "reason": tr("тот же интент, что и у другой строки")})
 
     return {
