@@ -23,6 +23,7 @@ import os
 import re
 import sys
 from collections import Counter, defaultdict
+from urllib.parse import urlsplit
 
 from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
                install, portfolio, profiles, publish, repair, report, settings,
@@ -524,7 +525,20 @@ def _analyse(args):
     aeo_result = None
     if not args.no_aeo:
         robots_path = args.robots or _guess_robots(args)
+        base = urlsplit(args.site or "").path.strip("/")
+        if base and robots_path and not args.robots:
+            # Поисковик читает только robots.txt в корне хоста. Файл сборки,
+            # которая живёт под /repo/, не действует — судить по нему нельзя.
+            parts = urlsplit(args.site)
+            notes.append(tr(
+                "robots.txt в сборке не действует: сайт живёт под /{a0}/, а поисковики "
+                "читают только {a1}://{a2}/robots.txt. Правила из него не проверялись; "
+                "настоящий файл хоста можно передать через --robots",
+                a0=base, a1=parts.scheme or "https", a2=parts.netloc))
+            robots_path = ""
         aeo_result = aeo.run(pages, robots_path, cfg=project.get("aeo"))
+        if base and not args.robots:
+            aeo_result["issues"] = [i for i in aeo_result["issues"] if i[2] != "no-robots"]
         analysis["issues"] += aeo_result["issues"]
 
     analysis["issues"] = checks.sort_issues(

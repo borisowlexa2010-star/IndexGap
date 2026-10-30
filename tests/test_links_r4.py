@@ -120,5 +120,32 @@ class Hubs(Site):
         self.assertLess(time.perf_counter() - started, 1.0)
 
 
+class SubPathRobots(Site):
+    def test_a_build_robots_under_a_sub_path_is_not_the_hosts(self):
+        import contextlib
+        import io
+        import json
+        from indexgap import cli
+        root = tempfile.mkdtemp(prefix="indexgap-r4-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "a"), exist_ok=True)
+        for name, text in {"index.html": html("Docs home", '<a href="/repo/a/">a</a>'),
+                           "a/index.html": html("Install guide", '<a href="/repo/">home</a>'),
+                           "robots.txt": "User-agent: *\nDisallow: /\n"}.items():
+            with open(os.path.join(root, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        out = os.path.join(root, "..", os.path.basename(root) + "-out.html")
+        self.addCleanup(lambda: [os.remove(p) for p in (out, out[:-5] + ".json")
+                                 if os.path.exists(p)])
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+            cli.main(["check", root, "--site", "https://user.github.io/repo/", "--out", out])
+        with open(out[:-5] + ".json", encoding="utf-8") as fh:
+            codes = {i["code"] for i in json.load(fh)["issues"]}
+        self.assertNotIn("robots-blocks-all", codes)
+        self.assertNotIn("no-robots", codes)
+        self.assertIn("user.github.io/robots.txt", stdout.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
