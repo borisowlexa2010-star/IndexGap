@@ -52,6 +52,9 @@ MESSAGES = {
     "главной страницы нет среди разобранных файлов, поэтому глубина клика и недостижимость не считались. Проверь --site и корень каталога.":
         "the home page is not among the parsed files, so click depth and "
         "unreachability were not computed. Check --site and the root directory.",
+    "до страницы ведут только ссылки со страниц, закрытых в robots.txt, а их поисковик не читает":
+        "only pages closed in robots.txt link here, and a search engine does not "
+        "read them",
     "до страницы нельзя дойти от главной по ссылкам":
         "the page cannot be reached from the home page by following links",
     "запрещён сниппет: страница может быть в индексе, но в ответы ИИ-поиска и в расширенную выдачу не попадёт":

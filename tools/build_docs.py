@@ -150,7 +150,8 @@ WHY = {
  "unreachable":
    "Being in the sitemap is a request; being reachable by links is the answer. "
    "A page a crawler cannot walk to from the home page competes for budget it "
-   "will not get.",
+   "will not get. Links on pages that robots.txt closes do not count: the "
+   "crawler never reads those pages, so it never sees their links.",
  "deep":
    "Every click of depth costs crawl frequency. Pages buried far from the home "
    "page get revisited slowly, so their updates reach the index late.",

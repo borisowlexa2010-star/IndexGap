@@ -522,7 +522,7 @@ def _redirect_target(page) -> str:
     return ""
 
 
-def link_graph(pages: list, home_url: str = None) -> dict:
+def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) -> dict:
     """
     Строит граф внутренних ссылок и считает то, что влияет на индексацию:
     входящие, исходящие, глубина клика от главной, сироты и тупики.
@@ -531,6 +531,10 @@ def link_graph(pages: list, home_url: str = None) -> dict:
     и на каталоге без главной 11 страниц из 12 объявлялись недостижимыми —
     катастрофа, которой нет. Если главной среди страниц нет, глубина
     не считается вовсе, и об этом сообщается.
+
+    `blocked` — страницы, закрытые в robots.txt: поисковик их не читает, и
+    ссылки с них никуда не ведут. Страница, до которой доходят только через
+    них, попадает в `behind_robots`.
     """
     by_key = {p.key: p.url for p in pages}
     inbound = defaultdict(set)
@@ -604,8 +608,13 @@ def link_graph(pages: list, home_url: str = None) -> dict:
                         queue.append(nxt)
         return found
 
-    by_links = walk(lambda u: outbound.get(u, ()))
-    depth = walk(lambda u: set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+    by_links = walk(lambda u: () if u in blocked else outbound.get(u, ()))
+    depth = walk(lambda u: set() if u in blocked
+                 else set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+    behind_robots = []
+    if blocked and home:
+        anyway = walk(lambda u: set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+        behind_robots = sorted(u for u in anyway if u not in depth)
     # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
     only_hreflang = sorted(set(depth) - set(by_links))
     hreflang_inbound = defaultdict(set)
@@ -632,6 +641,7 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         "dead_ends": sorted(u for u in urls if not outbound.get(u)),
         "unreachable": sorted(u for u in urls if u not in depth
                               and u != redirected_from) if home else [],
+        "behind_robots": behind_robots,
     }
 
 
@@ -1637,11 +1647,14 @@ def validate_config(cfg: dict) -> list:
 
 
 def run_all(pages: list, home_url: str = None, cfg: dict = None,
-            language: str = "") -> dict:
-    """Единая точка входа: всё, что считается локально, без сети."""
+            language: str = "", blocked: set = frozenset()) -> dict:
+    """
+    Единая точка входа: всё, что считается локально, без сети. `blocked` —
+    страницы, закрытые в robots.txt (`aeo.blocked_urls`): ссылки с них не в счёт.
+    """
     unknown = validate_config(cfg)
     cfg = {**CONFIG, **(cfg or {})}
-    graph = link_graph(pages, home_url)
+    graph = link_graph(pages, home_url, blocked)
     words = trimmed_words(pages)
     boiler = boilerplate_profile(pages, cfg, words)
     dupes = find_near_duplicates(pages, cfg, words)
@@ -1722,8 +1735,15 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     for url in graph["orphans"]:
         issues.append(("critical", url, "orphan",
                        tr("ни одна внутренняя ссылка не ведёт на страницу")))
+    # Закрытую в robots.txt страницу назовёт robots-blocks-page; дойти до неё
+    # можно, прочитать — нет.
+    behind = set(graph.get("behind_robots") or ())
+    graph["unreachable"] = [u for u in graph["unreachable"]
+                            if not (u in behind and u in blocked)]
     for url in graph["unreachable"]:
         issues.append(("critical", url, "unreachable",
+                       tr("до страницы ведут только ссылки со страниц, закрытых в robots.txt, "
+                          "а их поисковик не читает") if url in behind else
                        tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
         if url in shells or url in closed:
