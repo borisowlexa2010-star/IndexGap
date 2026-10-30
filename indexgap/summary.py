@@ -68,8 +68,51 @@ def render(data: dict) -> str:
     return "\n".join(lines)
 
 
+def _utf8_output() -> None:
+    """
+    Сводку читает GitHub, а он ждёт UTF-8 при любой кодировке консоли.
+
+    На Windows stdout, перенаправленный в `$GITHUB_STEP_SUMMARY`, — это cp1252,
+    и кириллический домен в заголовке ронял сводку UnicodeEncodeError.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+def _write(text: str) -> None:
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:
+        # Поток, который не перенастроить, получает байты UTF-8 в обход кодировки.
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is None:
+            raise
+        sys.stdout.flush()
+        buffer.write(text.encode("utf-8", "backslashreplace"))
+        buffer.flush()
+
+
+# По этим полям узнаются данные других команд: у них нет списка `issues`.
+OTHER_COMMANDS = (("projects", "portfolio"), ("keep", "plan"), ("causes", "doctor"))
+
+
+def _not_check(data) -> str:
+    """Пусто, если это данные `indexgap check`, иначе — чьи это данные."""
+    if isinstance(data, dict) and isinstance(data.get("issues"), list):
+        return ""
+    if isinstance(data, dict):
+        for key, command in OTHER_COMMANDS:
+            if key in data:
+                return command
+    return "?"
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    _utf8_output()
     if len(argv) != 1:
         print(tr("использование: python -m indexgap.summary indexgap-check.json"),
               file=sys.stderr)
@@ -80,10 +123,17 @@ def main(argv=None) -> int:
     except (OSError, ValueError) as exc:
         print(f"{argv[0]}: {exc}", file=sys.stderr)
         return 2
-    if not isinstance(data, dict):
+    # Данные doctor или portfolio раньше давали «0 страниц… Находок нет.» —
+    # зелёную сводку там, где проверки не было вовсе.
+    other = _not_check(data)
+    if other == "?":
         print(tr("{a0}: это не данные прогона indexgap check", a0=argv[0]), file=sys.stderr)
         return 2
-    sys.stdout.write(render(data) + "\n")
+    if other:
+        print(tr("{a0}: это данные indexgap {a1}, а сводка строится по данным indexgap check",
+                 a0=argv[0], a1=other), file=sys.stderr)
+        return 2
+    _write(render(data) + "\n")
     return 0
 
 

@@ -17,4 +17,6 @@ MESSAGES = {
     "использование: python -m indexgap.summary indexgap-check.json":
         "usage: python -m indexgap.summary indexgap-check.json",
     "{a0}: это не данные прогона indexgap check": "{a0}: this is not data from an indexgap check run",
+    "{a0}: это данные indexgap {a1}, а сводка строится по данным indexgap check":
+        "{a0}: this is data from indexgap {a1}, but the summary is built from indexgap check data",
 }
