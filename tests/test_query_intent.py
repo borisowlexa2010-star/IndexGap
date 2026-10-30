@@ -44,6 +44,73 @@ class Intent(unittest.TestCase):
         self.assertEqual(generate.query_intent("bestiary of austin"), "")
         self.assertEqual(generate.query_intent("toprak analysis"), "")
 
+    def test_russian_word_forms(self):
+        """Ключ в косвенном падеже — тот же ключ: «аренду», «цену», «лучших»."""
+        cases = {
+            "аренду экскаватора": "transactional",
+            "узнать цену на окна": "transactional",
+            "низких цен на визы": "transactional",
+            "стоимости доставки": "transactional",
+            "сколько стоят окна пвх": "transactional",
+            "сколько будет стоить виза": "transactional",
+            "дешёвые билеты в сочи": "transactional",
+            "дешевые билеты в сочи": "transactional",
+            "недорогие отели сочи": "transactional",
+            "скидку на визу": "transactional",
+            "торт на заказ": "transactional",
+            "квартиры посуточно": "transactional",
+            "лучших сантехников москвы": "commercial",
+            "отзывов о сервисе виз": "commercial",
+            "что лучше": "commercial",
+            "аналоги фотошопа": "commercial",
+        }
+        for keyword, expected in cases.items():
+            with self.subTest(keyword=keyword):
+                self.assertEqual(generate.query_intent(keyword), expected)
+
+    def test_russian_stems_do_not_overmatch(self):
+        for keyword in ("сцена театра", "центр города", "ценные бумаги", "ценность бренда",
+                        "стоянка у вокзала", "заказник в карелии", "заказчик проекта",
+                        "аналоговый синтезатор", "отзывчивый персонал", "топ-менеджер вакансии",
+                        "лучи солнца", "любой ценой"):
+            with self.subTest(keyword=keyword):
+                self.assertEqual(generate.query_intent(keyword), "")
+
+    def test_wrong_labels_from_ambiguous_words(self):
+        cases = {
+            # «или» само по себе не сравнение.
+            "чай или кофе": "",
+            # «снять» — аренда только рядом с жильём; вопрос «как» сильнее слабого глагола.
+            "как снять порчу": "informational",
+            "снять порчу": "",
+            "снять домашнее видео": "",
+            "снять квартиру в сочи": "transactional",
+            "как снять квартиру": "informational",
+            "как оформить визу": "informational",
+            # Английские слова, которые бывают не про покупку.
+            "best book on python": "commercial",
+            "book a hotel in paris": "transactional",
+            "how to book a flight": "informational",
+            "order of operations": "",
+            "order pizza online": "transactional",
+            "einstein quote": "",
+            "get a quote for roofing": "transactional",
+            "big deal": "",
+            "deals on laptops": "transactional",
+            "price of gold": "commercial",
+            "plumber price austin": "transactional",
+            "tank top": "",
+            "top up phone balance": "",
+            "top 10 plumbers austin": "commercial",
+            "top-rated plumbers": "commercial",
+            "vs code": "",
+            "vs code extensions": "",
+            "vs code vs sublime": "commercial",
+        }
+        for keyword, expected in cases.items():
+            with self.subTest(keyword=keyword):
+                self.assertEqual(generate.query_intent(keyword), expected)
+
     def test_plan_counts_and_writes_them(self):
         root = tempfile.mkdtemp(prefix="indexgap-intent-")
         self.addCleanup(shutil.rmtree, root, True)

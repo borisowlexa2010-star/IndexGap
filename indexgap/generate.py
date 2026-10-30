@@ -246,21 +246,43 @@ def read_dataset(path: str) -> dict:
 # ── аудит семантики ───────────────────────────────────────────────────────────
 
 # Признаки намерения. Только целые слова: «bestiary» — не «best», «toprak» — не «top».
-_INTENTS = (
-    ("transactional", r"buy|order|price|prices|pricing|cost|costs|cheap|cheapest|discount|"
-                      r"coupon|deal|deals|hire|book|booking|rent|rental|quote|near\s+me|for\s+sale|"
-                      r"купить|куплю|заказать|закажу|цена|цены|стоимость|сколько\s+стоит|недорого|"
-                      r"дешево|дёшево|аренда|арендовать|снять|доставка|скидка|скидки|промокод|"
-                      r"записаться|оформить"),
-    ("commercial", r"best|top|vs|versus|alternative|alternatives|compare|comparison|review|"
-                   r"reviews|rating|ratings|лучший|лучшие|лучшая|лучшее|топ|сравнение|сравнить|"
-                   r"отзывы|отзыв|рейтинг|аналог|аналоги|альтернатива|альтернативы|или"),
-    ("informational", r"how|what|why|when|where|guide|tutorial|ideas|meaning|definition|"
-                      r"как|что|зачем|почему|когда|где|инструкция|своими\s+руками|что\s+такое|"
-                      r"руководство|пошагово"),
-)
-_INTENT_RE = [(name, re.compile(r"(?<![\w])(?:" + words + r")(?![\w])", re.I | re.UNICODE))
-              for name, words in _INTENTS]
+# Русские слова — основами с перечнем окончаний: «цен» без него ловит «центр»
+# и «ценные бумаги», а «ценой» почти всегда переносное — «любой ценой».
+# «аренд» с любым хвостом — все падежи «аренды».
+_BUY = (r"buy|buying|prices?(?!\s+of\b)|pricing|costs?(?!\s+of\b)|cheap|cheaper|cheapest|"
+        r"discounts?|coupons?|deals|deal\s+(?:on|for|of\s+the\s+day)|hire|rent|rental|"
+        r"(?:get|request|free|instant)\s+(?:a\s+)?quotes?|near\s+me|for\s+sale|"
+        r"куп(?:ить|лю|им|ите)|покупк\w*|заказ(?:ать|а|у|ом|ы|ов)?|закаж(?:у|ем|ете|ите)|"
+        r"цен(?:а|ы|е|у|ам|ами|ах)?|ценник\w*|расценк\w*|прайс\w*|стоимост\w*|"
+        r"сколько\s+(?:\w+\s+){0,2}?сто(?:ит|ят|ить|ил|ила|ило|или)|поч[её]м|"
+        r"недорог\w*|деш[её]в\w*|аренд\w*|посуточн\w*|доставк\w*|скидк\w*|промокод\w*")
+# Слабые глаголы покупки: вопрос «как» сильнее их — «как оформить визу» читают,
+# а не покупают. «Снять» — аренда только рядом с жильём, иначе это «снять порчу».
+_BUY_WEAK = (r"book\s+(?:a|an|the|now|online|tickets?|flights?|hotels?|rooms?|tables?|"
+             r"appointments?)|booking|order\s+(?:a|an)|order\s+(?:\w+\s+)?(?:online|now|today)|"
+             r"(?:online|to)\s+order(?:ing)?|"
+             r"сн(?:ять|иму|имем|имать|имаю)\s+(?:\w+\s+)?(?:квартир|комнат|дом(?:а|ик|ики)?(?!\w)|жиль|апартамент|"
+             r"номер|офис|дач|коттедж|студи|помещени|гараж|койк|хостел|отел|гостиниц)\w*|"
+             r"оформить|записаться")
+# «или» сравнением не считается: «чай или кофе» — не выбор товара. «top» — только
+# «top 10» и «top-rated», иначе это «tank top»; «vs code» — название редактора.
+_CHOICE = (r"best|top(?=[\s-]*\d)|top[\s-](?:rated|ranked|picks?)|vs(?!\s+code\b)|versus|"
+           r"alternatives?|compare|comparison|reviews?|ratings?|(?:price|cost)\s+of|"
+           r"лучш\w*|топ(?![\s-]*менеджер)|сравнени\w*|сравнить|отзыв(?:ы|ов|а|у|ам|ами|ах|ом)?|"
+           r"рейтинг\w*|аналог(?:и|ов|а|у|ом)?|альтернатив\w*")
+_LEARN = (r"how|what|why|when|where|guide|tutorial|ideas|meaning|definition|"
+          r"как|что|зачем|почему|когда|где|инструкция|своими\s+руками|что\s+такое|"
+          r"руководство|пошагово")
+# Вопрос о способе, перед которым слабый глагол покупки уступает.
+_HOW = r"how|why|what|как|зачем|почему|что|guide|tutorial|инструкция|своими\s+руками|пошагово"
+
+
+def _words(words: str):
+    return re.compile(r"(?<![\w])(?:" + words + r")(?![\w])", re.I | re.UNICODE)
+
+
+_BUY_RE, _BUY_WEAK_RE, _CHOICE_RE, _LEARN_RE, _HOW_RE = (
+    _words(w) for w in (_BUY, _BUY_WEAK, _CHOICE, _LEARN, _HOW))
 
 
 def query_intent(keyword: str) -> str:
@@ -269,12 +291,19 @@ def query_intent(keyword: str) -> str:
     (выбрать: лучшие, vs, отзывы), informational (узнать: как, что) или пусто.
 
     Покупка сильнее выбора, выбор сильнее вопроса: «лучшая цена на визу» —
-    покупка. Это подсказка для порядка генерации, а не приговор ключу.
+    покупка. Слабый глагол покупки («оформить», «book a») уступает вопросу
+    «как»: «как оформить визу» — информация. Это подсказка для порядка
+    генерации, а не приговор ключу.
     """
     text = keyword or ""
-    for name, pattern in _INTENT_RE:
-        if pattern.search(text):
-            return name
+    if _BUY_RE.search(text):
+        return "transactional"
+    if _BUY_WEAK_RE.search(text) and not _HOW_RE.search(text):
+        return "transactional"
+    if _CHOICE_RE.search(text):
+        return "commercial"
+    if _LEARN_RE.search(text):
+        return "informational"
     return ""
 
 
