@@ -484,6 +484,12 @@ def _analyse(args):
 
     analysis["issues"] = checks.sort_issues(
         checks.drop_closed_noise(analysis["issues"], pages))
+    analysis["issues"], accepted = checks.apply_ignore(
+        analysis["issues"], project.get("ignore"), args.site)
+    analysis["accepted"] = accepted
+    if accepted:
+        print(tr("Принято намеренно (ignore в indexgap.json): {a0} — в счёт и в наряды не идут",
+                 a0=len(accepted)))
     return {"pages": pages, "rows": rows, "project": project,
             "analysis": analysis, "notes": notes,
             "template_notes": checks.template_wide(analysis["issues"],
@@ -545,6 +551,7 @@ def cmd_check(args):
         "pages": len(pages),
         "notes": notes,
         "issues": _serialize_issues(analysis["issues"]),
+        "accepted": _serialize_issues(analysis.get("accepted") or []),
         "orphans": analysis["graph"]["orphans"],
         "unreachable": analysis["graph"]["unreachable"],
         "duplicates": [{"a": a.url, "b": b.url, "jaccard": j}

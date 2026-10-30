@@ -1238,6 +1238,68 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED]
 
 
+def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
+    """
+    Находки, принятые намеренно: `ignore` в indexgap.json.
+
+    `{"noindex": ["/login/", "/search/*"], "ai-crawler-blocked": true,
+    "*": ["/drafts/*"]}` — код находки и адреса (шаблоны fnmatch по пути от
+    адреса сайта) или `true` для всех. Возвращает (оставшиеся, принятые).
+    Принятые не валят `--strict` и не попадают в наряды, но считаются и
+    пишутся в JSON отдельно: молча находка не пропадает. Опечатка в коде —
+    ошибка со словами: иначе правило тихо не действовало бы.
+    """
+    import difflib
+    import fnmatch
+    if not ignore:
+        return issues, []
+    if not isinstance(ignore, dict):
+        raise SourceError(tr("ignore в indexgap.json должен быть объектом: {\"код\": "
+                             "[\"/путь/*\"]} или {\"код\": true}"))
+    from .report import CODE_HELP
+    from .repair import FIX
+    known = set(CODE_HELP) | set(FIX) | set(CODE_WEIGHT)
+    rules = {}
+    for code, value in ignore.items():
+        if code.startswith("_"):
+            continue
+        if code != "*" and code not in known:
+            close = difflib.get_close_matches(code, sorted(known), n=1, cutoff=0.7)
+            raise SourceError(tr("ignore: кода «{a0}» нет", a0=code)
+                              + (tr(" — возможно, имелось в виду «{a0}»", a0=close[0])
+                                 if close else ""))
+        if value is True:
+            rules[code] = True
+        elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+            rules[code] = value
+        else:
+            raise SourceError(tr("ignore: у «{a0}» нужен список путей или true, а стоит {a1}",
+                                 a0=code, a1=json.dumps(value, ensure_ascii=False)))
+    base = urlsplit(site).path.rstrip("/") if site else ""
+
+    def path_of(url):
+        if "://" not in (url or ""):
+            return url or ""
+        path = urlsplit(url).path or "/"
+        if base and path.startswith(base + "/"):
+            path = path[len(base):]
+        return path
+
+    kept, accepted = [], []
+    for issue in issues:
+        path = path_of(issue[1])
+        hit = False
+        for code in (issue[2], "*"):
+            rule = rules.get(code)
+            if rule is True or (rule and any(
+                    fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase(path.rstrip("/"), p.rstrip("/"))
+                    for p in rule)):
+                hit = True
+                break
+        (accepted if hit else kept).append(issue)
+    return kept, accepted
+
+
 def validate_config(cfg: dict) -> list:
     """
     Пороги, вписанные руками: либо действуют, либо названы.
