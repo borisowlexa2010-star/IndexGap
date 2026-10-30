@@ -434,4 +434,8 @@ MESSAGES = {
         "All {a0} pages are closed to indexing (noindex, canonical, drafts) — an empty "
         "sitemap was not written.\n    Check noindex in the template and X-Robots-Tag in "
         "_headers, netlify.toml, vercel.json. If this is intended, add --force.",
+    "robots.txt в сборке не действует: сайт живёт под /{a0}/, а поисковики читают только {a1}://{a2}/robots.txt. Правила из него не проверялись; настоящий файл хоста можно передать через --robots":
+        "robots.txt in the build has no effect: the site lives under /{a0}/, and "
+        "search engines read only {a1}://{a2}/robots.txt. Its rules were not "
+        "checked; pass the host's real file with --robots",
 }
