@@ -32,7 +32,7 @@ from collections import Counter, defaultdict, deque
 
 from . import hreflang
 from .core import EMPTY_MOUNT, NOT_LIVE, SourceError, drop_spans, is_dense
-from .core import ALWAYS_SKIP, url_key
+from .core import ALWAYS_SKIP, tokenize, url_key
 from urllib.parse import urlsplit
 from .publish import indexable
 from .settings import display_width, text_volume
@@ -53,6 +53,10 @@ CONFIG = {
     # если различающихся слов у каждой не больше этого числа или этой доли.
     "slot_words": 6,
     "slot_share": 0.04,
+    # Доля вхождений, а не словаря: у страницы-клона подставленные значения
+    # (город, штат, пять чисел, три соседних города) занимают несколько
+    # процентов текста, у разных статей разное — десятки процентов.
+    "slot_token_share": 0.12,
     "slot_floor": 0.30,         # ниже этого сходства пару не перепроверяем
     "unique_share_min": 0.25,   # доля неповторяющегося текста ниже — тревога
     "max_click_depth": 3,       # глубже — почти не индексируется
@@ -241,14 +245,33 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
             continue
         j = inter / union
         if cfg["slot_floor"] <= j < cfg["near_duplicate"]:
-            j = max(j, _without_slots(words.get(a, []), words.get(b, []), k, cfg))
+            j = max(j, _without_slots(words.get(a, []), words.get(b, []), k, cfg,
+                                      _anchor_words(by_url[a]), _anchor_words(by_url[b])))
         if j >= cfg["similar"]:
             out.append((by_url[a], by_url[b], round(j, 3)))
     out.sort(key=lambda t: (-t[2], t[0].url, t[1].url))
     return {"pairs": out, "notes": notes, "method": method}
 
 
-def _without_slots(a: list, b: list, k: int, cfg: dict) -> float:
+def _anchor_words(page) -> set:
+    """Слова из текстов ссылок страницы: «соседние города» — тоже подстановка."""
+    return {w.lower() for a in (getattr(page, "anchors", None) or ()) for w in tokenize(a)}
+
+
+def _short_runs(words: list, differing: set, longest: int = 3, linked: set = frozenset()) -> bool:
+    run = 0
+    for word in words:
+        # Слово из текста ссылки не удлиняет кусок своего текста: список
+        # «Nearby: Round Rock, Cedar Park, Pflugerville» — пять подставленных
+        # слов подряд, и все они — анкоры ссылок на соседние страницы строки.
+        run = run + 1 if word in differing and word not in linked else 0
+        if run > longest:
+            return False
+    return True
+
+
+def _without_slots(a: list, b: list, k: int, cfg: dict,
+                   linked_a: set = frozenset(), linked_b: set = frozenset()) -> float:
     """
     Сходство двух страниц, если не считать подставленных значений.
 
@@ -264,8 +287,19 @@ def _without_slots(a: list, b: list, k: int, cfg: dict) -> float:
     """
     va, vb = set(a), set(b)
     only_a, only_b = va - vb, vb - va
+    if not (only_a or only_b) or not a or not b:
+        return 0.0
     limit = max(cfg["slot_words"], int(min(len(va), len(vb)) * cfg["slot_share"]))
-    if not (only_a or only_b) or len(only_a) > limit or len(only_b) > limit:
+    few_words = len(only_a) <= limit and len(only_b) <= limit
+    # Блок фактов и блок «соседние города» дают двенадцать-пятнадцать разных
+    # слов — больше порога словаря, — хотя текст тот же. Мерим и долю вхождений.
+    # Подстановка — короткая вставка: город, число, «Round Rock». Семь разных
+    # слов подряд — уже свой текст, а не подставленное значение.
+    share = cfg.get("slot_token_share", CONFIG["slot_token_share"])
+    rare = (_short_runs(a, only_a, linked=linked_a) and _short_runs(b, only_b, linked=linked_b)
+            and sum(1 for w in a if w in only_a) <= len(a) * share
+            and sum(1 for w in b if w in only_b) <= len(b) * share)
+    if not (few_words or rare):
         return 0.0
     k = k * 2 if is_dense(a) else k
     sa = _shingles(["\x00" if w in only_a else w for w in a], k)
@@ -1329,7 +1363,7 @@ def validate_config(cfg: dict) -> list:
             raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=key, a1=merged[key], a2=rule))
 
     for key in ("near_duplicate", "similar", "boilerplate_share", "unique_share_min",
-                "slot_share", "slot_floor"):
+                "slot_share", "slot_floor", "slot_token_share"):
         need(0 < merged[key] <= 1, key, tr("нужна доля от 0 до 1 — например 0.8, а не 80"))
     need(merged["similar"] <= merged["near_duplicate"], "similar",
          tr("порог «похожих» не может быть выше порога почти-дублей"))
