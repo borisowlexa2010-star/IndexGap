@@ -245,4 +245,7 @@ MESSAGES = {
         "indexing",
     "цитирование в ИИ-ответах":
         "citations in AI answers",
+    "`{a0}` — на {a1} страницах шаблона {a2} из {a3}. По сайту это {a4:.0%}, но страницы одного шаблона и чинятся один раз — в этом шаблоне.":
+        "`{a0}` — on {a1} pages of the template {a2} out of {a3}. That is {a4:.0%} "
+        "of the site, but pages of one template are fixed once — in that template.",
 }
