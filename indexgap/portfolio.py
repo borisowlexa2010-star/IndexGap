@@ -190,6 +190,10 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
 
         analysis["issues"] = checks.sort_issues(
             checks.drop_closed_noise(analysis["issues"], pages))
+        # Принятое намеренно в indexgap.json проекта — так же, как в `check`.
+        analysis["issues"], accepted = checks.apply_ignore(
+            analysis["issues"], project.get("ignore"), spec["site"])
+        result["accepted"] = len(accepted)
         result["issues"] = analysis["issues"]
         result["counts"] = dict(Counter(i[0] for i in analysis["issues"]))
         result["orphans"] = len(analysis["graph"]["orphans"])

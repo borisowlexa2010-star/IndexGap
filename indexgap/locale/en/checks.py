@@ -80,6 +80,11 @@ MESSAGES = {
         "the links start at the domain root — on the live site they are 404s. Set "
         "the base path in the generator (pathPrefix, baseURL, basePath) and rebuild. "
         "This is also why every page looks like an orphan.",
+    "ignore в indexgap.json должен быть объектом: {\"код\": [\"/путь/*\"]} или {\"код\": true}":
+        "ignore in indexgap.json must be an object: {\"code\": [\"/path/*\"]} or {\"code\": true}",
+    "ignore: кода «{a0}» нет": "ignore: there is no code “{a0}”",
+    "ignore: у «{a0}» нужен список путей или true, а стоит {a1}":
+        "ignore: “{a0}” needs a list of paths or true, and it is {a1}",
     "ни одна внутренняя ссылка не ведёт на страницу":
         "no internal link points at this page",
     "объём текста ≈ {a0} — тонкая страница":
