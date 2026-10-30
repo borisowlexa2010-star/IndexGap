@@ -230,7 +230,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.16.0
+- uses: borisowlexa2010-star/IndexGap@v1.17.0
   with:
     root: out
     site: https://example.com

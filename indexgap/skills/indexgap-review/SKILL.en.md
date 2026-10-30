@@ -138,6 +138,7 @@ Language versions:
 | `translations-parked` | critical | translations closed with noindex and canonicalised to the original; one line with a count per language — decide language by language |
 | `hreflang-missing` | warning | the site has several languages and this page does not say so |
 | `hreflang-bad-code`, `hreflang-lang-mismatch` | warning | a bad code or an empty href; the language does not match the text |
+| `lang-script-mismatch` | warning | `<html lang>` names one language, the text is in another script (Chinese text under `lang="en"`) — fix `lang` in the template |
 | `hreflang-target-blocked` | warning | the cluster points at a page closed to indexing |
 | `hreflang-unknown-target` | info | an address in the cluster is not among the pages |
 | `stale-closed` | info | the date has passed and the page is already closed to indexing — as it should be |
@@ -172,7 +173,7 @@ indexgap check --out indexgap-baseline.json                # once; commit the fi
 indexgap check --baseline indexgap-baseline.json --strict  # fails only on new critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.16.0` with `root`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.17.0` with `root`,
 `site`, and optional `baseline` and `args`.
 
 ## Before a deploy

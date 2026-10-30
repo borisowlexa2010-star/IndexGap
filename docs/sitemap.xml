@@ -32,12 +32,14 @@
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/jsonld-faq-invisible.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/jsonld-mismatch.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/jsonld-no-type.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/lang-script-mismatch.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/llm-leftover.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/long-paragraph.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/low-uniqueness.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/many-h1.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/mojibake.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/near-duplicate.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/new-finding.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-answer.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-author.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-date.html</loc></url>
@@ -51,8 +53,14 @@
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-title.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/no-viewport.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/noindex.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/nosnippet-added.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/nosnippet.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/orphan.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/page-closed.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/page-opened.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/page-redirected.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/page-removed.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/pages-added.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/robots-blocks-all.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/robots-blocks-page.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/robots-no-sitemap.html</loc></url>
@@ -64,7 +72,9 @@
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/stale-event.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/stale-year.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/still-draft.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/template-change.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/template-skeleton.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/text-shrunk.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/thin.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/title-h1-mismatch.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/checks/title-long.html</loc></url>
@@ -79,6 +89,7 @@
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/check.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/cite.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/doctor.html</loc></url>
+  <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/fetch.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/index.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/init.html</loc></url>
   <url><loc>https://borisowlexa2010-star.github.io/IndexGap/commands/notify.html</loc></url>

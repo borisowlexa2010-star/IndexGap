@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.17.0 — 2026-10-30
+
+What 1.16.0 left open, closed — and three commands the package was missing.
+
+**New**
+
+* **`indexgap diff OLD NEW --site URL`** — what a deploy breaks, before it goes
+  live. Two builds of the same site are compared: pages that disappear with no
+  redirect (`_redirects`, `netlify.toml`, `vercel.json` are read), pages that
+  close (noindex, a canonical elsewhere, a draft), titles, H1s and descriptions
+  changed across most of one URL template, text cut by more than half, new
+  pages per template, and critical findings the old build did not have. HTML and
+  JSON like `check`; `--strict` fails on anything critical.
+* **`indexgap fetch https://example.com --out-dir ./live`** — for a site you
+  have no build of. URLs come from the sitemap (from `--sitemap`, robots.txt or
+  `/sitemap.xml`); robots.txt is obeyed, other hosts are never requested, 500
+  pages by default (`--all` to lift it). Pages are saved so that `check` reads
+  them back under the same addresses, `X-Robots-Tag` headers go into `_headers`,
+  statuses and redirects into `fetch.json`. It prints the next command to run.
+* **Risk per template.** `check` groups pages by URL pattern and scores each
+  template 0–100 by how many of its pages carry critical findings and warnings,
+  weighted by severity. The five riskiest are printed, all are in the JSON
+  under `templates` and in the report.
+* **`lang-script-mismatch`** (warning): `<html lang="en">` over Chinese or
+  Korean text. Search engines, screen readers and this package's own hreflang
+  checks trust `lang`.
+* **`wrong-link-form`** (warning): a link that reaches a page only because the
+  checker forgives the difference — `/about.html` for `about/index.html`,
+  `/faq/` for `faq.html`, another letter case. Static hosts answer 404. A
+  redirect rule that covers the link silences it.
+
+**Fixed**
+
+* Hubs: letter pages of an A–Z index count as listings at any size, sibling
+  pagination (`/plumbing-2/`) is pagination, and a rotating "nearby" block on
+  the kids no longer hides a hub that links two of twenty.
+* Links on pages closed in robots.txt no longer make other pages reachable —
+  the crawler never reads them. `check` and `doctor` agree on it.
+* `vercel.json` sources with regex groups (`:id(\d+)`, `((?!blog).*)`,
+  `(.*)\.pdf`) match; a rule that cannot be read is named, not skipped
+  silently.
+* Dotted slugs (`/v1.2/`, `/asp.net`) and folders holding only a PDF are checked
+  for broken links; only real file extensions are skipped.
+* An inline `values = { "X-Robots-Tag" = "noindex" }` in `netlify.toml` closes
+  pages again (a 1.16.0 regression).
+* Pages over 4 KB got different verdicts than short ones: the `TODO` in a copy
+  button and the "page with code" rule for `unfilled-slot` only worked on short
+  pages.
+* `fetch` prints remote text without control characters, so a crafted
+  `Location` header cannot become a GitHub Actions command in a CI log.
+
+**Memory**: word lists are shared instead of copied and link captions are
+interned; a 3,000-page, 211 MB build peaks at 710 MB instead of 907 MB, with
+byte-identical output.
+
+1,141 tests on 3.9, 3.12 and 3.15.
+
 ## 1.16.0 — 2026-10-30
 
 Four adversarial batteries against 1.13–1.15 — 86 scenarios on the page
