@@ -1,5 +1,101 @@
 # Changelog
 
+## 1.16.0 — 2026-10-30
+
+Four adversarial batteries against 1.13–1.15 — 86 scenarios on the page
+signals, 59 on doctor, plan and CI, 74 on links, hubs and hosting rules — a
+review of the concept, and fifteen built sites the package had never seen
+(Japanese, Chinese, Korean, Russian and Persian docs; a 3,567-page Starlight
+directory; a 6,238-page mdBook + rustdoc build). Roughly a third of the
+scenarios failed. This release closes them.
+
+**The concept**
+
+* **A template is a unit, not only the whole site.** "Fix it once in the
+  template" required a finding on 90% of *all* pages, so on a site where 170
+  `/plumbing/<city>/` pages sit next to 30 blog posts it never fired. Pages are
+  now also grouped by URL pattern; a finding on 90% of a 20+ page pattern is
+  one template brief, and only those pages are collapsed into it — a blog post
+  with the same finding keeps its own brief.
+* **A dataset that joins nothing is loud.** When the dataset matched under half
+  of the pages, the fact check silently checked nothing. Rows are now matched
+  by a `slug`/`url`/`path` column first, a site-level `dataset-unbound` warning
+  says how many pages found no row, and the rows that have no page are listed.
+* **Accepted on purpose.** `"ignore": {"code": ["/path/*"]}` in `indexgap.json`
+  keeps a finding out of the score, the briefs and `--strict`; the JSON keeps
+  it under `accepted`. An unknown code is an error.
+* **City-swap clones are near-duplicates again** when a facts box and a
+  nearby-cities block differ: substituted slots are measured by token share in
+  short runs, so they no longer hide a page that is otherwise identical.
+* **`stale-year` judges a section's template**, not a page: one past year in
+  five or more titles and a third of the section. "2019 Honda Civic" is about
+  2019; "ES2017", "SQL Server 2019" are versions.
+* **Advice that fits programmatic pages.** Near-duplicate help no longer says
+  "point the canonical at one" for pages built for different cities — that
+  hides the pages the site exists for; give each its own data, or merge pages
+  for one query. Question headings and the short first paragraph are labelled
+  heuristics, not search engine rules.
+* **The 1,000-row Search Console export cap** is named when an export has
+  exactly 1,000 URLs: whatever did not fit would otherwise count as "not
+  indexed".
+
+**False alarms closed**
+
+* `unfilled-slot` was critical on 89 of 89 sampled documentation pages. With
+  a dataset its columns decide whose variable `{{city}}` is; without one, a
+  page with code examples gets a warning. `{{ft^2}}` is notation; `undefined`
+  in "null vs undefined in TypeScript" is a topic, not a seam.
+* Translations sharing a title or description are not duplicates.
+* A `TODO` inside an attribute (Starlight's copy button) is not page text.
+* Hosting rules: a `_headers` rule for another host — Cloudflare's own
+  `https://:project.pages.dev/*` preview recipe — closed the whole production
+  site; it no longer applies, and `! X-Robots-Tag` reopens. A commented-out
+  `X-Robots-Tag` in `netlify.toml` is not a rule. `vercel.json` entries with
+  `has`/`missing` apply only when their host condition matches the site.
+  `bingbot: noindex` does not close a page for Google.
+* Under `--site https://company.com/docs/`, links to `/pricing` or to other
+  GitHub Pages projects are another part of the domain, not broken links; the
+  build's own `robots.txt` there is not the host's and is not judged.
+* Hubs: numeric slugs (`/products/1001/`) are pages, not pagination; a
+  site-wide table of contents (mdBook's `toc.html`) links the section; a
+  canonical twin is not a missing kid; Sphinx `_modules` is not a section.
+* `noindex` on print, toc, search and 404 pages is info: generators close them
+  on purpose.
+* `plan` intent: Russian word forms (аренду, цену, стоимости, лучших, отзывов,
+  недорогие) are labelled; "или", "how to book", "order of operations", "tank
+  top", "vs code" are no longer commercial or transactional.
+
+**doctor**
+
+* A Performance export next to Bing or Yandex index lists was read as Google's
+  index, and pages without impressions became "missing only from Google".
+  Impressions are now detected per source and never judged as an index.
+* near-page-one reads Portuguese, Indonesian, Turkish, Vietnamese and
+  Ukrainian headers, never takes "Средняя позиция показа" for impressions,
+  reads `3,000` as three thousand, leaves out closed pages, names the engine
+  of every row, and sums rows split by fragments, http/https and `?utm_`.
+* URLs are printed and stored as URLs, not internal keys; causes have stable
+  `id`s; `duplicate_method` is a code.
+
+**CI and data**
+
+* Baseline: findings with a subject — which bot, which link target, which twin
+  — are new when a new subject appears; unblocking OAI-SearchBot and blocking
+  PerplexityBot used to read as "nothing new". A baseline saved with a BOM is
+  read.
+* `check` exits 2 when the `--sitemap` it was given cannot be read; `sitemap`
+  refuses to write an empty file when every page is closed (`--force` to
+  insist).
+* The Action fails loudly on an unbalanced quote in `args` instead of dropping
+  them, gives every run its own directory, and writes the step summary in
+  UTF-8 on Windows. `indexgap.summary` refuses doctor, portfolio and plan JSON.
+* `plan`'s rejected rows carry a stable `code`.
+* `hub-missing-links` is one pass: 11 s → under 0.1 s on 40,000 pages.
+* The root overview skill exists in English (`SKILL.en.md`); the stale
+  `PUSH.md` is gone.
+
+1,034 tests on 3.9, 3.12 and 3.15.
+
 ## 1.15.0 — 2026-10-29
 
 Nine additions from a public list of 232 SEO tactics, sorted by one rule: what

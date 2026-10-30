@@ -157,8 +157,13 @@ indexgap check --out indexgap-baseline.json                # один раз; ф
 indexgap check --baseline indexgap-baseline.json --strict  # падает только на новых critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.15.0` с `root`, `site`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.16.0` с `root`, `site`,
 необязательными `baseline` и `args`.
+
+Находку, которую человек принимает намеренно, вписывают в `indexgap.json`:
+`"ignore": {"no-viewport": ["/print/*"]}` — без его согласия находки не
+глуши. Если прогон говорит `dataset-unbound`, датасет к страницам не
+привязан: ни одно число не сверено, и называть факты проверенными нельзя.
 
 ## Наряды на починку
 

@@ -137,8 +137,22 @@ indexgap check --baseline indexgap-baseline.json --strict
 ```
 
 A finding is matched by page, check and level, not by its wording, so a
-changed number in the message does not make it new. The run prints what
-appeared and what is gone, and both go into the JSON under `baseline`.
+changed number in the message does not make it new. Findings with a subject —
+which bot is blocked, where a broken link points, which page is the twin — also
+compare the subject: unblocking one AI crawler and blocking another is a new
+finding, while fewer broken links is not. The run prints what appeared and what
+is gone, and both go into the JSON under `baseline`.
+
+Some findings are accepted on purpose: a print version without a viewport, a
+glossary that is meant to be short. List them in `indexgap.json` and they stop
+counting toward the score, the briefs and `--strict`; the run prints how many
+were accepted, and the JSON keeps them under `accepted`:
+
+```json
+{"ignore": {"no-viewport": ["/print/*"], "thin": ["/glossary/*"], "no-og": true}}
+```
+
+A code that does not exist is an error, not a silent no-op.
 
 Exit codes: `0` — the run finished (findings or not); `1` — `--strict` and there
 are critical findings (only new ones, with `--baseline`); `2` — the input is
@@ -155,7 +169,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.15.0
+- uses: borisowlexa2010-star/IndexGap@v1.16.0
   with:
     root: out
     site: https://example.com
@@ -234,11 +248,15 @@ the whole point:
   fired on 2,919 of 2,970 pages. That is one edit to one template, and 2,919
   identical tasks would bury the 51 pages that actually differ. The same holds
   per language: a finding on every page of the Chinese version is 10% of the
-  site but still one template fix.
+  site but still one template fix. And per URL pattern: 170 pages of
+  `/plumbing/*/` next to 30 blog posts — a defect of the city template is 85%
+  of the site and 100% of its template, so it is one brief for that template,
+  while a blog post with the same finding keeps its own.
 * **Near-duplicates are fixed as a group.** 588 duplicate findings are 72
   groups. One page out of a group of 17 cannot be fixed alone — the brief goes
-  to the group: keep one, pull the rest apart by intent, and never link them to
-  each other.
+  to the group. Pages built for different queries (a city, a model) need their
+  own data, not a canonical that would hide them; pages for one query are merged
+  into one.
 * **robots.txt, markup and hreflang clusters belong to the site**, not to a
   page, and live in their own file.
 
