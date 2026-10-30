@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime
 import os
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
 from .core import ALWAYS_SKIP, tokenize, url_key
@@ -237,9 +237,22 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
         parent = key[:key.rfind("/")] if key.count("/") > 2 else ""
         if parent and parent in by_key and by_key[parent].url not in skip:
             children[parent].append(page)
-    hubs = {k: kids for k, kids in children.items() if len(kids) >= 2}
+    # `_modules/`, `_sources/` — служебные листинги Sphinx, а не разделы сайта.
+    hubs = {k: kids for k, kids in children.items()
+            if len(kids) >= 2 and "/_" not in k}
     kid_urls = {k: {p.url for p in kids} for k, kids in hubs.items()}
     listing = {k: {by_key[k].url} for k in hubs}
+    # Оглавление на весь сайт (`toc.html` mdBook, HTML-карта сайта) — тоже
+    # путь к страницам раздела: оно ссылается почти на всех его детей сразу.
+    hub_of = {url: k for k, urls in kid_urls.items() for url in urls}
+    for page in pages:
+        out = set(outbound.get(page.url, ()))
+        if len(out) < 5:
+            continue
+        touched = Counter(hub_of[u] for u in out if u in hub_of)
+        for hub_key, n in touched.items():
+            if n >= max(5, 0.8 * len(kid_urls[hub_key])):
+                listing[hub_key].add(page.url)
     for page in pages:
         key = page.key
         cut = key.rfind("/")

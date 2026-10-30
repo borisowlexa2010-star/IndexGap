@@ -582,6 +582,45 @@ def _uninformative_length(anchor: str, cfg: dict) -> bool:
 
 
 _FIELD_LEFTOVER = re.compile(r"\b(?:undefined|NaN)\b|(?<=\S)\s+\b(?:null|None)\b")
+# Пустое значение стоит там, где генератор подставляет поле: в начале, после
+# предлога или разделителя. «Plumbers in undefined», «Austin, null» — шов;
+# «Handling None values», «Why NaN !== NaN» — предмет текста.
+_SLOT_BEFORE = re.compile(
+    r"(?:^|[,|·•—–:;(\-]|\b(?:in|for|near|at|from|of|to|в|во|для|на|из|по|у))\s*$", re.I)
+# `{{ft^2}}` — нотация единиц, а не переменная: внутри шва стоит имя поля.
+_SLOT_NAME = re.compile(r"^\s*[A-Za-z_][\w.]*\s*(?:\|[^{}]*)?$")
+_IDENT = re.compile(r"[A-Za-z_]\w*")
+
+
+def _docs_page(page) -> bool:
+    """Страница с примерами кода: `{FOLDER_NAME}` и `undefined` на ней — нотация автора."""
+    raw = (page.raw or "")[:400_000].lower()
+    return "<pre" in raw or "<code" in raw
+
+
+def _field_leftovers(value: str) -> list:
+    hits = list(_FIELD_LEFTOVER.finditer(value))
+    if len({m.group(0).strip() for m in hits}) > 1:
+        return []                          # «null vs undefined» — тема, а не шов
+    return [m.group(0).strip() for m in hits
+            if _SLOT_BEFORE.search(value[:m.start()])]
+
+
+def _template_verdict(sample: str, columns: set, docs: bool) -> str:
+    """
+    Шов шаблона: critical, warning или пусто.
+
+    С датасетом решают его колонки: `{{city}}` при колонке `city` — шов,
+    `{FOLDER_NAME}` — нотация документации. Без датасета на странице с кодом
+    это предупреждение, на странице без кода — критично, как и было.
+    """
+    if sample.startswith("{{") and not _SLOT_NAME.match(sample[2:-2]):
+        return ""
+    names = {n.lower() for n in _IDENT.findall(sample)}
+    if columns:
+        return "critical" if names & columns else "warning"
+    return "warning" if docs else "critical"
+
 _EMPTY_SLOT = re.compile(
     # «Plumbers in , TX»: пробел перед знаком — пустое место. «Where it comes
     # from?» — законный предлог в конце фразы, пробела там нет.
@@ -625,11 +664,18 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
             slots = find_slots(visible_text(page.raw) if not markdown else page.text,
                                markdown=markdown)
         critical, empty = [], []
+        docs = _docs_page(page)
         llm = [s for k, s in slots if k == "llm"]
         mojibake = [s for k, s in slots if k == "mojibake"]
         for kind, sample in slots:
-            if kind in ("template", "leftover"):
-                critical.append(sample)
+            if kind == "template":
+                verdict = _template_verdict(sample, columns, docs)
+                if verdict == "critical":
+                    critical.append(sample)
+                elif verdict:
+                    empty.append(sample)
+            elif kind == "leftover":
+                (empty if docs else critical).append(sample)
             elif kind == "lorem":
                 # Документация шаблонизаторов показывает lorem ipsum в примерах
                 # (hexo.io). На странице каталога это забытая заглушка — но
@@ -641,9 +687,16 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
             t for level, t in (page.headings or []) if level <= 2]
         for value in fields_text:
             if not markdown:
-                critical += [m.group(0) for m in SLOT_TEMPLATE.finditer(value)]
-            critical += [m.group(0).strip() for m in _FIELD_LEFTOVER.finditer(value)]
-            if _EMPTY_SLOT.search(value):
+                for m in SLOT_TEMPLATE.finditer(value):
+                    verdict = _template_verdict(m.group(0), columns, docs)
+                    if verdict == "critical":
+                        critical.append(m.group(0))
+                    elif verdict:
+                        empty.append(m.group(0))
+            if not docs:
+                critical += _field_leftovers(value)
+            if not docs and _EMPTY_SLOT.search(value):
+                # `opt_*()`, `if ()`, «| — побитовое ИЛИ» — заголовки справочника.
                 empty.append(value.strip())
         for block in page.jsonld or []:
             try:
@@ -671,6 +724,9 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
     return issues
 
 
+_ATTRIBUTE = re.compile(r"""\s[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*')""")
+
+
 def check_brief(pages: list, cfg: dict = None) -> list:
     """Выполнен ли бриф: не остались ли следы заготовки и вменяемы ли анкоры."""
     cfg = {**CONFIG, **(cfg or {})}
@@ -679,6 +735,10 @@ def check_brief(pages: list, cfg: dict = None) -> list:
         # `TODO:` в скрипте или в примере кода — заметка разработчика, а не
         # недописанная страница.
         raw = _strip_fences(drop_spans(page.raw or "", NOT_PROSE))
+        # Атрибуты — не текст: кнопка «копировать» Starlight держит весь пример
+        # кода с его `TODO:` в `data-code` (devtut: 17 ложных находок из 21).
+        if "TODO" in raw:
+            raw = _ATTRIBUTE.sub("", raw)
         if any(marker in raw for marker in OWN_BRIEF_MARKERS):
             issues.append(("critical", page.url, "brief-left",
                            tr("в файле остался блок брифа или TODO — страница не дописана")))
