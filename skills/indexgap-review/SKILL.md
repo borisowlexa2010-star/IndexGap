@@ -157,8 +157,13 @@ indexgap check --out indexgap-baseline.json                # once; commit the fi
 indexgap check --baseline indexgap-baseline.json --strict  # fails only on new critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.15.0` with `root`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.16.0` with `root`,
 `site`, and optional `baseline` and `args`.
+
+A finding the person accepts on purpose goes into `indexgap.json` as
+`"ignore": {"no-viewport": ["/print/*"]}` — never silence a finding
+without asking. If the run says `dataset-unbound`, the dataset is not joined
+to the pages: no number was checked, so do not report the facts as verified.
 
 ## Repair briefs
 
