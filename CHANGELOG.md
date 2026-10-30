@@ -1,7 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.18.0 — 2026-10-30
 
+Everything 1.17.0 listed as "not yet", closed.
+
+* **`indexgap fetch --crawl`** follows links breadth first from the home page
+  and the sitemap. Every page records how it was found (`found_by`,
+  `linked_from`); the summary lists pages found only by links — missing from
+  the sitemap — and sitemap URLs no fetched page links to, plus broken links
+  with the page they came from. Output is the same whatever `--jobs` is.
+* **`indexgap fetch --render`** saves the DOM an installed Chrome, Chromium or
+  Edge draws, for pages JavaScript builds (`--browser PATH` if it is not found).
+  The browser reaches only the site: its names are pinned to the address
+  resolved once, so DNS cannot be switched mid-run; other names do not
+  resolve; IP literals, loopback and the cloud metadata address go to a proxy
+  sink the package itself listens on; WebRTC does not go around it. The
+  sandbox stays on — as root on Linux it refuses until `--browser-no-sandbox`
+  accepts the risk. A browser that hangs is killed after 60 s and the raw HTML
+  is kept. Without `--render`, pages that look like empty JS shells are counted
+  and the summary says to rerun with it.
 * **`indexgap diff --dataset`** (and `--keyword`): the dataset is applied to
   both builds, so a number that is not in the data and is new in NEW is a
   `new-finding`. Before, diff compared invented numbers only when
@@ -10,13 +27,19 @@
   build) runs `indexgap diff` after `check` in the same step: report and data
   in the same artifact, outputs `diff-report` and `diff-data`, its own summary
   on the run page, and with `strict` the step fails if either run fails.
-  `diff-args` passes anything else to `diff`. `old-root` needs `root`.
+  `diff-args` passes anything else to `diff`. Without `root` the new build is
+  the `root` in `indexgap.json`.
 * **`python -m indexgap.summary` reads diff data**: counts by level and the
   critical items, instead of refusing it.
 * **`portfolio` reads robots.txt for reachability**, as `check` and `doctor`
   do: links on a page robots.txt blocks no longer make other pages reachable.
   A build robots.txt of a site under a base path is not the host's and is not
   applied (a note says so) unless the project names one in `robots`.
+* **Memory**: paragraphs are stored as spans of the page text, not a second
+  copy. A 3,000-page build peaks 20% lower in one process and 32% lower in
+  parallel, with the same wall time and byte-identical output.
+
+1,196 tests on 3.9, 3.12 and 3.15.
 
 ## 1.17.0 — 2026-10-30
 

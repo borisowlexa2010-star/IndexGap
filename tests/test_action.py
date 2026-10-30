@@ -174,6 +174,15 @@ class ActionScript(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("old-root", proc.stdout)
 
+    def test_old_root_takes_the_new_build_from_indexgap_json(self):
+        with open(os.path.join(self.dir, "indexgap.json"), "w", encoding="utf-8") as fh:
+            json.dump({"root": DEMO, "site": SITE}, fh)
+        self.addCleanup(os.remove, os.path.join(self.dir, "indexgap.json"))
+        proc, out, _ = self.run_step(site=SITE, strict="false",
+                                     **{"old-root": self.old_same})
+        self.assertNotEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertTrue(out.get("diff-data"), proc.stdout)
+
     def test_an_unbalanced_quote_in_diff_args_is_an_error(self):
         proc, _, _ = self.run_step(root=DEMO, site=SITE, **{"old-root": self.old_same,
                                                            "diff-args": "--dataset 'x"})

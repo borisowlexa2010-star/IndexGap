@@ -512,7 +512,15 @@ COMMANDS = [
   "robots.txt, never leaves the host, stops at --limit, and saves each page "
   "where check reads it back under the same URL. Status codes and redirects go "
   "to fetch.json, X-Robots-Tag headers to _headers, and robots.txt and the "
-  "sitemap files alongside — then it prints the check command to run next."),
+  "sitemap files alongside — then it prints the check command to run next. "
+  "--crawl also follows links and names pages missing from the sitemap; "
+  "--render saves what an installed Chromium draws, kept to the site's host."),
+ ("diff", "What a deploy breaks: two builds compared",
+  "Compares the build in production with the new one before it goes live: "
+  "pages that disappear without a redirect, pages that close, titles changed "
+  "across a whole URL template, text cut in half, and critical findings the "
+  "old build did not have. --strict fails the deploy on anything critical; the "
+  "GitHub Action runs it with old-root."),
  ("cite", "Measure whether AI search cites you",
   "Asks Perplexity, the OpenAI Responses API, Gemini and Grok a set of real "
   "user questions and counts how often your domain comes back among the "

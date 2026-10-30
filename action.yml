@@ -99,11 +99,18 @@ runs:
           fi
           eval "extra=($quoted)"
         }
-        # Сравнивать не с чем, если новая сборка не названа: путь из
-        # indexgap.json знает только сам check.
+        # Новая сборка не названа — берём каталог из indexgap.json, как check.
         if [ -n "$IG_OLD_ROOT" ] && [ -z "$IG_ROOT" ]; then
-          echo "::error title=indexgap::old-root needs root: name the directory of the new build"
-          exit 2
+          IG_ROOT="$(python -c 'import json,sys
+        try:
+            r = json.load(open("indexgap.json", encoding="utf-8")).get("root") or ""
+        except (OSError, ValueError):
+            r = ""
+        print(r if isinstance(r, str) else "")' 2>/dev/null || true)"
+          if [ -z "$IG_ROOT" ]; then
+            echo "::error title=indexgap::old-root needs root: name the directory of the new build or set root in indexgap.json"
+            exit 2
+          fi
         fi
         # Свой каталог на каждый запуск: второй вызов действия в той же job
         # не должен показывать отчёт первого, если сам упал на входе.
