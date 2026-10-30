@@ -2,7 +2,8 @@ name: indexgap check
 description: >-
   Quality control for programmatic SEO in CI: near-duplicates, thin pages,
   template seams, orphans, hreflang and JavaScript shells in the built site.
-  With a baseline, the build fails only on findings that are new.
+  With a baseline, the build fails only on findings that are new; with the
+  previous build, also on what the deploy breaks.
 author: borisowlexa2010-star
 branding:
   icon: check-square
@@ -26,6 +27,17 @@ inputs:
   args:
     description: Any other arguments for `indexgap check`, e.g. "--sitemap out/sitemap.xml --profile catalog".
     default: ""
+  old-root:
+    description: >-
+      Directory with the previous build (the one in production), e.g. built from
+      the previous commit or downloaded from the last deploy. When set, `indexgap
+      diff` compares it with `root` after the check: pages that disappear without a
+      redirect, pages that close, template-wide changes, new critical findings.
+      Needs `root`.
+    default: ""
+  diff-args:
+    description: Any other arguments for `indexgap diff`, e.g. "--dataset keywords.csv --profile catalog".
+    default: ""
   python-version:
     description: Python to run on. Any version from 3.9 works.
     default: "3.12"
@@ -40,6 +52,12 @@ outputs:
   data:
     description: Path to the JSON data, usable as the next baseline.
     value: ${{ steps.check.outputs.data }}
+  diff-report:
+    description: Path to the HTML report of `indexgap diff`; empty without old-root.
+    value: ${{ steps.check.outputs.diff-report }}
+  diff-data:
+    description: Path to the JSON data of `indexgap diff`; empty without old-root.
+    value: ${{ steps.check.outputs.diff-data }}
 
 runs:
   using: composite
@@ -67,7 +85,26 @@ runs:
         IG_BASELINE: ${{ inputs.baseline }}
         IG_STRICT: ${{ inputs.strict }}
         IG_ARGS: ${{ inputs.args }}
+        IG_OLD_ROOT: ${{ inputs.old-root }}
+        IG_DIFF_ARGS: ${{ inputs.diff-args }}
       run: |
+        # Extra arguments are split like a shell would, without running them.
+        # Незакрытая кавычка — ошибка, а не тихо потерянные аргументы.
+        split_args() {
+          extra=()
+          [ -n "$2" ] || return 0
+          if ! quoted="$(printf '%s' "$2" | python -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in shlex.split(sys.stdin.read())))')"; then
+            echo "::error title=indexgap::cannot split $1 (unbalanced quote?): $2"
+            exit 2
+          fi
+          eval "extra=($quoted)"
+        }
+        # Сравнивать не с чем, если новая сборка не названа: путь из
+        # indexgap.json знает только сам check.
+        if [ -n "$IG_OLD_ROOT" ] && [ -z "$IG_ROOT" ]; then
+          echo "::error title=indexgap::old-root needs root: name the directory of the new build"
+          exit 2
+        fi
         # Свой каталог на каждый запуск: второй вызов действия в той же job
         # не должен показывать отчёт первого, если сам упал на входе.
         out="$(mktemp -d "$RUNNER_TEMP/indexgap-XXXXXX")"
@@ -77,17 +114,15 @@ runs:
         [ -n "$IG_SITE" ] && cmd+=(--site "$IG_SITE")
         [ -n "$IG_BASELINE" ] && cmd+=(--baseline "$IG_BASELINE")
         [ "$IG_STRICT" = "true" ] && cmd+=(--strict)
-        # Extra arguments are split like a shell would, without running them.
-        if [ -n "$IG_ARGS" ]; then
-          # Незакрытая кавычка — ошибка, а не тихо потерянные аргументы.
-          if ! quoted="$(printf '%s' "$IG_ARGS" | python -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in shlex.split(sys.stdin.read())))')"; then
-            echo "::error title=indexgap::cannot split args (unbalanced quote?): $IG_ARGS"
-            exit 2
-          fi
-          eval "extra=($quoted)"
-          cmd+=("${extra[@]}")
+        split_args args "$IG_ARGS"
+        cmd+=("${extra[@]}" --out "$out/indexgap-check.html")
+        if [ -n "$IG_OLD_ROOT" ]; then
+          dcmd=(indexgap diff "$IG_OLD_ROOT" "$IG_ROOT")
+          [ -n "$IG_SITE" ] && dcmd+=(--site "$IG_SITE")
+          [ "$IG_STRICT" = "true" ] && dcmd+=(--strict)
+          split_args diff-args "$IG_DIFF_ARGS"
+          dcmd+=("${extra[@]}" --out "$out/indexgap-diff.html")
         fi
-        cmd+=(--out "$out/indexgap-check.html")
         echo "report=$out/indexgap-check.html" >> "$GITHUB_OUTPUT"
         echo "data=$out/indexgap-check.json" >> "$GITHUB_OUTPUT"
         set +e
@@ -96,6 +131,19 @@ runs:
         set -e
         if [ -f "$out/indexgap-check.json" ]; then
           python -m indexgap.summary "$out/indexgap-check.json" >> "$GITHUB_STEP_SUMMARY" || true
+        fi
+        if [ -n "$IG_OLD_ROOT" ]; then
+          echo "diff-report=$out/indexgap-diff.html" >> "$GITHUB_OUTPUT"
+          echo "diff-data=$out/indexgap-diff.json" >> "$GITHUB_OUTPUT"
+          set +e
+          "${dcmd[@]}"
+          diff_code=$?
+          set -e
+          if [ -f "$out/indexgap-diff.json" ]; then
+            python -m indexgap.summary "$out/indexgap-diff.json" >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          # Шаг падает, если упал любой из двух строгих прогонов.
+          if [ "$code" -eq 0 ]; then code=$diff_code; fi
         fi
         echo "code=$code" >> "$GITHUB_OUTPUT"
 

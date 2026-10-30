@@ -241,6 +241,38 @@ artifact:
     args: --sitemap out/sitemap.xml    # optional, anything `check` accepts
 ```
 
+With `old-root` the same step also runs `diff` against the previous build:
+its summary goes on the run page after the check's, its report and data into
+the same artifact (outputs `diff-report`, `diff-data`), and with `strict` the
+step fails if either run fails. The action does not fetch the previous build —
+that depends on how you deploy. The simplest source is the previous commit:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2                     # the previous commit as well
+- run: npm ci && npm run build         # the new build → out/
+- name: Build the previous commit into old/
+  run: |
+    git worktree add ../prev HEAD~1
+    (cd ../prev && npm ci && npm run build)
+    mv ../prev/out old
+- uses: borisowlexa2010-star/IndexGap@main   # old-root is newer than v1.17.0
+  with:
+    root: out
+    site: https://example.com
+    baseline: indexgap-baseline.json
+    old-root: old
+    diff-args: --dataset keywords.csv  # optional, anything `diff` accepts
+```
+
+`HEAD~1` is what is in production only if every commit to the branch is
+deployed; on a pull request it is the tip of the base branch. If production is
+something else, download the last deploy's build instead (for example
+`actions/download-artifact` with `run-id` and `github-token`) and pass its
+directory as `old-root`. `old-root` needs `root`: the directory of the new
+build has to be named.
+
 ---
 
 ## What it checks

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+* **`indexgap diff --dataset`** (and `--keyword`): the dataset is applied to
+  both builds, so a number that is not in the data and is new in NEW is a
+  `new-finding`. Before, diff compared invented numbers only when
+  `indexgap.json` named a dataset. The JSON records it under `dataset`.
+* **The GitHub Action runs `diff`.** A new input `old-root` (the previous
+  build) runs `indexgap diff` after `check` in the same step: report and data
+  in the same artifact, outputs `diff-report` and `diff-data`, its own summary
+  on the run page, and with `strict` the step fails if either run fails.
+  `diff-args` passes anything else to `diff`. `old-root` needs `root`.
+* **`python -m indexgap.summary` reads diff data**: counts by level and the
+  critical items, instead of refusing it.
+* **`portfolio` reads robots.txt for reachability**, as `check` and `doctor`
+  do: links on a page robots.txt blocks no longer make other pages reachable.
+  A build robots.txt of a site under a base path is not the host's and is not
+  applied (a note says so) unless the project names one in `robots`.
+
 ## 1.17.0 — 2026-10-30
 
 What 1.16.0 left open, closed — and three commands the package was missing.

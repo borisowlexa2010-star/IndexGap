@@ -218,6 +218,37 @@ keywords.csv` (и `--keyword`, если колонка называется ин
     args: --sitemap out/sitemap.xml    # необязательно, всё, что принимает `check`
 ```
 
+С `old-root` тот же шаг после проверки запускает `diff` против прошлой сборки:
+его сводка — на странице прогона после сводки `check`, отчёт и данные — в том
+же артефакте (выходы `diff-report`, `diff-data`), а со `strict` шаг падает,
+если упал любой из двух прогонов. Прошлую сборку действие само не достаёт —
+это зависит от того, как устроен деплой. Проще всего собрать прошлый коммит:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2                     # заодно прошлый коммит
+- run: npm ci && npm run build         # новая сборка → out/
+- name: Собрать прошлый коммит в old/
+  run: |
+    git worktree add ../prev HEAD~1
+    (cd ../prev && npm ci && npm run build)
+    mv ../prev/out old
+- uses: borisowlexa2010-star/IndexGap@main   # old-root появился после v1.17.0
+  with:
+    root: out
+    site: https://example.com
+    baseline: indexgap-baseline.json
+    old-root: old
+    diff-args: --dataset keywords.csv  # необязательно, всё, что принимает `diff`
+```
+
+`HEAD~1` — то, что на проде, только если в прод уходит каждый коммит ветки;
+в pull request это вершина базовой ветки. Если на проде другое, скачай сборку
+последнего деплоя (например, `actions/download-artifact` с `run-id` и
+`github-token`) и передай её каталог как `old-root`. Без `root` `old-root` не
+работает: каталог новой сборки нужно назвать.
+
 ---
 
 ## Что именно проверяется

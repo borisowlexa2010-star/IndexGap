@@ -128,5 +128,86 @@ class SummaryOutput(unittest.TestCase):
         self.assertIn("это не данные прогона indexgap check", err)
 
 
+
+DIFF = {
+    "_indexgap": "1.17.0", "schema": 2, "site": "https://example.com",
+    "old": {"root": "old", "pages": 9}, "new": {"root": "new", "pages": 8},
+    "redirects": [], "dataset": None,
+    "summary": {"critical": 2, "warning": 1, "info": 1},
+    "items": [
+        {"level": "critical", "url": "https://example.com/city/c3/", "code": "page-removed",
+         "message": "была открыта для индекса | 404"},
+        {"level": "critical", "url": "https://example.com/city/c5/", "code": "new-finding",
+         "message": "no-title — нет title"},
+        {"level": "warning", "url": "/city/*/", "code": "template-change",
+         "message": "title изменился"},
+        {"level": "info", "url": "/city/*/", "code": "pages-added", "message": "новых страниц: 1"},
+    ],
+    "removed": [], "closed": [], "opened": [], "nosnippet": [], "shrunk": [],
+    "template_changes": [], "added": {"total": 0, "by_pattern": [], "urls": []},
+    "findings": {"new": [], "fixed": [], "new_critical": 1, "new_warning": 0,
+                 "fixed_critical": 2},
+}
+
+
+class DiffSummary(unittest.TestCase):
+    """Данные `indexgap diff` получают свою сводку, а не отказ."""
+
+    def test_counts_by_level_and_the_critical_items(self):
+        text = summary.render_diff(DIFF)
+        self.assertIn("### indexgap diff: 9 → 8", text)
+        self.assertIn("https://example.com", text)
+        self.assertIn("| 2 | 1 | 1 |", text)
+        self.assertIn("`page-removed` https://example.com/city/c3/", text)
+        self.assertIn("`new-finding` https://example.com/city/c5/", text)
+        self.assertIn("\\| 404", text)
+        # Предупреждения и сведения в список критичного не идут.
+        self.assertNotIn("template-change", text)
+        self.assertIn("новых критичных 1", text)
+        self.assertIn("исчезло критичных 2", text)
+
+    def test_nothing_critical_says_so(self):
+        data = dict(DIFF, summary={"critical": 0, "warning": 0, "info": 0}, items=[],
+                    findings=None)
+        text = summary.render_diff(data)
+        self.assertIn("Разницы, которая ломает индекс, нет.", text)
+        self.assertNotIn("Находки check", text)
+
+    def test_main_accepts_diff_data(self):
+        root = tempfile.mkdtemp(prefix="indexgap-summary-")
+        self.addCleanup(shutil.rmtree, root, True)
+        path = os.path.join(root, "indexgap-diff.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(DIFF, fh, ensure_ascii=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(summary.main([path]), 0)
+        self.assertIn("### indexgap diff", out.getvalue())
+
+    def test_real_diff_output_is_summarised(self):
+        from indexgap import cli
+        root = tempfile.mkdtemp(prefix="indexgap-summary-")
+        self.addCleanup(shutil.rmtree, root, True)
+        for side in ("old", "new"):
+            for i in range(3):
+                if side == "new" and i == 1:
+                    continue
+                path = os.path.join(root, side, f"p{i}", "index.html")
+                os.makedirs(os.path.dirname(path))
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(f"<html lang=\"ru\"><head><title>Страница {i} сайта</title></head>"
+                             f"<body><main><h1>Страница {i}</h1><p>"
+                             + " ".join(f"слово{n}" for n in range(80))
+                             + "</p></main></body></html>")
+        data = os.path.join(root, "d.json")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            cli.main(["diff", os.path.join(root, "old"), os.path.join(root, "new"),
+                      "--site", "https://example.com", "--out", data])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(summary.main([data]), 0)
+        self.assertIn("`page-removed` https://example.com/p1/", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

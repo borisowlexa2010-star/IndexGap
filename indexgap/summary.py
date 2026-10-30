@@ -2,7 +2,8 @@
 """
 Короткая сводка прогона в Markdown — для страницы сборки в CI.
 
-`python -m indexgap.summary indexgap-check.json >> "$GITHUB_STEP_SUMMARY"`.
+`python -m indexgap.summary indexgap-check.json >> "$GITHUB_STEP_SUMMARY"`;
+данные `indexgap diff` получают свою сводку: счёт по уровням и критичное.
 HTML-отчёт в CI лежит артефактом, который надо скачать; сводка видна сразу
 на странице прогона: сколько находок, какие новые, с чего начинать.
 """
@@ -68,6 +69,40 @@ def render(data: dict) -> str:
     return "\n".join(lines)
 
 
+def render_diff(data: dict) -> str:
+    """Сводка `indexgap diff`: сколько чего и что именно критично."""
+    items = [i for i in data.get("items") or [] if isinstance(i, dict)]
+    counts = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    if not counts:
+        counts = Counter(i.get("level") for i in items)
+    old, new = data.get("old") or {}, data.get("new") or {}
+    lines = [tr("### indexgap diff: {a0} → {a1} страниц(ы), {a2}",
+                a0=old.get("pages", 0) if isinstance(old, dict) else 0,
+                a1=new.get("pages", 0) if isinstance(new, dict) else 0,
+                a2=data.get("site", "")), ""]
+    lines += ["| " + " | ".join(tr(LABELS[level]) for level in LEVELS) + " |",
+              "|" + "---:|" * len(LEVELS),
+              "| " + " | ".join(str(counts.get(level, 0)) for level in LEVELS) + " |", ""]
+    findings = data.get("findings")
+    if isinstance(findings, dict):
+        lines += [tr("Находки check: новых критичных {a0}, новых «внимание» {a1}; "
+                     "исчезло критичных {a2}.", a0=findings.get("new_critical", 0),
+                     a1=findings.get("new_warning", 0),
+                     a2=findings.get("fixed_critical", 0)), ""]
+    crit = [i for i in items if i.get("level") == "critical"]
+    if crit:
+        lines += [tr("**Критичное**"), ""]
+        for item in crit[:LIMIT]:
+            lines.append(f"- `{_cell(item.get('code'))}` {_cell(item.get('url'))} — "
+                         f"{_cell(item.get('message'))}")
+        if len(crit) > LIMIT:
+            lines.append(tr("- … и ещё {a0}", a0=len(crit) - LIMIT))
+        lines.append("")
+    else:
+        lines += [tr("Разницы, которая ломает индекс, нет."), ""]
+    return "\n".join(lines)
+
+
 def _utf8_output() -> None:
     """
     Сводку читает GitHub, а он ждёт UTF-8 при любой кодировке консоли.
@@ -99,9 +134,16 @@ def _write(text: str) -> None:
 OTHER_COMMANDS = (("projects", "portfolio"), ("keep", "plan"), ("causes", "doctor"))
 
 
+def _is_diff(data) -> bool:
+    return (isinstance(data, dict) and isinstance(data.get("items"), list)
+            and isinstance(data.get("old"), dict) and isinstance(data.get("new"), dict))
+
+
 def _not_check(data) -> str:
-    """Пусто, если это данные `indexgap check`, иначе — чьи это данные."""
+    """Пусто, если это данные `indexgap check` или `diff`, иначе — чьи это данные."""
     if isinstance(data, dict) and isinstance(data.get("issues"), list):
+        return ""
+    if _is_diff(data):
         return ""
     if isinstance(data, dict):
         for key, command in OTHER_COMMANDS:
@@ -114,7 +156,8 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     _utf8_output()
     if len(argv) != 1:
-        print(tr("использование: python -m indexgap.summary indexgap-check.json"),
+        print(tr("использование: python -m indexgap.summary indexgap-check.json "
+                 "(или indexgap-diff.json)"),
               file=sys.stderr)
         return 2
     try:
@@ -127,13 +170,14 @@ def main(argv=None) -> int:
     # зелёную сводку там, где проверки не было вовсе.
     other = _not_check(data)
     if other == "?":
-        print(tr("{a0}: это не данные прогона indexgap check", a0=argv[0]), file=sys.stderr)
+        print(tr("{a0}: это не данные прогона indexgap check или diff", a0=argv[0]),
+              file=sys.stderr)
         return 2
     if other:
-        print(tr("{a0}: это данные indexgap {a1}, а сводка строится по данным indexgap check",
-                 a0=argv[0], a1=other), file=sys.stderr)
+        print(tr("{a0}: это данные indexgap {a1}, а сводка строится по данным "
+                 "indexgap check или diff", a0=argv[0], a1=other), file=sys.stderr)
         return 2
-    _write(render(data) + "\n")
+    _write((render_diff(data) if _is_diff(data) else render(data)) + "\n")
     return 0
 
 
