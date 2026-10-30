@@ -444,9 +444,15 @@ class TestTemplateSlots(unittest.TestCase):
         self.assertTrue(not j or j[0] < 0.8, j)
 
     def test_on_a_long_page_the_share_decides(self):
-        """300 слов: предел — 4% от длины, то есть 12 подстановок."""
+        """
+        300 слов: по словарю предел — 12 подстановок, по доле вхождений — 12%
+        текста короткими вставками. 13 разбросанных подстановок — всё ещё
+        клон шаблона (так выглядит страница с блоком фактов и соседними
+        городами); 40 — уже больше 12% текста, и это разные страницы.
+        """
         self.assertEqual(similarity(self.slotted(300, 12)), [1.0])
-        j = similarity(self.slotted(300, 13))
+        self.assertEqual(similarity(self.slotted(300, 13)), [1.0])
+        j = similarity(self.slotted(300, 40))
         self.assertTrue(not j or j[0] < 0.8, j)
 
     def test_dense_script_uses_double_shingles(self):
