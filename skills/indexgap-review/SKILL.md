@@ -56,8 +56,11 @@ the `check` command that `fetch` prints at the end. It downloads the pages in
 the sitemap (500 at most by default, obeying robots.txt and never leaving the
 host) and keeps the status codes, redirects and `X-Robots-Tag` headers. Fixes
 from such a report belong to the site owner, in the source; never edit the
-downloaded files. When a build exists, check the build: `fetch` cannot see text
-that JavaScript renders.
+downloaded files. `--crawl` follows links too and names the pages missing from
+the sitemap and the sitemap URLs no link leads to. If the summary says pages
+look like empty JS shells, rerun with `--render` (it needs an installed Chrome
+or Chromium, or `--browser PATH`): what the browser rendered is saved instead.
+When a build exists, check the build.
 
 ## What to look at first
 
