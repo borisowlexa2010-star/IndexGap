@@ -505,4 +505,7 @@ MESSAGES = {
         "path to the browser for --render when it is not found on its own",
     "запускать браузер без песочницы — только в одноразовом контейнере под root":
         "run the browser without its sandbox — only in a throwaway container as root",
+    "  ! скиллы в .claude/skills/ от другой версии indexgap: {a0}. Обнови их командой `indexgap init` в корне проекта — indexgap.json она не трогает":
+        "  ! skills in .claude/skills/ come from another indexgap version: {a0}. Run "
+        "`indexgap init` in the project root to update them — it leaves indexgap.json alone",
 }
