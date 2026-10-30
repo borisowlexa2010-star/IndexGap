@@ -2,9 +2,9 @@
 """signals — English. Год в заголовке, title и H1, превью, viewport, вес, хабы."""
 
 MESSAGES = {
-    "в заголовке {a0} год, а сейчас {a1}: страница обещает свежесть и выглядит заброшенной — шаблон или данные не обновили":
-        "the heading says {a0} and it is {a1}: the page promises freshness and looks "
-        "abandoned — the template or the data was not updated",
+    "у {a0} из {a1} страниц раздела /{a2} в заголовке {a3} год, а сейчас {a4}: шаблон заголовка не обновили. Например: {a5}":
+        "{a0} of {a1} pages of the /{a2} section have {a3} in the heading, and it is {a4}: "
+        "the heading template was not updated. For example: {a5}",
     "title и H1 не делят ни одного слова: «{a0}» и «{a1}» — поисковик может переписать заголовок в выдаче":
         "the title and the H1 share no word: “{a0}” and “{a1}” — the search engine may "
         "rewrite the title in results",
@@ -21,6 +21,7 @@ MESSAGES = {
         "the section does not link to {a0} of its {a1} pages: {a2}{a3} — they are reached "
         "only through the sitemap or stray links",
     " и ещё {a0}": " and {a0} more",
+    "абсолютного адреса в og:image ({a0})": "an absolute address in og:image ({a0})",
     "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; сожми их или отдай WebP/AVIF":
         "images heavier than 1 MB in the build: {a0} — {a1}. They slow the page down on a "
         "phone; compress them or serve WebP/AVIF",

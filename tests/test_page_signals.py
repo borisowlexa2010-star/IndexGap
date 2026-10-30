@@ -88,6 +88,35 @@ class JsonLd(Site):
                     jsonld=self.ld())
         self.assertIn(("warning", "jsonld-mismatch"), self.codes({"index.html": page}))
 
+    def test_price_spellings_from_real_shops(self):
+        # $16<sup>99</sup>, раздельные центы, индийские и швейцарские разряды, «1.2K».
+        cases = [("16.99", "<p>Only $16<sup>99</sup> today</p>"),
+                 ("16.99", "<p>Only <span>$16</span><span>.99</span> today</p>"),
+                 ("160000", "<p>Price ₹1,60,000 per year</p>"),
+                 ("1600.00", "<p>Price CHF 1'600.00 per job</p>"),
+                 ("1600", "<p>From $1.6k per job</p>")]
+        for price, body in cases:
+            with self.subTest(body=body):
+                ld = {"@context": "https://schema.org", "@type": "Product", "name": "Acme",
+                      "offers": {"@type": "Offer", "price": price, "priceCurrency": "USD"}}
+                self.assertNotIn(("warning", "jsonld-mismatch"),
+                                 self.codes({"index.html": html(body=body, jsonld=ld)}))
+
+    def test_review_count_in_thousands(self):
+        ld = {"@context": "https://schema.org", "@type": "Product", "name": "Acme",
+              "aggregateRating": {"@type": "AggregateRating", "ratingValue": "4.8",
+                                  "reviewCount": "1234"}}
+        page = html(body="<p>Rated 4.8 from 1.2K reviews</p>", jsonld=ld)
+        self.assertNotIn(("warning", "jsonld-mismatch"), self.codes({"index.html": page}))
+
+    def test_a_price_written_with_its_currency_in_the_markup_is_still_checked(self):
+        for price in ("$1,600", "1600 USD"):
+            with self.subTest(price=price):
+                ld = {"@context": "https://schema.org", "@type": "Product", "name": "Acme",
+                      "offers": {"@type": "Offer", "price": price}}
+                page = html(body="<p>From $1,500 per job</p>", jsonld=ld)
+                self.assertIn(("warning", "jsonld-mismatch"), self.codes({"index.html": page}))
+
     def test_no_numbers_in_markup_is_fine(self):
         page = html(jsonld={"@context": "https://schema.org", "@type": "Article",
                             "headline": "Plumbers"})
@@ -125,38 +154,70 @@ class Hubs(Site):
 
 
 class StaleYear(Site):
-    def test_a_past_year_in_a_freshness_title(self):
-        page = html(title=f"Best plumbers in Austin {YEAR - 2}", h1=f"Best plumbers {YEAR - 2}")
-        self.assertIn(("warning", "stale-year"), self.codes({"index.html": page}))
+    """
+    Прошлый год в заголовке — находка шаблона, а не страницы.
 
-    def test_this_year_is_fine(self):
-        page = html(title=f"Best plumbers in Austin {YEAR}", h1="Best plumbers")
-        self.assertNotIn(("warning", "stale-year"), self.codes({"index.html": page}))
+    Одна страница с годом в заголовке неоднозначна: «2019 Honda Civic price»,
+    «The Batman (2022) review», «Paris Olympics 2024» — о том годе и написаны.
+    Забытый шаблон виден иначе: один и тот же прошлый год стоит в заголовках
+    заметной доли страниц раздела.
+    """
 
-    def test_a_dated_post_from_that_year_is_history(self):
-        page = html(title=f"Weekly report {YEAR - 3}", h1=f"Weekly report {YEAR - 3}",
-                    head=f'<meta property="article:published_time" content="{YEAR - 3}-05-12">')
-        self.assertNotIn(("warning", "stale-year"), self.codes({"index.html": page}))
+    CITIES = ("Austin", "Boston", "Dallas", "Denver", "Miami", "Tampa")
 
-    def test_a_blog_post_about_a_past_year_is_history(self):
-        # apisix: «firsthand experience … from OSPP 2020 students», опубликовано в 2021.
-        page = html(title=f"Firsthand experience from OSPP {YEAR - 5} students",
-                    h1=f"Experience from OSPP {YEAR - 5}",
-                    head=f'<meta property="article:published_time" content="{YEAR - 4}-06-03">')
-        self.assertNotIn(("warning", "stale-year"), self.codes({"index.html": page}))
-        files = {f"events/{YEAR - 3}-meetups/index.html": html(title=f"Meetups in {YEAR - 3}",
-                                                               h1=f"Meetups {YEAR - 3}")}
-        self.assertNotIn(("warning", "stale-year"), self.codes(files))
+    def section(self, title, head="", n=6):
+        return {f"plumbing/{c.lower()}/index.html": html(title=title.format(city=c),
+                                                         h1=title.format(city=c), head=head)
+                for c in self.CITIES[:n]}
 
-    def test_a_year_that_is_a_name_not_a_date(self):
-        for title in ("Windows 2000 drivers archive", "Plumbing since 1998",
-                      "The 1990s in Austin"):
+    def stale(self, files):
+        return [i for i in self.issues(files) if i[2] == "stale-year"]
+
+    def test_a_template_with_last_years_title_is_one_finding(self):
+        found = self.stale(self.section("Best plumbers in {city} %d | Acme" % (YEAR - 2)))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0], "warning")
+        self.assertIn(str(YEAR - 2), found[0][3])
+        self.assertIn("6", found[0][3])
+
+    def test_old_publication_date_does_not_hide_a_stale_template(self):
+        head = f'<meta property="article:published_time" content="{YEAR - 2}-03-01">'
+        found = self.stale(self.section("Plumber prices in {city} %d" % (YEAR - 1), head=head))
+        self.assertEqual(len(found), 1)
+
+    def test_one_page_is_not_a_template(self):
+        self.assertEqual(self.stale({"index.html": html(title=f"Best plumbers in Boston {YEAR - 2}")}), [])
+
+    def test_years_that_differ_page_to_page_are_the_subject(self):
+        files = {f"cars/m{i}/index.html": html(title=f"{YEAR - 1 - i} Honda Civic price and specs",
+                                                h1=f"{YEAR - 1 - i} Honda Civic")
+                 for i in range(6)}
+        self.assertEqual(self.stale(files), [])
+
+    def test_this_year_and_ranges_reaching_it(self):
+        for title in ("Best plumbers in {city} %d" % YEAR,
+                      "Best plumbers in {city} %d–%d" % (YEAR - 1, YEAR),
+                      "Season %d/%s in {city}" % (YEAR - 1, str(YEAR)[2:]),
+                      "Plumbing in {city} since %d" % (YEAR - 9)):
             with self.subTest(title=title):
-                self.assertNotIn(("warning", "stale-year"),
-                                 self.codes({"index.html": html(title=title, h1=title)}))
+                self.assertEqual(self.stale(self.section(title)), [])
+
+    def test_dated_posts_about_their_own_year(self):
+        y = YEAR - 3
+        files = {f"blog/p{i}/index.html": html(title=f"Weekly report {y} #{i}", h1=f"Weekly report {y}",
+                                               body=f'<time datetime="{y}-0{i + 1}-12">{y}</time>')
+                 for i in range(6)}
+        self.assertEqual(self.stale(files), [])
 
 
 class TitleAndHeading(Site):
+    def test_a_logo_h1_in_the_header_is_not_the_heading(self):
+        page = ("<!doctype html><html lang=\"en\"><head><title>Plumbers in Austin, TX</title>"
+                "</head><body><header><h1><a href=\"/\">Acme</a></h1></header><main>"
+                f"<h1>Plumbers in Austin</h1><p>{TEXT}</p></main></body></html>")
+        self.assertNotIn(("info", "title-h1-mismatch"), self.codes({"index.html": page}))
+
+
     def test_title_and_h1_about_different_things(self):
         page = html(title="Emergency electricians in Dallas", h1="Garden furniture sale")
         self.assertIn(("info", "title-h1-mismatch"), self.codes({"index.html": page}))
@@ -175,6 +236,15 @@ class Previews(Site):
     def test_missing_og_tags(self):
         self.assertIn(("info", "no-og"), self.codes({"index.html": html(og=False)}))
         self.assertNotIn(("info", "no-og"), self.codes({"index.html": html()}))
+
+    def test_relative_og_image(self):
+        page = html(og=False, head='<meta property="og:title" content="Plumbers">'
+                                   '<meta property="og:image" content="/img/card.png">')
+        self.assertIn(("info", "no-og"), self.codes({"index.html": page}))
+
+    def test_thai_words_are_whole(self):
+        self.assertEqual(core.tokenize("กรุงเทพมหานคร คือเมืองหลวง"),
+                         ["กรุงเทพมหานคร", "คือเมืองหลวง"])
 
     def test_missing_viewport(self):
         self.assertIn(("warning", "no-viewport"), self.codes({"index.html": html(viewport=False)}))

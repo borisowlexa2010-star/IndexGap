@@ -25,7 +25,7 @@ from .i18n import tr
 # обновлено 2026-02-03).
 HTML_LIMIT = 2 * 1024 * 1024
 IMAGE_LIMIT = 1024 * 1024
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp", ".tif", ".tiff")
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp", ".tif", ".tiff", ".svg")
 MAX_WALK = 200_000
 
 
@@ -35,52 +35,97 @@ def _is_html(page) -> bool:
 
 # ── год в заголовке ──────────────────────────────────────────────────────────
 
-_YEAR = re.compile(r"(?<![\d.])(20\d\d)(?![\d.])")
-# Слова свежести: заголовок с ними обещает актуальность, и прошлый год в нём —
-# забытый шаблон, а не история.
-_FRESH = re.compile(
-    r"\b(?:best|top|guide|review|reviews|price|prices|pricing|cost|costs|rates|list|"
-    r"ranking|ranked|update|updated|latest|new|deals|"
-    r"лучш\w*|топ|цен\w*|стоимост\w*|рейтинг\w*|обзор\w*|гид|список|актуальн\w*|"
-    r"обновл\w*|новы\w*)\b", re.I)
-_BEFORE = re.compile(r"(?:\b(?:in|for|of|в|на|для)\s+|[(\[—–-]\s*)$", re.I)
-_SINCE = re.compile(r"\b(?:since|from|с|со|от)\s+$", re.I)
-_SEPARATORS = re.compile(r"\s+[|·•—–-]\s+|\s*:\s+")
+_YEAR = re.compile(r"(?<![\d.,])(20\d\d)(?![\d.,])")
+# Диапазон, который доходит до текущего года, — не прошлое: «2025–2026»,
+# «2025/26», «2025-26».
+_RANGE_AFTER = re.compile(r"^\s*[–—/-]\s*(\d{2,4})\b")
+_RANGE_BEFORE = re.compile(r"\b(20\d\d)\s*[–—/-]\s*$")
+# Год как точка отсчёта: «since 2015», «established in 2015», «с 2015 года».
+_SINCE = re.compile(r"\b(?:since|established(?:\s+in)?|est\.?|founded(?:\s+in)?|from|"
+                    r"с|со|от|основан\w*(?:\s+в)?)\s+$", re.I)
 _LD_DATE = re.compile(r'"date(?:Published|Created)"\s*:\s*"(\d{4})')
+_TIME_YEAR = re.compile(r"(\d{4})")
+STALE_MIN_PAGES = 5
+STALE_SHARE = 0.3
 
 
-def _page_year(page) -> int:
+def _page_years(page) -> set:
+    """Годы, которыми страница датирована: публикация, JSON-LD, `<time>`."""
+    years = set()
     meta = getattr(page, "meta", {}) or {}
-    for key in ("datepublished", "date", "datecreated"):
+    for key in ("datepublished", "date", "datecreated", "datemodified"):
         found = re.match(r"\s*(\d{4})", str(meta.get(key) or ""))
         if found:
-            return int(found.group(1))
+            years.add(int(found.group(1)))
     for block in getattr(page, "jsonld", None) or ():
-        found = _LD_DATE.search(block)
-        if found:
-            return int(found.group(1))
-    return 0
+        years.update(int(y) for y in _LD_DATE.findall(block))
+    return years
 
 
-def _stale_year(text: str, current: int) -> int:
-    """Прошлый год, поданный как свежесть: в конце заголовка, после «в»/«for» или рядом со словом свежести."""
-    text = text or ""
-    core = _SEPARATORS.split(text)[0] if _SEPARATORS.search(text) else text
-    for m in _YEAR.finditer(text):
+def _past_years(text: str, current: int) -> set:
+    """Прошлые годы в строке — без диапазонов до текущего года и без «since 2015»."""
+    out = set()
+    for m in _YEAR.finditer(text or ""):
         year = int(m.group(1))
         if not 2000 <= year < current:
             continue
-        before = text[:m.start()]
+        before, after = text[:m.start()], text[m.end():]
         if _SINCE.search(before):
             continue
-        at_end = not core[core.find(m.group(1)) + 4:].strip(" )]!?.,") if m.group(1) in core else False
-        if at_end or _BEFORE.search(before) or _FRESH.search(text):
-            return year
-    return 0
+        tail = _RANGE_AFTER.match(after)
+        if tail:
+            end = int(tail.group(1))
+            end = end + 2000 if end < 100 else end
+            if end >= current:
+                continue
+        head = _RANGE_BEFORE.search(before)
+        if head and int(head.group(1)) < year:
+            continue                        # вторая половина «2023–2025» решается по ней
+        out.add(year)
+    return out
+
+
+def stale_years(pages: list, today: datetime.date = None) -> list:
+    """
+    Прошлый год в заголовках раздела: шаблон, который не обновили.
+
+    Одна страница с годом в заголовке ничего не говорит: «2019 Honda Civic»,
+    «The Batman (2022) review», «Paris Olympics 2024» — о том годе и написаны.
+    Забытый шаблон виден по-другому: один и тот же прошлый год стоит в
+    заголовках у пяти и больше страниц и не меньше чем у трети раздела.
+    Страница, датированная тем же годом, — запись о нём и не считается.
+    Одна находка на раздел.
+    """
+    current = (today or datetime.date.today()).year
+    by_section = defaultdict(list)
+    for page in pages:
+        parts = urlsplit(page.url).path.strip("/").split("/")
+        by_section[parts[0] if len(parts) > 1 else ""].append(page)
+    issues = []
+    for section, members in sorted(by_section.items()):
+        hits = defaultdict(list)
+        for page in members:
+            h1 = next((t for level, t in (page.headings or []) if level == 1), "")
+            years = _past_years(page.title, current) | _past_years(h1, current)
+            for year in years - _page_years(page):
+                hits[year].append(page)
+        for year, found in sorted(hits.items()):
+            if len(found) < STALE_MIN_PAGES or len(found) < STALE_SHARE * len(members):
+                continue
+            examples = "; ".join(f"«{p.title[:60]}»" for p in sorted(found, key=lambda p: p.url)[:2])
+            hub = next((p.url for p in members
+                        if urlsplit(p.url).path.strip("/") == section), "")
+            issues.append(("warning", hub, "stale-year", tr(
+                "у {a0} из {a1} страниц раздела /{a2} в заголовке {a3} год, а сейчас {a4}: "
+                "шаблон заголовка не обновили. Например: {a5}",
+                a0=len(found), a1=len(members), a2=(section + "/") if section else "",
+                a3=year, a4=current, a5=examples)))
+    return issues
 
 
 # ── title против H1 ──────────────────────────────────────────────────────────
 
+_SEPARATORS = re.compile(r"\s+[|·•—–-]\s+|\s*:\s+")
 _STOP = {"the", "and", "for", "with", "your", "you", "our", "from", "how", "what",
          "best", "top", "all", "new", "это", "для", "как", "что", "все", "наш", "ваш"}
 
@@ -125,19 +170,10 @@ def page_signals(pages: list, today: datetime.date = None) -> list:
     current = (today or datetime.date.today()).year
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
-        h1 = next((t for level, t in (page.headings or []) if level == 1), "")
-        year = _stale_year(page.title, current) or _stale_year(h1, current)
-        # Запись с датой публикации до этого года — история, а не забытый
-        # шаблон: «опыт студентов OSPP-2020» в блоге apisix. Год в адресе
-        # (`/blog/2021/…`, `/2022-meetups/`) — тот же знак: страница о том годе.
-        published = _page_year(page)
-        if year and (0 < published < current or str(year) in urlsplit(page.url).path):
-            year = 0
-        if year:
-            issues.append(("warning", page.url, "stale-year", tr(
-                "в заголовке {a0} год, а сейчас {a1}: страница обещает свежесть и выглядит "
-                "заброшенной — шаблон или данные не обновили", a0=year, a1=current)))
-        if _title_h1_apart(page.title, h1):
+        h1s = [t for level, t in (page.headings or []) if level == 1]
+        h1 = h1s[0] if h1s else ""
+        # Логотип в <h1> шапки — не заголовок статьи: сверяем со всеми H1.
+        if h1s and all(_title_h1_apart(page.title, h) for h in h1s):
             issues.append(("info", page.url, "title-h1-mismatch", tr(
                 "title и H1 не делят ни одного слова: «{a0}» и «{a1}» — поисковик "
                 "может переписать заголовок в выдаче", a0=page.title[:60], a1=h1[:60])))
@@ -145,6 +181,10 @@ def page_signals(pages: list, today: datetime.date = None) -> list:
             continue
         meta = page.meta or {}
         missing = [name for name in ("og:title", "og:image") if not meta.get(name)]
+        image = meta.get("og:image") or ""
+        if image and not image.startswith(("http://", "https://")):
+            # Open Graph требует абсолютный адрес: относительный мессенджер не откроет.
+            missing.append(tr("абсолютного адреса в og:image ({a0})", a0=image[:60]))
         if missing:
             issues.append(("info", page.url, "no-og", tr(
                 "нет {a0}: ссылка на страницу в мессенджере или соцсети выйдет без "

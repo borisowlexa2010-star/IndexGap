@@ -1534,6 +1534,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     from . import signals
     living = [p for p in pages if p.url not in shells]
     issues += signals.page_signals(living)
+    issues += signals.stale_years([p for p in living if p.url not in spared])
     issues += signals.hub_links(pages, graph, skip=spared)
     issues += signals.heavy_images(pages)
     issues = _collapse_parked(issues, notes, pages, cfg)
