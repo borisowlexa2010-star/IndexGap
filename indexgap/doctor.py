@@ -706,6 +706,9 @@ def read_citations(csv_path: str, site: str = "") -> dict:
     return out
 
 
+UI_EXPORT_CAP = 1000
+
+
 def read_sources(specs: list, site: str = "") -> dict:
     """
     Читает несколько выгрузок сразу и помнит, чем каждая является.
@@ -762,6 +765,14 @@ def read_sources(specs: list, site: str = "") -> dict:
         result = read_indexed(path, site, index_status=kind == sources.INDEX)
         notes += result.get("notes", [])
         urls = set(result["urls"])
+        if kind == sources.INDEX and len(urls) + len(result.get("excluded") or {}) == UI_EXPORT_CAP:
+            # Интерфейс Search Console отдаёт не больше 1000 строк — и отчёт
+            # «Эффективность», и примеры в «Индексировании страниц».
+            notes.append(tr(
+                "{a0}: ровно {a1} адресов — это потолок выгрузки из интерфейса Search "
+                "Console, а не размер индекса. Всё, что не влезло, воронка посчитает "
+                "«не в индексе»; полный список дают API или массовая выгрузка в BigQuery",
+                a0=os.path.basename(path), a1=UI_EXPORT_CAP))
         if kind == sources.INDEX:
             dropped = dict(result.get("excluded") or {})
             issue = sources.zip_issue(path)

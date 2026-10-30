@@ -274,4 +274,9 @@ MESSAGES = {
     "{a0}: столбец показов есть, а столбца позиции я не узнал — страницы у первой страницы выдачи по этому файлу не искались. Заголовки файла: {a1}":
         "{a0}: there is an impressions column but no position column I recognise — "
         "pages close to page one were not looked for in this file. File headers: {a1}",
+    "{a0}: ровно {a1} адресов — это потолок выгрузки из интерфейса Search Console, а не размер индекса. Всё, что не влезло, воронка посчитает «не в индексе»; полный список дают API или массовая выгрузка в BigQuery":
+        "{a0}: exactly {a1} URLs — that is the cap of a Search Console UI export, "
+        "not the size of the index. Whatever did not fit will count as \"not "
+        "indexed\" in the funnel; the API or the BigQuery bulk export gives the "
+        "full list",
 }
