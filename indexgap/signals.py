@@ -214,7 +214,17 @@ def page_signals(pages: list, today: datetime.date = None) -> list:
 # Пагинация — `page/2`, `p/2`, `page-2`, `seite/2`, `strona/2`, `страница/2`.
 # Голое число (`/products/1001/`, `/archive/2019/`) — адрес страницы, а не
 # номер листа: раньше такие разделы не проверялись вовсе.
-_PAGINATION = re.compile(r"^(?:page|p|seite|strona|pagina|страница)[/-]?\d+$", re.I)
+_PAGINATION = re.compile(r"^(?:(?:page|seite|strona|pagina|страница)[/-]?|p/)\d+$", re.I)
+# `p7` и `/plumbing/2/` (Gatsby, Astro) бывают и листом, и слагом поста;
+# `/plumbing-2/` рядом с `/plumbing/` — пагинация WordPress и Jekyll, но и
+# `/windows-10/` рядом с `/windows/`. Такие засчитываются, только если на них
+# ведёт сам раздел или его список и они ведут к его детям. Четыре цифры —
+# год или артикул, а не номер листа.
+_MAYBE_PAGE = re.compile(r"^(?:p-?\d+|\d{1,3})$", re.I)
+_SIBLING_PAGE = re.compile(r"^(.*[^/-])-(\d{1,4})$")
+# Буква алфавитного указателя: `/plumbing/a/`, `/plumbing/letter-a/`.
+_LETTER = re.compile(r"^(?:(?:letter|alpha|starts?-with|bukva|буква)[-_]?)?(?:[^\W\d_]|0-9)$",
+                     re.I)
 
 
 def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
@@ -223,22 +233,28 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
 
     `/plumbing/` есть, а `/plumbing/boston/` с него не связан: поисковик
     доходит до страницы через sitemap или случайную ссылку, и вес раздела до
-    неё не доходит. Ссылка засчитывается и со страниц пагинации раздела
-    (`/plumbing/page/2/`), и с любой страницы-списка внутри раздела, где
-    ссылок на детей раздела пять и больше — алфавитные указатели так и устроены.
+    неё не доходит. Ссылка засчитывается и со страниц-списков раздела: их
+    находит обход от хаба. Список — это лист пагинации (`/plumbing/page/2/`,
+    `/plumbing-2/`), буква указателя или страница глубже детей, на которую
+    ведёт хаб или другой список и чьи ссылки внутри раздела — в основном на
+    детей. Размер не важен: в букве X бывает один город. Ребёнок хаба со
+    своим блоком «рядом» списком не становится: такой блок есть на каждой
+    странице программного сайта и прятал хаб, который ссылается на две из
+    двадцати.
 
     Один проход по страницам: каждая встаёт под своих предков-разделов. Раньше
     каждый раздел перебирал весь сайт, и на 40 тысячах страниц это были
     одиннадцать секунд.
     """
-    by_key = {p.key: p for p in pages}
+    key_of = {p.url: p.key for p in pages}
+    by_key = {key: p for p in pages for key in (key_of[p.url],)}
     inbound = graph.get("inbound") or {}
     outbound = graph.get("outbound") or {}
     children = defaultdict(list)
     for page in pages:
         if page.url in skip:
             continue
-        key = page.key
+        key = key_of[page.url]
         parent = key[:key.rfind("/")] if key.count("/") > 2 else ""
         if parent and parent in by_key and by_key[parent].url not in skip:
             children[parent].append(page)
@@ -258,24 +274,77 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
         for hub_key, n in touched.items():
             if n >= max(5, 0.8 * len(kid_urls[hub_key])):
                 listing[hub_key].add(page.url)
+    # Кандидаты в списки: страница → «лист» (засчитывается, если ведёт хоть к
+    # одному ребёнку) или «глубже» (если дети — большинство её ссылок в разделе).
+    candidates = defaultdict(dict)
+    pagers = set()
     for page in pages:
-        key = page.key
+        key = key_of[page.url]
         cut = key.rfind("/")
         while key.count("/", 0, cut) >= 2:
             hub_key = key[:cut]
             if hub_key in hubs:
                 tail = key[len(hub_key) + 1:]
-                if (_PAGINATION.match(tail)
-                        or len(set(outbound.get(page.url, ())) & kid_urls[hub_key]) >= 5):
+                if _PAGINATION.match(tail):
                     listing[hub_key].add(page.url)
+                    pagers.add(page.url)
+                elif _MAYBE_PAGE.match(tail):
+                    candidates[hub_key][page.url] = "pager"
+                elif _LETTER.match(tail.rsplit("/", 1)[-1]):
+                    candidates[hub_key][page.url] = "letter"
+                elif "/" in tail:
+                    candidates[hub_key][page.url] = "deeper"
             cut = key.rfind("/", 0, cut)
+        sibling = _SIBLING_PAGE.match(key)
+        if sibling and sibling.group(1) in hubs:
+            candidates[sibling.group(1)][page.url] = "pager"
+    out_sets = {}
+
+    def out_of(url):
+        found = out_sets.get(url)
+        if found is None:
+            found = out_sets[url] = set(outbound.get(url, ()))
+        return found
+
+    for hub_key, cands in candidates.items():
+        kids = kid_urls[hub_key]
+        queue = sorted(listing[hub_key])
+        reached = set(queue)
+        while queue:
+            out = out_of(queue.pop())
+            # Перебирается меньшее: оглавление на весь сайт ссылается на
+            # тысячи страниц, а кандидатов у раздела обычно единицы.
+            hits = ([u for u in cands if u in out] if len(cands) < len(out)
+                    else [u for u in out if u in cands])
+            for url in hits:
+                if url in reached:
+                    continue
+                links = out_of(url)
+                to_kids = len(links & kids)
+                if not to_kids:
+                    continue
+                if cands[url] == "deeper":
+                    own = key_of[url]
+                    own = own[:own.rfind("/") + 1]
+                    # Соседи по уровню (другие буквы, другие листы) — навигация
+                    # самого списка, а не чужие ссылки.
+                    inside = sum(1 for u in links if u in key_of
+                                 and key_of[u].startswith(hub_key + "/")
+                                 and not key_of[u].startswith(own))
+                    if to_kids * 2 <= inside:
+                        continue
+                reached.add(url)
+                listing[hub_key].add(url)
+                queue.append(url)
+                if cands[url] == "pager":
+                    pagers.add(url)
 
     issues = []
     for hub_key, kids in sorted(hubs.items()):
         hub = by_key[hub_key]
         missing = sorted(k.url for k in kids
                          if not set(inbound.get(k.url, ())) & listing[hub_key]
-                         and not _PAGINATION.match(k.key[len(hub_key) + 1:]))
+                         and k.url not in pagers)
         if missing:
             shown = ", ".join(urlsplit(u).path for u in missing[:3])
             issues.append(("warning", hub.url, "hub-missing-links", tr(
