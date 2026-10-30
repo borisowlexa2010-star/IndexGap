@@ -42,6 +42,7 @@ cd <корень проекта> && indexgap init
 | до генерации | `indexgap-plan` | принесли CSV с ключами |
 | после генерации | `indexgap-review` | страницы написаны, но не опубликованы |
 | починка найденного | `indexgap-review` → `indexgap brief` | наряды на правки, страница за страницей |
+| перед деплоем | `indexgap-review` → `indexgap diff` | новая сборка против той, что на проде |
 | публикация и разбор | `indexgap-publish` | sitemap, IndexNow, «почему нет трафика» |
 | несколько сайтов | `indexgap-portfolio` | у человека портфель, а не один проект |
 

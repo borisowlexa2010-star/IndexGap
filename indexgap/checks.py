@@ -1134,6 +1134,87 @@ def template_wide(issues: list, page_count: int, share: float = 0.9,
     return notes
 
 
+RISK_MIN_PAGES = 10
+RISK_OTHER = "other"
+
+
+def _severity(level: str, code: str) -> float:
+    """Тяжесть одной находки, 0–1: см. `template_risk`."""
+    if level not in ("critical", "warning"):
+        return 0.0
+    hard = 1.0 - min(CODE_WEIGHT.get(code, 50), 20) / 40
+    return hard if level == "critical" else 0.3 * hard
+
+
+def template_risk(issues: list, pages: list, min_pages: int = RISK_MIN_PAGES) -> list:
+    """
+    Какой шаблон чинить первым: риск 0–100 по каждому шаблону адресов.
+
+    Шаблон — `_url_pattern` страницы; шаблоны меньше `min_pages` страниц
+    сложены в `other`. Нет ни одного шаблона такого размера — сайт и есть
+    один шаблон, и сказать нечего: возвращается пустой список.
+
+    Формула. Тяжесть находки берётся из `CODE_WEIGHT` (меньше вес — тяжелее):
+
+        критичная:  1 − min(вес, 20) / 40      от 1.0 до 0.5
+        внимание:   0.3 × то же самое           от 0.3 до 0.15
+        мелочь:     0
+
+    Код без веса считается весом 50, то есть самым лёгким. Страница весит
+    по своей самой тяжёлой находке — сто мелочей на одной странице не делают
+    её опаснее одной закрытой от индекса. Риск шаблона — средняя тяжесть по
+    его страницам × 100, округлённая: доля задетых страниц входит в него сама.
+
+    Находки уровня сайта (robots.txt, без адреса) ни к одному шаблону
+    не относятся.
+    """
+    by_url = {}
+    for page in pages or ():
+        by_url[page.url] = page.url
+        by_url.setdefault(url_key(page.url), page.url)
+    groups = defaultdict(list)
+    for page in pages or ():
+        groups[_url_pattern(page.url)].append(page.url)
+    if not any(len(m) >= min_pages for p, m in groups.items() if p):
+        return []
+    template_of = {}
+    for pattern, members in groups.items():
+        name = pattern if pattern and len(members) >= min_pages else RISK_OTHER
+        for url in members:
+            template_of[url] = name
+
+    worst = defaultdict(float)
+    levels = defaultdict(set)
+    codes = defaultdict(Counter)
+    for level, url, code, _ in issues:
+        if level not in ("critical", "warning") or not url:
+            continue
+        own = by_url.get(url) or by_url.get(url_key(url))
+        if own is None:
+            continue
+        worst[own] = max(worst[own], _severity(level, code))
+        levels[own].add(level)
+        codes[template_of[own]][code] += 1
+
+    members = defaultdict(list)
+    for url, name in template_of.items():
+        members[name].append(url)
+    out = []
+    for name, urls in members.items():
+        total = len(urls)
+        out.append({
+            "pattern": name,
+            "pages": total,
+            "critical_share": round(sum(1 for u in urls if "critical" in levels[u]) / total, 3),
+            "warning_share": round(sum(1 for u in urls if "warning" in levels[u]) / total, 3),
+            "top_codes": [{"code": c, "count": n}
+                          for c, n in sorted(codes[name].items(),
+                                             key=lambda x: (-x[1], x[0]))[:3]],
+            "risk": int(100 * sum(worst[u] for u in urls) / total + 0.5),
+        })
+    return sorted(out, key=lambda t: (-t["risk"], -t["pages"], t["pattern"]))
+
+
 def sort_issues(issues: list) -> list:
     return sorted(issues, key=lambda i: (LEVEL_ORDER.get(i[0], 3),
                                          CODE_WEIGHT.get(i[2], 50), i[2], i[1]))

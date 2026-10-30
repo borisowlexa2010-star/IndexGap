@@ -438,4 +438,37 @@ MESSAGES = {
         "robots.txt in the build has no effect: the site lives under /{a0}/, and "
         "search engines read only {a1}://{a2}/robots.txt. Its rules were not "
         "checked; pass the host's real file with --robots",
+
+    # ── риск по шаблонам ──────────────────────────────────────────────────────
+    "Самые рискованные шаблоны (риск 0–100):": "Riskiest templates (risk 0–100):",
+    "  {a0:>3}  {a1}  — {a2} стр., критично на {a3:.0%}, внимание на {a4:.0%}; {a5}":
+        "  {a0:>3}  {a1}  — {a2} pages, critical on {a3:.0%}, warnings on {a4:.0%}; {a5}",
+
+    # ── diff ──────────────────────────────────────────────────────────────────
+    "Было — {a0}": "Before — {a0}",
+    "Стало — {a0}": "After — {a0}",
+    "Страниц было {a0}, стало {a1}: исчезло {a2}, новых {a3}":
+        "Pages before {a0}, after {a1}: {a2} gone, {a3} new",
+    "Критично: {a0}   Внимание: {a1}   К сведению: {a2}":
+        "Critical: {a0}   Warnings: {a1}   Info: {a2}",
+    "OLD и NEW — один и тот же каталог {a0}: сравнивать нечего. Нужны две сборки — та, что на проде, и новая.":
+        "OLD and NEW are the same directory {a0}: there is nothing to compare. "
+        "Two builds are needed — the one in production and the new one.",
+    "Редиректы новой сборки: {a0} — правил {a1}": "Redirects of the new build: {a0} — {a1} rules",
+    "Файлов редиректов (_redirects, netlify.toml, vercel.json) рядом с новой сборкой нет: исчезнувшая страница считается 404":
+        "No redirect files (_redirects, netlify.toml, vercel.json) next to the new build: "
+        "a page that disappears counts as a 404",
+    "  новые по шаблонам: {a0}": "  new by template: {a0}",
+    "Находки check: новых критичных {a0}, новых «внимание» {a1}; исчезло критичных {a2}":
+        "check findings: {a0} new critical, {a1} new warnings; {a2} critical gone",
+    "  правка шаблона {a0}: {a1} изменился на {a2} из {a3} — «{a4}» → «{a5}»":
+        "  template change {a0}: {a1} changed on {a2} of {a3} — “{a4}” → “{a5}”",
+    "две сборки до деплоя: что этот деплой сломает":
+        "two builds before a deploy: what this deploy will break",
+    "каталог сборки, которая сейчас на проде": "directory of the build that is in production now",
+    "каталог новой сборки": "directory of the new build",
+    "путь к indexgap.json; по умолчанию ищется рядом с новой сборкой":
+        "path to indexgap.json; looked up next to the new build by default",
+    "не прогонять проверки check по обеим сборкам — только сравнение страниц":
+        "do not run the check findings on both builds — compare pages only",
 }

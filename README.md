@@ -93,6 +93,7 @@ indexgap check
 indexgap init                       # install into this project
 indexgap plan keywords.csv          # audit the keyword set before generating
 indexgap check                      # everything local: text, structure, machine-readability
+indexgap diff ./prod ./out          # two builds before a deploy: what this deploy breaks
 indexgap brief --write              # turn the findings into work orders in indexgap-briefs/
 indexgap sitemap --out-dir ./public # sitemap with sharding and an honest lastmod
 indexgap notify --key <your-key>    # tell IndexNow what actually changed
@@ -153,6 +154,38 @@ were accepted, and the JSON keeps them under `accepted`:
 ```
 
 A code that does not exist is an error, not a silent no-op.
+
+### Before a deploy: `diff`
+
+Each build can look fine on its own while the deploy between them breaks the
+site: a page that had impressions is simply not generated any more, one line in
+a template puts `noindex` on a whole section. `diff` compares the build that is
+in production with the new one:
+
+```bash
+indexgap diff ./prod-build ./out --site https://example.com --strict
+```
+
+It reports pages that disappear (critical if they were indexable and nothing
+redirects them — `_redirects`, `netlify.toml` and `vercel.json` next to the new
+build are read, splats and `:params` included), pages that close (noindex
+appears, the canonical starts pointing elsewhere, a draft, a redirect stub),
+title/H1/description changed on most pages of one URL template at once, pages
+whose text drops by more than half, new pages per template, and — unless
+`--no-checks` — critical `check` findings that are new in NEW against OLD.
+The report goes to `indexgap-diff.html` with the data in `indexgap-diff.json`
+(`items` in the same level/url/code/message shape as findings); `--strict`
+exits `1` if anything is critical.
+
+### Risk by template
+
+`check` also groups pages by URL template (`/plumbing/*/`, templates of at
+least ten pages; the rest is `other`) and scores each 0–100: the average over
+its pages of the page's worst finding, where a critical finding weighs 0.5–1
+by its code and a warning 0.15–0.3. The five riskiest are printed after the
+summary, the report has a table, and the JSON has `templates` with `pattern`,
+`pages`, `critical_share`, `warning_share`, `top_codes` and `risk`. A site with
+no template of ten pages gets an empty list and nothing extra in the console.
 
 Exit codes: `0` — the run finished (findings or not); `1` — `--strict` and there
 are critical findings (only new ones, with `--baseline`); `2` — the input is
