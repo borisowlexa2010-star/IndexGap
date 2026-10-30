@@ -1204,6 +1204,18 @@ _HTML_OPEN = re.compile(r"<html\b[^<>]{0,2000}>", re.I)
 _REFRESH_META = re.compile(r"<meta\b[^<>]{0,2000}>", re.I)
 _TIME_TAG = re.compile(r"<time\b[^<>]{0,500}>", re.I)
 _NEXT_SCRIPT = re.compile(r"NEXT_REDIRECT[^<]{0,300}")
+_CODE_TAG = re.compile(r"<(?:pre|code)", re.I)
+_ATTRIBUTE = re.compile(r"""\s[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*')""")
+
+
+def brief_prose(raw: str) -> str:
+    """
+    Где искать следы брифа: без кода, скриптов и атрибутов. `TODO:` в примере
+    кода — заметка разработчика; кнопка «копировать» Starlight держит весь
+    пример с его `TODO:` в `data-code` (devtut: 17 ложных находок из 21).
+    """
+    prose = _strip_fences(drop_spans(raw or "", NOT_PROSE))
+    return _ATTRIBUTE.sub("", prose) if "TODO" in prose else prose
 
 
 # ── следы незаполненного шаблона ─────────────────────────────────────────────
@@ -1320,8 +1332,12 @@ def essence(raw: str) -> str:
     if mount:
         parts.append(mount.group(0))
     if any(marker in raw for marker in BRIEF_MARKERS):
-        prose = drop_spans(raw, NOT_PROSE)
+        prose = brief_prose(raw)
         parts += [marker for marker in BRIEF_MARKERS if marker in prose]
+    # Есть ли на странице примеры кода: от этого зависит, шов `{FOLDER_NAME}`
+    # или нотация автора.
+    if _CODE_TAG.search(raw, 0, 400_000):
+        parts.append("<pre></pre>")
     return "\n".join(parts)
 
 
