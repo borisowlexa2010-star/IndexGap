@@ -201,6 +201,9 @@ appears, the canonical starts pointing elsewhere, a draft, a redirect stub),
 title/H1/description changed on most pages of one URL template at once, pages
 whose text drops by more than half, new pages per template, and — unless
 `--no-checks` — critical `check` findings that are new in NEW against OLD.
+Numbers that are not in the data are findings only against a dataset: pass
+`--dataset keywords.csv` (and `--keyword` if the column is named otherwise),
+or name it in `indexgap.json`, and both builds are checked against it.
 The report goes to `indexgap-diff.html` with the data in `indexgap-diff.json`
 (`items` in the same level/url/code/message shape as findings); `--strict`
 exits `1` if anything is critical.

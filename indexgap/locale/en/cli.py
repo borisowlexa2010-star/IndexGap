@@ -471,6 +471,11 @@ MESSAGES = {
         "path to indexgap.json; looked up next to the new build by default",
     "не прогонять проверки check по обеим сборкам — только сравнение страниц":
         "do not run the check findings on both builds — compare pages only",
+    "семантика (CSV или XLSX) для обеих сборок — тогда сравниваются и числа, которых нет в данных":
+        "keyword dataset (CSV or XLSX) for both builds — then numbers that are not "
+        "in the data are compared too",
+    "Датасет — {a0}: строк {a1}, сверяется с обеими сборками":
+        "Dataset — {a0}: {a1} rows, matched against both builds",
     "  скачано {a0} из {a1}…": "  fetched {a0} of {a1}…",
     "URL sitemap; по умолчанию — из robots.txt, иначе /sitemap.xml":
         "sitemap URL; by default from robots.txt, otherwise /sitemap.xml",

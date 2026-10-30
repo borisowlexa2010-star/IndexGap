@@ -228,6 +228,70 @@ class Diff(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+DEMO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "examples", "demo-site")
+
+
+class DiffDataset(unittest.TestCase):
+    """
+    Выдуманное число — находка check только при датасете. Без `--dataset`
+    у diff новая выдумка в NEW проходила молча, если датасет не назван
+    в indexgap.json.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="indexgap-diff-ds-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.old = os.path.join(self.dir, "old")
+        self.new = os.path.join(self.dir, "new")
+        for root in (self.old, self.new):
+            shutil.copytree(DEMO, root, ignore=shutil.ignore_patterns("cities.csv"))
+        self.dataset = os.path.join(self.dir, "cities.csv")
+        shutil.copy(os.path.join(DEMO, "cities.csv"), self.dataset)
+        berlin = os.path.join(self.new, "rent", "berlin", "index.html")
+        with open(berlin, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(berlin, "w", encoding="utf-8") as fh:
+            fh.write(text.replace("34 minutes.", "34 minutes, and the agency fee is $2,999."))
+        self.out = os.path.join(self.dir, "d.html")
+
+    def run_diff(self, *extra):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["diff", self.old, self.new, "--site", "https://demo.example",
+                             "--out", self.out, *extra])
+        with open(os.path.join(self.dir, "d.json"), encoding="utf-8") as fh:
+            return code, json.load(fh)
+
+    def invented(self, data):
+        return [i["url"] for i in data["items"] if i["code"] == "new-finding"
+                and i["message"].startswith("unsupported-number")]
+
+    def test_without_a_dataset_the_invented_number_is_not_compared(self):
+        _, data = self.run_diff()
+        self.assertEqual(self.invented(data), [])
+
+    def test_with_a_dataset_a_new_invented_number_is_a_new_finding(self):
+        code, data = self.run_diff("--dataset", self.dataset, "--strict")
+        self.assertEqual(code, 1)
+        # Гамбург выдуман в обеих сборках — это не новое; Берлин — новое.
+        self.assertEqual(self.invented(data), ["https://demo.example/rent/berlin/"])
+        self.assertEqual(data["dataset"], self.dataset)
+
+    def test_the_keyword_column_is_passed_along(self):
+        with open(self.dataset, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(self.dataset, "w", encoding="utf-8") as fh:
+            fh.write(text.replace("keyword,", "slug,", 1))
+        _, data = self.run_diff("--dataset", self.dataset, "--keyword", "slug")
+        self.assertEqual(self.invented(data), ["https://demo.example/rent/berlin/"])
+
+    def test_a_missing_dataset_exits_2(self):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["diff", self.old, self.new, "--site", "https://demo.example",
+                             "--out", self.out, "--dataset", os.path.join(self.dir, "no.csv")])
+        self.assertEqual(code, 2)
+
+
 class English(unittest.TestCase):
     """В английском режиме у diff не остаётся русского — ни в консоли, ни в отчёте."""
 
