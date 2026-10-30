@@ -147,6 +147,39 @@ class HeaderFiles(Fixture):
         self.assertTrue(pages[SITE + "/glossary/drain/"].noindex)
         self.assertFalse(pages[SITE + "/pros/a/"].noindex)
 
+    def test_a_preview_host_rule_does_not_close_production(self):
+        # Рецепт Cloudflare: превью *.pages.dev закрыты, свой домен открыт.
+        for rule in ("https://:project.pages.dev/*", "https://preview.example.com/*"):
+            with self.subTest(rule=rule):
+                pages = self.site({"_headers": f"{rule}\n  X-Robots-Tag: noindex\n"})
+                self.assertFalse(any(p.noindex for p in pages.values()))
+        pages = self.site({"_headers": "https://example.com/glossary/*\n  X-Robots-Tag: noindex\n"})
+        self.assertTrue(pages[SITE + "/glossary/drain/"].noindex)
+
+    def test_a_removed_header_reopens_the_page(self):
+        pages = self.site({"_headers": "/*\n  X-Robots-Tag: noindex\n"
+                                       "/glossary/*\n  ! X-Robots-Tag\n"})
+        self.assertFalse(pages[SITE + "/glossary/drain/"].noindex)
+        self.assertTrue(pages[SITE + "/pros/a/"].noindex)
+
+    def test_a_commented_out_toml_header_is_not_a_rule(self):
+        pages = self.site({"netlify.toml": '[[headers]]\n  for = "/*"\n  [headers.values]\n'
+                                           '    # X-Robots-Tag = "noindex"\n'
+                                           '    Cache-Control = "max-age=60"\n'})
+        self.assertFalse(any(p.noindex for p in pages.values()))
+
+    def test_a_conditional_vercel_rule_is_not_applied_to_every_request(self):
+        rule = {"source": "/(.*)", "headers": [{"key": "X-Robots-Tag", "value": "noindex"}]}
+        for cond in ({"has": [{"type": "host", "value": "preview.example.com"}]},
+                     {"has": [{"type": "header", "key": "x-preview"}]},
+                     {"missing": [{"type": "host", "value": "example.com"}]}):
+            with self.subTest(cond=cond):
+                pages = self.site({"vercel.json": json.dumps({"headers": [{**rule, **cond}]})})
+                self.assertFalse(any(p.noindex for p in pages.values()))
+        own = {**rule, "has": [{"type": "host", "value": "example.com"}]}
+        pages = self.site({"vercel.json": json.dumps({"headers": [own]})})
+        self.assertTrue(pages[SITE + "/pros/a/"].noindex)
+
 
 class FirstParagraph(Fixture):
     def test_a_date_line_is_not_the_answer(self):

@@ -1742,7 +1742,7 @@ def _route_regex(pattern: str):
 
 
 _TOML_FOR = re.compile(r"""^\s*for\s*=\s*["']([^"']+)["']""", re.M)
-_TOML_TAG = re.compile(r"""X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""", re.I)
+_TOML_TAG = re.compile(r"""^\s*["']?X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""", re.I | re.M)
 
 
 def _closes(value: str) -> bool:
@@ -1750,13 +1750,45 @@ def _closes(value: str) -> bool:
     return "noindex" in directives or "none" in directives
 
 
-def header_noindex_rules(root: str) -> list:
+def _same_host(a: str, b: str) -> bool:
+    a, b = (a or "").lower().split(":")[0], (b or "").lower().split(":")[0]
+    strip = lambda h: h[4:] if h.startswith("www.") else h
+    return bool(a) and strip(a) == strip(b)
+
+
+def _vercel_applies(entry: dict, host: str) -> bool:
+    """
+    Условное правило vercel.json (`has` / `missing`) действует не на каждый
+    запрос. Условие по хосту проверяется по адресу сайта; любое другое —
+    заголовок, cookie, параметр — у обычного обхода не выполняется, и правило
+    к нему не применяется.
+    """
+    for kind in ("has", "missing"):
+        for cond in entry.get(kind) or ():
+            if not isinstance(cond, dict):
+                return False
+            if cond.get("type") != "host":
+                if kind == "has":
+                    return False
+                continue                  # «нет такого заголовка» у обхода выполнено
+            hit = _same_host(str(cond.get("value", "")), host)
+            if hit != (kind == "has"):
+                return False
+    return True
+
+
+def header_noindex_rules(root: str, host: str = "") -> list:
     """
     Правила X-Robots-Tag: noindex из `_headers` (Netlify, Cloudflare Pages),
     `netlify.toml` и `vercel.json` — в сборке и уровнем выше.
 
     Тот же noindex, отданный заголовком, был невидим: 88 страниц глоссария
     закрывались из `_headers`, а отчёт показывал их открытыми.
+
+    Каждое правило — (выражение, файл, шаблон, закрывает ли). Правило с чужим
+    хостом (`https://:project.pages.dev/*` — рецепт Cloudflare для превью)
+    к сайту не относится; `! X-Robots-Tag` в `_headers` снимает заголовок —
+    это правило «открывает».
     """
     rules = []
     near = [root, os.path.dirname(os.path.abspath(root))]
@@ -1772,11 +1804,20 @@ def header_noindex_rules(root: str) -> list:
                 continue
             if not line[:1].isspace():
                 current = line.strip()
+                if "://" in current and not _same_host(urlsplit(current).netloc, host):
+                    current = None        # правило другого хоста
                 continue
-            name, _, value = line.strip().partition(":")
-            if current and name.strip().lower() == "x-robots-tag" and _closes(value):
-                path = urlsplit(current).path if "://" in current else current
-                rules.append((_route_regex(path), "_headers", current))
+            if not current:
+                continue
+            path = urlsplit(current).path if "://" in current else current
+            stripped = line.strip()
+            if stripped.startswith("!"):
+                if stripped[1:].strip().lower() == "x-robots-tag":
+                    rules.append((_route_regex(path), "_headers", current, False))
+                continue
+            name, _, value = stripped.partition(":")
+            if name.strip().lower() == "x-robots-tag" and _closes(value):
+                rules.append((_route_regex(path), "_headers", current, True))
     for folder in near:
         toml = os.path.join(folder, "netlify.toml")
         if not os.path.isfile(toml):
@@ -1789,7 +1830,8 @@ def header_noindex_rules(root: str) -> list:
             block = block.split("[[", 1)[0]
             where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)
             if where and tag and _closes(tag.group(1)):
-                rules.append((_route_regex(where.group(1)), "netlify.toml", where.group(1)))
+                rules.append((_route_regex(where.group(1)), "netlify.toml",
+                              where.group(1), True))
         break
     for folder in near:
         vercel = os.path.join(folder, "vercel.json")
@@ -1802,18 +1844,21 @@ def header_noindex_rules(root: str) -> list:
         for entry in (data.get("headers") if isinstance(data, dict) else None) or []:
             if not isinstance(entry, dict) or not isinstance(entry.get("source"), str):
                 continue
+            if not _vercel_applies(entry, host):
+                continue
             for header in entry.get("headers") or []:
                 if (isinstance(header, dict)
                         and str(header.get("key", "")).lower() == "x-robots-tag"
                         and _closes(str(header.get("value", "")))):
-                    rules.append((_route_regex(entry["source"]), "vercel.json", entry["source"]))
+                    rules.append((_route_regex(entry["source"]), "vercel.json",
+                                  entry["source"], True))
         break
     return rules
 
 
 def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -> None:
-    rules = header_noindex_rules(root)
-    if not rules:
+    rules = header_noindex_rules(root, urlsplit(base_url).netloc)
+    if not any(closes for *_, closes in rules):
         return
     base = urlsplit(base_url).path.rstrip("/")
     hits = Counter()
@@ -1821,8 +1866,11 @@ def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -
         path = urlsplit(page.url).path
         if base and path.startswith(base + "/"):
             path = path[len(base):]
-        for regex, source, pattern in rules:
-            if regex.match(path) or regex.match(path.rstrip("/")):
+        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        reopened = {source for regex, source, _, closes in rules
+                    if not closes and matches(regex)}
+        for regex, source, pattern, closes in rules:
+            if closes and source not in reopened and matches(regex):
                 if not page.noindex:
                     page.robots = (page.robots + ",noindex").strip(",")
                 hits[(source, pattern)] += 1

@@ -721,6 +721,15 @@ def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
             path = key.split("?", 1)[0]
             if "." in path.rsplit("/", 1)[-1]:
                 continue
+            if base:
+                # Сайт под префиксом: всё вне него — другая часть домена
+                # (/pricing рядом с /docs) или чужой проект на том же
+                # github.io, а не пустота. Ссылку, забывшую префикс, отсюда
+                # от блога компании не отличить; когда префикс забыт
+                # системно, это ловит `root_mismatch`.
+                local = "/" + path.lstrip("/").partition("/")[2]
+                if local != base and not local.startswith(base + "/"):
+                    continue
             if _parent(path) in sections and not is_route(path):
                 bad.append(path)
         if bad:
