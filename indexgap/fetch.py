@@ -581,28 +581,17 @@ def _site_hosts(site: str) -> list:
     return sorted({host, bare, "www." + bare} - {"", "www."})
 
 
-def _loopback(host: str) -> bool:
-    import ipaddress
-    if host == "localhost" or host.endswith(".localhost"):
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 def browser_args(browser: str, url: str, profile: str = "", site: str = "",
                  no_sandbox: bool = False, proxy_port: int = 9, pins: dict = None) -> list:
     """
     Список аргументов, не строка: shell между пакетом и браузером нет.
 
     Страница сама тянет скрипты, шрифты и API — в том числе с чужих хостов,
-    из внутренней сети и с 169.254.169.254. Браузер выпускается только на
-    сайт: имена сайта закреплены за адресами, которые пакет разрешил сам
-    (`pins`), — подменить DNS посреди обхода нельзя; остальные имена не
-    разрешаются, а всё, что идёт не на сайт, в том числе по IP и на
-    loopback, уходит в прокси-ловушку пакета, которая молча закрывает
-    соединение. WebRTC мимо прокси не ходит.
+    из внутренней сети, с loopback и с 169.254.169.254. Весь трафик браузера,
+    loopback тоже (`<-loopback>`), идёт через прокси-шлюз пакета (`_Gate`),
+    а тот соединяет только с хостом и портом сайта по адресу, разрешённому
+    один раз: ни чужой хост, ни подмена DNS посреди обхода, ни соседний порт
+    на своей машине недоступны. WebRTC мимо прокси не ходит.
     """
     args = [browser, "--headless=new", "--disable-gpu"]
     if no_sandbox:
@@ -611,15 +600,10 @@ def browser_args(browser: str, url: str, profile: str = "", site: str = "",
     args += ["--no-first-run", "--no-default-browser-check"]
     hosts = _site_hosts(site or url)
     if hosts:
-        pins = pins or {}
-        rules = [f"MAP {h} {pins[h]}" if h in pins else f"EXCLUDE {h}" for h in hosts]
-        args.append("--host-resolver-rules=" + ", ".join(rules + ["MAP * ~NOTFOUND"]))
-        # `<-loopback>` отбирает у loopback обход прокси — и Chromium тогда
-        # не пускает напрямую даже явно названный 127.0.0.1. Для сайта на
-        # своей машине loopback и есть сайт.
-        local = any(_loopback(h) for h in hosts)
-        args += [f"--proxy-server=127.0.0.1:{proxy_port}",
-                 "--proxy-bypass-list=" + ";".join(hosts + ([] if local else ["<-loopback>"])),
+        args += ["--host-resolver-rules=MAP * ~NOTFOUND, "
+                 + ", ".join(f"EXCLUDE {h}" for h in hosts),
+                 f"--proxy-server=127.0.0.1:{proxy_port}",
+                 "--proxy-bypass-list=<-loopback>",
                  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]
     if profile:
         # Свой профиль на каждый вызов: открытый Chrome человека не трогается.
@@ -629,39 +613,49 @@ def browser_args(browser: str, url: str, profile: str = "", site: str = "",
     return args
 
 
-def _pin_hosts(site: str) -> dict:
-    """Имена сайта → один адрес, разрешённый здесь и сейчас. IP-адрес сайта не трогаем."""
+def _site_targets(site: str) -> dict:
+    """
+    (хост, порт) сайта → адрес, разрешённый здесь и сейчас. Имена с www и без,
+    порт из адреса или по схеме. IP-адрес сайта остаётся как есть.
+    """
     import ipaddress
     import socket
-    pins = {}
+    parts = urlsplit(site)
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    targets = {}
     for host in _site_hosts(site):
         try:
             ipaddress.ip_address(host)
+            targets[(host, port)] = host
             continue
         except ValueError:
             pass
         try:
-            info = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+            info = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except OSError:
             continue
         if info:
-            address = info[0][4][0]
-            pins[host] = f"[{address}]" if ":" in address else address
-    return pins
+            targets[(host, port)] = info[0][4][0]
+    return targets
 
 
-class _Sink:
+class _Gate:
     """
-    Прокси-ловушка на свободном порту: принимает соединение и сразу закрывает.
-    Свой слушатель, а не «заведомо пустой» порт 9: на чужой машине на нём
-    может сидеть что угодно.
+    Прокси-шлюз для браузера на свободном порту 127.0.0.1. Пропускает только
+    к сайту: CONNECT host:port и запросы `http://host:port/…`, где (host, port)
+    — из `targets`, соединяясь по заранее разрешённому адресу. Всё остальное —
+    соединение закрывается. Свой слушатель, а не «заведомо пустой» порт: на
+    чужой машине на нём может сидеть что угодно.
     """
 
-    def __init__(self):
+    MAX_HEAD = 64 * 1024
+
+    def __init__(self, targets: dict):
         import socket
+        self.targets = dict(targets)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("127.0.0.1", 0))
-        self.sock.listen(16)
+        self.sock.listen(32)
         self.sock.settimeout(0.5)
         self.port = self.sock.getsockname()[1]
         self.done = threading.Event()
@@ -674,7 +668,75 @@ class _Sink:
                 conn, _ = self.sock.accept()
             except OSError:
                 continue
-            conn.close()
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _target(self, host: str, port: int):
+        return self.targets.get(((host or "").lower().strip("[]"), port))
+
+    def _serve(self, conn):
+        import socket
+        upstream = None
+        try:
+            conn.settimeout(30)
+            head = b""
+            while b"\r\n\r\n" not in head and len(head) < self.MAX_HEAD:
+                chunk = conn.recv(8192)
+                if not chunk:
+                    return
+                head += chunk
+            line, _, rest = head.partition(b"\r\n")
+            parts = line.split(b" ")
+            if len(parts) != 3:
+                return
+            method, target, version = parts
+            if method == b"CONNECT":
+                host, _, port = target.decode("ascii", "replace").rpartition(":")
+                address = self._target(host, int(port) if port.isdigit() else -1)
+                if not address:
+                    return
+                upstream = socket.create_connection((address, int(port)), timeout=30)
+                conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                leftover = head.split(b"\r\n\r\n", 1)[1]
+                if leftover:
+                    upstream.sendall(leftover)
+            else:
+                url = urlsplit(target.decode("ascii", "replace"))
+                if url.scheme != "http":
+                    return
+                port = url.port or 80
+                address = self._target(url.hostname, port)
+                if not address:
+                    return
+                upstream = socket.create_connection((address, port), timeout=30)
+                path = (url.path or "/") + (f"?{url.query}" if url.query else "")
+                upstream.sendall(method + b" " + path.encode("ascii", "replace") + b" "
+                                 + version + b"\r\n" + rest)
+            self._pipe(conn, upstream)
+        except (OSError, ValueError):
+            return
+        finally:
+            for s in (conn, upstream):
+                if s is not None:
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
+
+    @staticmethod
+    def _pipe(a, b):
+        """Байты в обе стороны, пока одна не закроется."""
+        import select
+        a.settimeout(None)
+        b.settimeout(None)
+        while True:
+            ready, _, _ = select.select([a, b], [], [], 30)
+            if not ready:
+                return
+            for src in ready:
+                data = src.recv(65536)
+                if not data:
+                    return
+                (b if src is a else a).sendall(data)
 
     def close(self):
         self.done.set()
@@ -725,11 +787,11 @@ def render(browser: str, url: str, site: str, no_sandbox: bool = False) -> tuple
                         "передаётся", a0=site)
     profile = tempfile.mkdtemp(prefix="indexgap-render-")
     extra = {} if os.name == "nt" else {"start_new_session": True}
-    sink = _Sink()
+    gate = _Gate(_site_targets(site))
     try:
         try:
             proc = subprocess.Popen(browser_args(browser, url, profile, site, no_sandbox,
-                                                 sink.port, _pin_hosts(site)),
+                                                 gate.port),
                                     shell=False,
                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, **extra)
@@ -741,7 +803,7 @@ def render(browser: str, url: str, site: str, no_sandbox: bool = False) -> tuple
             _stop(proc)
             return None, tr("браузер не уложился в {a0} с — остановлен", a0=RENDER_TIMEOUT)
     finally:
-        sink.close()
+        gate.close()
         shutil.rmtree(profile, ignore_errors=True)
     if proc.returncode != 0:
         return None, tr("браузер завершился с кодом {a0}", a0=proc.returncode)
