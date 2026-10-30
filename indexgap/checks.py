@@ -738,6 +738,21 @@ def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
     return found
 
 
+def _other_host(pages: list) -> str:
+    """Хост, под которым сайт ссылается на собственные страницы, если такой есть."""
+    keys = {p.key.split("/", 3)[3] if p.key.count("/") >= 3 else "" for p in pages}
+    hits = Counter()
+    for p in pages:
+        for key in p.__dict__.get("_foreign_links", ()):
+            host, _, path = key.lstrip("/").partition("/")
+            if path.rstrip("/") in keys or (not path and "" in keys):
+                hits[host] += 1
+    if not hits:
+        return ""
+    host, n = hits.most_common(1)[0]
+    return host if n >= max(5, len(pages) * 0.3) else ""
+
+
 def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
     """
     Самый частый неверный вердикт: каталог не соответствует корню сайта.
@@ -750,6 +765,16 @@ def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
     """
     unresolved = set(graph.get("unresolved") or [])
     orphans = graph.get("orphans") or []
+    lost = len(orphans) + len(graph.get("unreachable") or [])
+    if pages and lost >= max(3, len(pages) * 0.3):
+        other = _other_host(pages)
+        if other:
+            return tr("ссылки на страницах ведут на {a0}, а сайт проверяется как {a1}: "
+                      "для пакета это чужой сайт, и страницы выглядят сиротами. Если "
+                      "{a0} — тот же сайт (старый домен, github.io за CNAME), задай его "
+                      "в --site или поправь адрес сайта в генераторе — на живом сайте "
+                      "каждая такая ссылка идёт через редирект.",
+                      a0=other, a1=pages[0].url.split("/")[2])
     if not unresolved or not pages or len(orphans) < max(3, len(pages) * 0.5):
         return ""
     shifted = set()
@@ -867,6 +892,10 @@ def _consolidated(page, target) -> bool:
     return not (a != b and (_is_locale(a) or _is_locale(b)))
 
 
+_CLOSED_BY_DESIGN = {"print", "print.html", "toc", "toc.html", "search", "search.html",
+                     "404", "404.html", "search-results"}
+
+
 def technical_issues(pages: list, cfg: dict = None, language: str = "",
                      shells: set = None) -> list:
     """Плоский список находок: (уровень, url, код, пояснение)."""
@@ -898,7 +927,11 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         for note in p.notes:
             issues.append(("warning", p.url, "source-note", note))
         if p.noindex:
-            issues.append(("critical", p.url, "noindex",
+            # Печатная копия и оглавление mdBook, поиск Docusaurus, страница 404
+            # закрыты генератором намеренно: это сведение, а не авария.
+            last = urlsplit(p.url).path.rstrip("/").rsplit("/", 1)[-1].lower()
+            issues.append(("info" if last in _CLOSED_BY_DESIGN else "critical", p.url,
+                           "noindex",
                            tr("страница закрыта от индексации — если это не задумано, трафика не будет")))
         if p.nosnippet:
             issues.append(("critical", p.url, "nosnippet",

@@ -1686,6 +1686,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
                 page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own.path, "", ""))
     seen = set()
     forms = []
+    foreign = []
     for href in hrefs:
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
             continue
@@ -1697,7 +1698,12 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             if markdown and not base_href and not _EXT_RE.search(urlsplit(href).path):
                 base = url
             absolute, _ = urldefrag(urljoin(base, href))
-            if urlsplit(url_key(absolute)).netloc != host:
+            other = urlsplit(url_key(absolute)).netloc
+            if other != host:
+                # Помним немного чужих адресов: если сайт ссылается на себя
+                # под другим именем хоста, все страницы выглядят сиротами.
+                if other and len(foreign) < 30:
+                    foreign.append(url_key(absolute))
                 continue
         except ValueError:
             continue
@@ -1711,6 +1717,8 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             page.links.append(absolute)
             forms.append((key, form))
     page.__dict__["_link_forms"] = forms
+    if foreign:
+        page.__dict__["_foreign_links"] = foreign
 
     return page
 

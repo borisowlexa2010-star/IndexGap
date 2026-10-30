@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 import language  # noqa: F401  — закрепляет русский язык вывода
-from indexgap import checks, content, core
+from indexgap import checks, content, core, signals
 
 SITE = "https://example.com"
 TEXT = ("Plumbers fix leaks, unclog drains and install water heaters. Most visits take "
@@ -60,6 +60,37 @@ class Corpus(unittest.TestCase):
             with self.subTest(h2=h2):
                 pages = self.build({"index.html": html("Reference", "<pre>x | y</pre>", h2=h2)})
                 self.assertEqual(content.check_slots(pages), [])
+
+    def test_links_to_the_site_under_another_host_are_named(self):
+        # ryan-han.com: CNAME, а все ссылки — на integerous.github.io.
+        files = {"index.html": html("Home", "".join(
+            f'<a href="http://old.github.io/p{i}/">p{i}</a>' for i in range(8)))}
+        for i in range(8):
+            files[f"p{i}/index.html"] = html(f"Post number {i}",
+                                             '<a href="http://old.github.io/">home</a>')
+        pages = self.build(files)
+        notes = checks.run_all(pages, SITE + "/")["notes"]
+        self.assertTrue(any("old.github.io" in n for n in notes), notes)
+
+    def test_pages_closed_by_the_generator_are_not_an_alarm(self):
+        closed = ('<!doctype html><html><head><title>{0}</title>'
+                  '<meta name="robots" content="noindex"></head><body><p>x</p></body></html>')
+        pages = self.build({"print.html": closed.format("Print"),
+                            "search/index.html": closed.format("Search"),
+                            "guide/index.html": closed.format("Guide")})
+        levels = {i[1]: i[0] for i in checks.technical_issues(pages) if i[2] == "noindex"}
+        self.assertEqual(levels[SITE + "/guide/"], "critical")
+        self.assertEqual(levels[SITE + "/search/"], "info")
+        self.assertEqual({lvl for url, lvl in levels.items() if "print" in url}, {"info"})
+
+
+class Years(unittest.TestCase):
+    def test_a_version_in_a_product_name_is_not_a_date(self):
+        for title in ("ES2017 async functions", "SQL Server 2019 setup",
+                      "Office 2016 shortcuts", "ECMAScript 2015 modules"):
+            with self.subTest(title=title):
+                self.assertEqual(signals._past_years(title, 2026), set())
+        self.assertEqual(signals._past_years("Best plumbers 2019", 2026), {2019})
 
 
 if __name__ == "__main__":

@@ -248,4 +248,10 @@ MESSAGES = {
     "`{a0}` — на {a1} страницах шаблона {a2} из {a3}. По сайту это {a4:.0%}, но страницы одного шаблона и чинятся один раз — в этом шаблоне.":
         "`{a0}` — on {a1} pages of the template {a2} out of {a3}. That is {a4:.0%} "
         "of the site, but pages of one template are fixed once — in that template.",
+    "ссылки на страницах ведут на {a0}, а сайт проверяется как {a1}: для пакета это чужой сайт, и страницы выглядят сиротами. Если {a0} — тот же сайт (старый домен, github.io за CNAME), задай его в --site или поправь адрес сайта в генераторе — на живом сайте каждая такая ссылка идёт через редирект.":
+        "links on the pages point to {a0}, while the site is checked as {a1}: to the "
+        "package that is another site, and the pages look orphaned. If {a0} is the "
+        "same site (an old domain, github.io behind a CNAME), pass it as --site or "
+        "fix the site address in the generator — live, every such link goes through "
+        "a redirect.",
 }
