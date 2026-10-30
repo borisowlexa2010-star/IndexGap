@@ -242,5 +242,56 @@ class TestPortfolio(Fixture):
         self.assertIn("не проверен", open(path, encoding="utf-8").read())
 
 
+
+class TestPortfolioRobots(Fixture):
+    """
+    Ссылки страницы, закрытой в robots.txt, поисковик не читает — как в `check`
+    и `doctor`. Портфель звал run_all без закрытых страниц, и страница, до
+    которой дотягивались только из закрытого раздела, считалась достижимой.
+    """
+
+    def _site(self, prefix=""):
+        def page(title, *hrefs):
+            body = " ".join(f"слово{n}" for n in range(120))
+            refs = "".join(f'<a href="{prefix}{h}">ссылка {h}</a> ' for h in hrefs)
+            return (f"<!doctype html><html lang=\"ru\"><head><title>{title} — сайт</title>"
+                    f"</head><body><main><h1>{title}</h1><p>{body}</p>{refs}</main>"
+                    f"</body></html>")
+        self.write("site/index.html", page("Главная", "/plumbing/", "/private/"))
+        self.write("site/plumbing/index.html", page("Сантехника", "/"))
+        self.write("site/private/index.html", page("Закрытая", "/plumbing/denver/"))
+        self.write("site/plumbing/denver/index.html", page("Денвер", "/plumbing/"))
+        self.write("site/robots.txt", f"User-agent: *\nDisallow: {prefix}/private/\n")
+
+    def _run(self, site, **extra):
+        spec = dict({"name": "s", "root": "site", "site": site}, **extra)
+        result = portfolio.run_one(portfolio.read_portfolio(self.portfolio_file([spec]))[0])
+        self.assertEqual(result["error"], "")
+        return result
+
+    def unreachable(self, result):
+        return [i[1] for i in result["issues"] if i[2] == "unreachable"]
+
+    def test_links_from_a_blocked_page_do_not_reach(self):
+        self._site()
+        result = self._run("https://example.com")
+        self.assertEqual(self.unreachable(result), ["https://example.com/plumbing/denver/"])
+
+    def test_a_build_robots_under_a_base_path_is_not_the_hosts(self):
+        # Сайт живёт под /repo/: поисковик читает только robots.txt корня хоста.
+        self._site("/repo")
+        result = self._run("https://example.github.io/repo")
+        self.assertEqual(self.unreachable(result), [])
+        self.assertTrue(any("robots.txt" in n and "/repo/" in n for n in result["notes"]),
+                        result["notes"])
+        self.assertNotIn("no-robots", [i[2] for i in result["issues"]])
+
+    def test_an_explicit_robots_under_a_base_path_is_applied(self):
+        self._site("/repo")
+        result = self._run("https://example.github.io/repo", robots="site/robots.txt")
+        self.assertEqual(self.unreachable(result),
+                         ["https://example.github.io/repo/plumbing/denver/"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -97,6 +97,10 @@ MESSAGES = {
         "{a0}: project #{a1} is missing the fields ",
     "Проверка — {a0}":
         "Checking — {a0}",
+    "robots.txt в сборке не действует: сайт живёт под /{a0}/, а поисковики читают только {a1}://{a2}/robots.txt. Правила из него не проверялись; настоящий файл хоста можно назвать полем `robots` проекта":
+        "the robots.txt in the build has no effect: the site lives under /{a0}/, and "
+        "search engines read only {a1}://{a2}/robots.txt. Its rules were not checked; "
+        "the host's real file can be named in the project's `robots` field",
     "Файл портфеля {a0} не найден.":
         "Portfolio file {a0} not found.",
     "в {a0} нет ни одной страницы":
