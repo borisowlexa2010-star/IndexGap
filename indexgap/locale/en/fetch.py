@@ -67,4 +67,5 @@ MESSAGES = {
     "сегмент пути длиннее 200 байт": "a path segment longer than 200 bytes",
     "файл {a0} check не читает": "check does not read the file {a0}",
     "файл {a0} уже занят адресом {a1}": "the file {a0} is already taken by {a1}",
+    "<каталог>": "<directory>",
 }

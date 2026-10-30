@@ -577,16 +577,40 @@ def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
     return manifest
 
 
+# Знаки, которые cmd и PowerShell раскрывают даже в двойных кавычках.
+_NT_UNSAFE = re.compile(r'["%!$`]')
+_NT_PLAIN = re.compile(r"^[\w\-.:\\/~@+=,]+$")
+
+
+def _nt_arg(arg: str) -> str:
+    """Аргумент для cmd и PowerShell: как есть, в двойных кавычках или никак."""
+    if _NT_PLAIN.match(arg):
+        return arg
+    if _NT_UNSAFE.search(arg):
+        return ""
+    return f'"{arg}"'
+
+
 def next_command(out_dir: str, manifest: dict) -> str:
-    parts = ["indexgap", "check", out_dir, "--site", manifest["site"]]
+    """
+    Команда, которую человек скопирует в терминал. Имя sitemap пришло с
+    чужого сервера: `/a&calc.xml` в команде для cmd стал бы второй командой.
+    На POSIX это закрывает shlex.quote; в Windows одинарных кавычек нет,
+    поэтому аргумент со знаками, которые раскрываются и в двойных кавычках,
+    в команду не попадает вовсе — check найдёт sitemap и без него.
+    """
+    pairs = [("--site", manifest["site"])]
     for rel in manifest.get("root_sitemaps") or ():
-        parts += ["--sitemap", os.path.join(out_dir, *rel.split("/"))]
-    if os.name == "nt":
-        # cmd и PowerShell не понимают одинарных кавычек shlex: путь
-        # `'C:\\…\\live'` они передали бы вместе с кавычками.
-        import subprocess
-        return subprocess.list2cmdline(parts)
-    return " ".join(shlex.quote(p) for p in parts)
+        pairs.append(("--sitemap", os.path.join(out_dir, *rel.split("/"))))
+    if os.name != "nt":
+        parts = ["indexgap", "check", out_dir] + [x for pair in pairs for x in pair]
+        return " ".join(shlex.quote(p) for p in parts)
+    words = ["indexgap", "check", _nt_arg(out_dir) or tr("<каталог>")]
+    for flag, value in pairs:
+        quoted = _nt_arg(value)
+        if quoted:
+            words += [flag, quoted]
+    return " ".join(words)
 
 
 def print_summary(out_dir: str, manifest: dict) -> int:
