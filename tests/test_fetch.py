@@ -343,7 +343,7 @@ class TestLimits(FetchCase):
 
     def test_a_non_empty_out_dir_is_refused(self):
         os.makedirs(self.out)
-        with open(os.path.join(self.out, "keep.txt"), "w") as fh:
+        with open(os.path.join(self.out, "keep.txt"), "w", encoding="utf-8") as fh:
             fh.write("мой файл")
         code, out = self.run_cli()
         self.assertEqual(code, 2)
