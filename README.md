@@ -157,8 +157,12 @@ in `fetch.json` stay those of the raw response, and the page gets
 `rendered: true`. Each page gets a fresh throwaway profile and 60 seconds; a
 browser that hangs is killed and the raw HTML is kept. Without a browser
 `--render` stops before the first request (exit 2) and says what to install.
-The browser loads what the page loads — scripts, fonts, APIs — including from
-other hosts, and it does not consult robots.txt for them. What `fetch` still
+The browser is let out only to the site: other host names do not resolve and
+everything else — IP addresses, loopback, the cloud metadata address — goes to
+a dead proxy, so scripts, fonts or APIs from other hosts do not load (a page
+that needs them renders without them). The sandbox stays on; as root on Linux
+`--render` refuses to start unless `--browser-no-sandbox` says you accept the
+risk. What `fetch` still
 cannot see: URLs with query strings that are not in the sitemap, and, without
 `--crawl`, pages that are not in the sitemap.
 

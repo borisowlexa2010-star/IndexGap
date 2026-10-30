@@ -781,19 +781,39 @@ class TestRenderUnits(unittest.TestCase):
                     self.assertIsNone(dom)
                     self.assertTrue(error)
 
-    def test_no_sandbox_only_for_root_on_linux(self):
-        with mock.patch.object(fetch.sys, "platform", "linux"), \
-                mock.patch.object(fetch.os, "geteuid", create=True, return_value=0):
-            self.assertIn("--no-sandbox", fetch.browser_args("/bin/chrome", "https://e.com/"))
-        with mock.patch.object(fetch.sys, "platform", "linux"), \
-                mock.patch.object(fetch.os, "geteuid", create=True, return_value=1000):
-            self.assertNotIn("--no-sandbox", fetch.browser_args("/bin/chrome", "https://e.com/"))
-        with mock.patch.object(fetch.sys, "platform", "darwin"), \
-                mock.patch.object(fetch.os, "geteuid", create=True, return_value=0):
-            args = fetch.browser_args("/bin/chrome", "https://e.com/")
-        self.assertNotIn("--no-sandbox", args)
+    def test_no_sandbox_only_when_asked(self):
+        self.assertNotIn("--no-sandbox", fetch.browser_args("/bin/chrome", "https://e.com/"))
+        self.assertIn("--no-sandbox",
+                      fetch.browser_args("/bin/chrome", "https://e.com/", no_sandbox=True))
+        args = fetch.browser_args("/bin/chrome", "https://e.com/")
         self.assertEqual(args[0], "/bin/chrome")
         self.assertEqual(args[-1], "https://e.com/")
+
+    def test_root_on_linux_must_opt_out_of_the_sandbox(self):
+        with mock.patch.object(fetch, "needs_no_sandbox", return_value=True), \
+                mock.patch.object(fetch, "find_browser", return_value="/bin/chrome"):
+            with self.assertRaises(fetch.SourceError) as caught:
+                fetch.run("https://e.com/", os.path.join(tempfile.mkdtemp(), "out"),
+                          render_pages=True)
+        self.assertIn("--browser-no-sandbox", str(caught.exception))
+
+    def test_the_browser_may_only_reach_the_site(self):
+        args = fetch.browser_args("/bin/chrome", "https://www.e.com/a/", site="https://e.com/")
+        rules = next(a for a in args if a.startswith("--host-resolver-rules="))
+        self.assertIn("MAP * ~NOTFOUND", rules)
+        self.assertIn("EXCLUDE e.com", rules)
+        self.assertIn("EXCLUDE www.e.com", rules)
+        self.assertIn("--proxy-server=127.0.0.1:9", args)
+        bypass = next(a for a in args if a.startswith("--proxy-bypass-list="))
+        self.assertIn("<-loopback>", bypass)
+        self.assertNotIn("169.254", bypass)
+
+    def test_a_batch_browser_gets_only_plain_urls(self):
+        for url in ("https://e.com/a&calc/", "https://e.com/%PATH%/", "https://e.com/(x)/"):
+            with self.subTest(url=url):
+                dom, error = fetch.render("C:\\tools\\chrome.bat", url, "https://e.com/")
+                self.assertIsNone(dom)
+                self.assertTrue(error)
 
 
 if __name__ == "__main__":

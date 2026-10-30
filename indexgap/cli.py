@@ -1110,7 +1110,7 @@ def cmd_fetch(args):
     manifest = fetch.run(args.site, args.out_dir, sitemaps=args.sitemap, limit=args.limit,
                          all_pages=args.all, delay=args.delay, jobs=args.jobs,
                          progress=progress, follow=args.crawl, render_pages=args.render,
-                         browser=args.browser)
+                         browser=args.browser, no_sandbox=args.browser_no_sandbox)
     return fetch.print_summary(args.out_dir, manifest)
 
 
@@ -1967,6 +1967,9 @@ def build_parser():
                            "Chromium, а не исходный HTML — для страниц, которые рисует JavaScript"))
     p.add_argument("--browser", metavar="PATH",
                    help=tr("путь к браузеру для --render, если он не нашёлся сам"))
+    p.add_argument("--browser-no-sandbox", action="store_true",
+                   help=tr("запускать браузер без песочницы — только в одноразовом "
+                           "контейнере под root"))
     p.set_defaults(func=cmd_fetch)
     ap._subparsers_map = dict(sub.choices)
     return ap
