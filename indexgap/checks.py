@@ -973,6 +973,26 @@ NOT_TEMPLATE_WIDE = {"near-duplicate", "similar", "js-shell", "unsupported-numbe
                      "hreflang-no-return", "hreflang-unknown-target"}
 
 
+class TemplateNote(str):
+    """Строка заметки о шаблоне плюс адреса, которые она покрывает (`urls`)."""
+
+    urls = frozenset()
+
+    @classmethod
+    def of(cls, text: str, urls) -> "TemplateNote":
+        note = cls(text)
+        note.urls = frozenset(urls)
+        return note
+
+
+def _url_pattern(url: str) -> str:
+    """`/plumbing/austin/` → `/plumbing/*/`: последний сегмент пути — переменная шаблона."""
+    parts = [s for s in urlsplit(url).path.split("/") if s]
+    if not parts:
+        return ""
+    return "/" + "".join(f"{s}/" for s in parts[:-1]) + "*/"
+
+
 def template_wide(issues: list, page_count: int, share: float = 0.9,
                   pages: list = None) -> list:
     """
@@ -989,6 +1009,13 @@ def template_wide(issues: list, page_count: int, share: float = 0.9,
     китайских страницах — это 10% сайта и 100% языка. Первое ничего не значит,
     второе значит ровно то, что описания китайской версии написаны по длине
     латиницы: чинится один раз, в шаблоне этой версии.
+
+    И по шаблонам адресов. 170 страниц `/plumbing/<город>/` рядом с 30
+    записями блога: дефект городского шаблона — 85% сайта и 100% шаблона.
+    Сайтовый порог его не видит, а чинится он так же — один раз.
+
+    Каждая заметка — `TemplateNote`: помнит, какие адреса покрывает, чтобы
+    наряд шаблона забирал только их, а не ту же находку со всего сайта.
     """
     if page_count < 20:
         return []
@@ -998,14 +1025,16 @@ def template_wide(issues: list, page_count: int, share: float = 0.9,
             continue
         by_code[code].add(url)
     notes = []
+    covered = defaultdict(set)
     for code, urls in sorted(by_code.items()):
         got = len(urls) / page_count
         if got >= share:
-            notes.append(
+            notes.append(TemplateNote.of(
                 tr("`{a0}` — на {a1} страницах из {a2} ({a3:.0%}). Это свойство "
                    "шаблона, а не список страниц: чинится один раз в шаблоне "
                    "и исчезает везде.", a0=code, a1=len(urls), a2=page_count,
-                   a3=got))
+                   a3=got), urls))
+            covered[code] |= urls
 
     total_by_lang = defaultdict(set)
     where = {}
@@ -1014,26 +1043,45 @@ def template_wide(issues: list, page_count: int, share: float = 0.9,
         where[page.url] = code
         if code:
             total_by_lang[code].add(page.url)
-    if len(total_by_lang) < 2:
-        return notes
 
-    for code, urls in sorted(by_code.items()):
-        if len(urls) / page_count >= share:
-            continue                      # уже сказано про весь сайт
-        hit = defaultdict(int)
-        for url in urls:
-            language = where.get(url)
-            if language:
-                hit[language] += 1
-        for language, count in sorted(hit.items()):
-            total = len(total_by_lang.get(language) or ())
-            if total >= 20 and count / total >= share:
-                notes.append(
-                    tr("`{a0}` — на {a1} страницах языка «{a2}» из {a3}, то есть "
-                       "почти на всех. По сайту это лишь {a4:.0%}, но чинится "
-                       "один раз: в шаблоне этой языковой версии.",
-                       a0=code, a1=count, a2=language, a3=total,
-                       a4=len(urls) / page_count))
+    if len(total_by_lang) >= 2:
+        for code, urls in sorted(by_code.items()):
+            if code in covered:
+                continue                  # уже сказано про весь сайт
+            hit = defaultdict(set)
+            for url in urls:
+                language = where.get(url)
+                if language:
+                    hit[language].add(url)
+            for language, got in sorted(hit.items()):
+                total = len(total_by_lang.get(language) or ())
+                if total >= 20 and len(got) / total >= share:
+                    notes.append(TemplateNote.of(
+                        tr("`{a0}` — на {a1} страницах языка «{a2}» из {a3}, то есть "
+                           "почти на всех. По сайту это лишь {a4:.0%}, но чинится "
+                           "один раз: в шаблоне этой языковой версии.",
+                           a0=code, a1=len(got), a2=language, a3=total,
+                           a4=len(urls) / page_count), got))
+                    covered[code] |= got
+
+    by_pattern = defaultdict(set)
+    for page in pages or ():
+        pattern = _url_pattern(page.url)
+        if pattern:
+            by_pattern[pattern].add(page.url)
+    for pattern, members in sorted(by_pattern.items()):
+        if len(members) < 20:
+            continue
+        for code, urls in sorted(by_code.items()):
+            got = (urls & members) - covered[code]
+            if len(got) < 20 or len(urls & members) / len(members) < share:
+                continue
+            notes.append(TemplateNote.of(
+                tr("`{a0}` — на {a1} страницах шаблона {a2} из {a3}. По сайту это "
+                   "{a4:.0%}, но страницы одного шаблона и чинятся один раз — "
+                   "в этом шаблоне.", a0=code, a1=len(urls & members), a2=pattern,
+                   a3=len(members), a4=len(urls) / page_count), got))
+            covered[code] |= got
     return notes
 
 

@@ -286,18 +286,24 @@ def build(pages: list, analysis: dict, cfg: dict = None,
     cfg = {**CHECK_DEFAULTS, **(cfg or {})}
     by_page = defaultdict(list)
     site_issues, grouped_issues = [], []
-    template_codes = set()
+    # Код шаблона → адреса, которые забирает его наряд. Заметка без адресов
+    # (простая строка) забирает код со всего сайта.
+    template_codes = {}
     for note in template_notes or ():
         match = re.search(r"`([a-z\-]+)`", note)
         if match:
-            template_codes.add(match.group(1))
+            scope = getattr(note, "urls", None) or None
+            have = template_codes.get(match.group(1), set())
+            template_codes[match.group(1)] = (None if scope is None or have is None
+                                              else have | scope)
 
     for level, url, code, message in analysis.get("issues", ()):
         if code in SITE_LEVEL or not url or url == "robots.txt":
             site_issues.append((level, url, code, message))
         elif code in GROUPED:
             grouped_issues.append((level, url, code, message))
-        elif code in template_codes:
+        elif code in template_codes and (template_codes[code] is None
+                                         or url in template_codes[code]):
             continue                      # уйдёт в наряд на шаблон
         else:
             by_page[url].append((level, code, message))
