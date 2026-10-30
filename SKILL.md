@@ -46,8 +46,9 @@ cd <корень проекта> && indexgap init
 | несколько сайтов | `indexgap-portfolio` | у человека портфель, а не один проект |
 
 Скиллы ставятся в проект командой `indexgap init` и лежат в
-`.claude/skills/indexgap-*/`. Claude Code читает их сам; для Codex есть
-`indexgap init --agents`, который дописывает блок в `AGENTS.md`.
+`.claude/skills/indexgap-*/`. Claude Code читает их сам; для Codex `init`
+дописывает блок в существующий `AGENTS.md`, а `indexgap init --agents`
+создаёт файл, если его нет.
 
 Открывай нужный скилл целиком — там команды и таблицы кодов.
 

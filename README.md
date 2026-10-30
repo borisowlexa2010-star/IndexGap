@@ -502,7 +502,7 @@ killed a 47,000-page run. Across eleven of them critical findings went from
 
 ## For agents
 
-`SKILL.md` at the root is the overview. `indexgap/skills/` holds four
+`SKILL.en.md` at the root is the overview (`SKILL.md` is the same in Russian). `indexgap/skills/` holds four
 stage-specific skills — `indexgap-plan`, `indexgap-review`, `indexgap-publish`,
 `indexgap-portfolio` — which `indexgap init` copies into your project's
 `.claude/skills/`. A narrow skill fires more accurately than a broad one:
