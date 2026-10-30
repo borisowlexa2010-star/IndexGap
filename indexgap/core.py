@@ -30,6 +30,7 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
+from array import array
 from collections import Counter, defaultdict
 from html import unescape as html_unescape
 from html.parser import HTMLParser
@@ -200,6 +201,99 @@ def is_dense(words: list) -> bool:
     return sum(1 for w in sample if len(w) == 1 and "\u3040" <= w <= "\ufaff") * 2 > len(sample)
 
 
+# \u2500\u2500 \u0410\u0431\u0437\u0430\u0446\u044b \u043a\u0430\u043a \u043a\u0443\u0441\u043a\u0438 \u0442\u0435\u043a\u0441\u0442\u0430 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+#
+# \u0410\u0431\u0437\u0430\u0446\u044b \u2014 \u043f\u043e\u0447\u0442\u0438 \u0442\u043e\u0442 \u0436\u0435 \u043e\u0441\u043d\u043e\u0432\u043d\u043e\u0439 \u0442\u0435\u043a\u0441\u0442 \u0432\u0442\u043e\u0440\u043e\u0439 \u0440\u0430\u0437: \u043d\u0430 \u0441\u0430\u0439\u0442\u0435 \u0432 \u0442\u0440\u0438 \u0442\u044b\u0441\u044f\u0447\u0438
+# \u0441\u0442\u0440\u0430\u043d\u0438\u0446 \u044d\u0442\u043e \u0441\u043e\u0442\u043d\u044f-\u043f\u043e\u043b\u0442\u043e\u0440\u044b \u043c\u0435\u0433\u0430\u0431\u0430\u0439\u0442. \u041f\u043e\u044d\u0442\u043e\u043c\u0443 \u0430\u0431\u0437\u0430\u0446 \u0445\u0440\u0430\u043d\u0438\u0442\u0441\u044f \u043a\u0430\u043a \u043a\u0443\u0441\u043a\u0438
+# `text`, \u0430 \u0441\u0442\u0440\u043e\u043a\u043e\u0439 \u2014 \u0442\u043e\u043b\u044c\u043a\u043e \u0442\u043e\u0442, \u0447\u0442\u043e \u0432 \u0442\u0435\u043a\u0441\u0442\u0435 \u043d\u0435 \u043d\u0430\u0448\u0451\u043b\u0441\u044f. \u0420\u0430\u0437\u043d\u0438\u0446\u0430 \u0431\u044b\u0432\u0430\u0435\u0442
+# \u043e\u0434\u043d\u0430: \u0430\u0431\u0437\u0430\u0446 \u0441\u043a\u043b\u0435\u0438\u0432\u0430\u0435\u0442 \u043a\u0443\u0441\u043a\u0438 \u0440\u0430\u0437\u043c\u0435\u0442\u043a\u0438 \u0447\u0435\u0440\u0435\u0437 \u043f\u0440\u043e\u0431\u0435\u043b, \u0430 \u0442\u0435\u043a\u0441\u0442 \u2014 \u0432\u043f\u0440\u0438\u0442\u044b\u043a
+# (`link</a>, more` \u2014 \u0432 \u0442\u0435\u043a\u0441\u0442\u0435 \u00ablink, more\u00bb, \u0432 \u0430\u0431\u0437\u0430\u0446\u0435 \u00ablink , more\u00bb).
+# \u0421\u0431\u043e\u0440\u043a\u0430 \u0442\u043e\u0447\u043d\u0430 \u043f\u043e \u043f\u043e\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u044e: \u043a\u0443\u0441\u043a\u0438 \u0440\u0430\u0432\u043d\u044b \u043e\u0442\u0440\u0435\u0437\u043a\u0430\u043c \u0430\u0431\u0437\u0430\u0446\u0430, \u043c\u0435\u0436\u0434\u0443 \u043d\u0438\u043c\u0438 \u2014 \u0435\u0433\u043e
+# \u0436\u0435 \u043f\u0440\u043e\u0431\u0435\u043b\u044b.
+
+def _span_walk(p: str, text: str, j: int):
+    """\u0410\u0431\u0437\u0430\u0446 `p` \u043a\u0430\u043a \u043a\u0443\u0441\u043a\u0438 `text` \u0441 \u043f\u043e\u0437\u0438\u0446\u0438\u0438 `j`: [\u043d\u0430\u0447\u0430\u043b\u043e, \u043a\u043e\u043d\u0435\u0446, ...] \u0438\u043b\u0438 None."""
+    out = []
+    i, n = 0, len(p)
+    while True:
+        if text.startswith(p[i:], j):
+            size = n - i
+        else:
+            # \u0421\u0430\u043c\u043e\u0435 \u0434\u043b\u0438\u043d\u043d\u043e\u0435 \u043e\u0431\u0449\u0435\u0435 \u043d\u0430\u0447\u0430\u043b\u043e: startswith \u043c\u043e\u043d\u043e\u0442\u043e\u043d\u0435\u043d \u043f\u043e \u0434\u043b\u0438\u043d\u0435.
+            lo, hi = 0, n - i
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                if text.startswith(p[i:i + mid], j):
+                    lo = mid
+                else:
+                    hi = mid
+            size = lo
+        if not size:
+            return None
+        out += (j, j + size)
+        i += size
+        j += size
+        if i == n:
+            return out
+        if p[i] != " ":
+            return None
+        i += 1
+
+
+def _span_find(p: str, text: str, pos: int):
+    # \u0418\u0449\u0435\u0442\u0441\u044f \u043f\u0435\u0440\u0432\u043e\u0435 \u0441\u043b\u043e\u0432\u043e, \u0430 \u043d\u0435 \u0430\u0431\u0437\u0430\u0446 \u0446\u0435\u043b\u0438\u043a\u043e\u043c: \u0430\u0431\u0437\u0430\u0446 \u0441\u043e \u0441\u043a\u043b\u0435\u0439\u043a\u043e\u0439 \u0432 \u0442\u0435\u043a\u0441\u0442\u0435
+    # \u043d\u0435 \u043d\u0430\u0439\u0434\u0451\u0442\u0441\u044f, \u0438 \u043f\u043e\u0438\u0441\u043a \u0434\u0432\u0430\u0436\u0434\u044b \u043f\u0440\u043e\u0448\u0451\u043b \u0431\u044b \u0432\u0435\u0441\u044c \u0442\u0435\u043a\u0441\u0442 \u0432\u043f\u0443\u0441\u0442\u0443\u044e.
+    head = p.split(" ", 1)[0]
+    for start in (pos, 0) if pos else (0,):
+        j = text.find(head, start)
+        # \u041f\u0435\u0440\u0432\u043e\u0435 \u0441\u043b\u043e\u0432\u043e \u0432\u0441\u0442\u0440\u0435\u0447\u0430\u0435\u0442\u0441\u044f \u0438 \u0440\u0430\u043d\u044c\u0448\u0435 \u0430\u0431\u0437\u0430\u0446\u0430; \u0434\u0430\u043b\u044c\u0448\u0435 \u043f\u0430\u0440\u044b \u043f\u043e\u043f\u044b\u0442\u043e\u043a \u043d\u0435 \u0438\u0449\u0435\u043c.
+        for _ in range(4):
+            if j < 0:
+                break
+            found = _span_walk(p, text, j)
+            if found:
+                return found
+            j = text.find(head, j + 1)
+    return None
+
+
+def _pack_paragraphs(text: str, paragraphs) -> tuple:
+    """(text, \u043a\u0443\u0441\u043a\u0438, \u0441\u0442\u0440\u043e\u043a\u0438): \u043d\u0430 \u0430\u0431\u0437\u0430\u0446 \u2014 \u0447\u0438\u0441\u043b\u043e \u043a\u0443\u0441\u043a\u043e\u0432 \u0438 \u0438\u0445 \u0433\u0440\u0430\u043d\u0438\u0446\u044b; 0 \u2014 \u0441\u0442\u0440\u043e\u043a\u0430."""
+    spans = array("L")
+    loose = []
+    pos = 0
+    for p in paragraphs:
+        found = _span_find(p, text, pos) if p and text else None
+        if found is None:
+            spans.append(0)
+            spans.append(len(loose))
+            loose.append(p)
+            continue
+        spans.append(len(found) // 2)
+        spans.extend(found)
+        pos = found[-1]
+    return text, spans, loose
+
+
+def _unpack_paragraphs(packed) -> list:
+    text, spans, loose = packed
+    out = []
+    k, end = 0, len(spans)
+    while k < end:
+        count = spans[k]
+        if not count:
+            out.append(loose[spans[k + 1]])
+            k += 2
+            continue
+        if count == 1:
+            out.append(text[spans[k + 1]:spans[k + 2]])
+        else:
+            out.append(" ".join(text[spans[x]:spans[x + 1]]
+                                for x in range(k + 1, k + 1 + 2 * count, 2)))
+        k += 1 + 2 * count
+    return out
+
+
 @dataclass
 class Page:
     path: str                      # путь к файлу на диске
@@ -277,6 +371,24 @@ class Page:
             " ".join(re.findall(r"\w+", (self.text or "").lower(), flags=re.UNICODE)),
         ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+# Поле `paragraphs` остаётся полем dataclass (конструктор, сравнение, repr),
+# но хранится сжатым: см. `_pack_paragraphs`. Чтение собирает новый список —
+# менять его на месте бесполезно, только присваивать. Сжатое держит ссылку
+# на свой текст: замена `text` абзацы не сдвигает, а pickle пишет текст один раз.
+def _get_paragraphs(self) -> list:
+    packed = self.__dict__.get("_para")
+    return _unpack_paragraphs(packed) if packed else []
+
+
+def _set_paragraphs(self, value):
+    value = list(value or ())
+    self.__dict__["_para"] = (_pack_paragraphs(self.__dict__.get("text") or "", value)
+                              if value else None)
+
+
+Page.paragraphs = property(_get_paragraphs, _set_paragraphs)
 
 
 # ── URL ───────────────────────────────────────────────────────────────────────
