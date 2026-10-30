@@ -34,6 +34,7 @@ import json
 import os
 import re
 from collections import Counter, defaultdict
+from urllib.parse import urlsplit
 
 from . import aeo, checks, content, doctor, freshness, profiles, report, settings
 from .core import SourceError, check_site_url, load_pages, read_text, url_key
@@ -153,8 +154,23 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         home = spec.get("home") or (spec["site"]
                                     if url_key(spec["site"]) in {p.key for p in pages}
                                     else None)
+        # Тот же robots.txt и то же правило, что в `check`: файл сборки сайта,
+        # живущего под /repo/, поисковик не читает — судить по нему нельзя.
+        base = urlsplit(spec["site"]).path.strip("/")
+        robots = spec.get("robots") or _guess_robots(spec["root"])
+        blocked = set()
+        if base and robots and not spec.get("robots"):
+            parts = urlsplit(spec["site"])
+            result["notes"].append(tr(
+                "robots.txt в сборке не действует: сайт живёт под /{a0}/, а поисковики "
+                "читают только {a1}://{a2}/robots.txt. Правила из него не проверялись; "
+                "настоящий файл хоста можно назвать полем `robots` проекта",
+                a0=base, a1=parts.scheme or "https", a2=parts.netloc))
+            robots = ""
+        elif robots:
+            blocked = aeo.blocked_urls(pages, aeo.read_robots(robots))
         analysis = checks.run_all(pages, home_url=home, cfg=project.get("checks"),
-                                  language=project.get("language", ""))
+                                  language=project.get("language", ""), blocked=blocked)
         result["notes"] += analysis.get("notes") or []
 
         if not project["_skip_facts"]:
@@ -170,8 +186,10 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             result["notes"].append(
                 tr("сверка фактов и швов шаблона выключена профилем: страницы не порождаются датасетом, сверять не с чем"))
 
-        robots = spec.get("robots") or _guess_robots(spec["root"])
-        analysis["issues"] += aeo.run(pages, robots, cfg=project.get("aeo"))["issues"]
+        aeo_issues = aeo.run(pages, robots, cfg=project.get("aeo"))["issues"]
+        if base and not spec.get("robots"):
+            aeo_issues = [i for i in aeo_issues if i[2] != "no-robots"]
+        analysis["issues"] += aeo_issues
 
         if project["_checks_freshness"]:
             fresh = freshness.check(pages, spec.get("freshness"))
