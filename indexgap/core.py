@@ -1709,7 +1709,8 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         except ValueError:
             continue
         raw_path = urlsplit(absolute).path
-        form = ("file" if _EXT_RE.search(raw_path) else
+        form = ("index" if _INDEX_RE.search(raw_path) else
+                "file" if _EXT_RE.search(raw_path) else
                 "slash" if raw_path.endswith("/") else "bare")
         absolute = normalize_url(absolute)
         key = url_key(absolute)
@@ -1902,6 +1903,65 @@ def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -
                            "X-Robots-Tag: noindex — правило {a2}", a0=source, a1=n, a2=pattern))
 
 
+_TOML_FROM = re.compile(r"""^\s*from\s*=\s*["']([^"']+)["']""", re.M)
+
+
+def host_redirect_rules(root: str) -> tuple:
+    """
+    Перенаправления хостинга: (выражения путей, переписывает ли хостинг формы
+    адресов сам).
+
+    `_redirects` (Netlify, Cloudflare Pages), `[[redirects]]` в netlify.toml,
+    `redirects` и `rewrites` в vercel.json — в сборке и уровнем выше. Путь,
+    который правило ловит, отдаётся, даже если такого файла нет. `cleanUrls`
+    и `trailingSlash` в vercel.json меняют формы всех адресов разом.
+    """
+    rules, rewrites_forms = [], False
+
+    def add(pattern):
+        pattern = urlsplit(pattern).path if "://" in pattern else pattern
+        regex = _route_regex(pattern) if pattern.startswith("/") else None
+        if regex:
+            rules.append(regex)
+
+    def text_of(path):
+        try:
+            return read_text(path)[0] if os.path.isfile(path) else ""
+        except SourceError:
+            return ""
+
+    for line in text_of(os.path.join(root, "_redirects")).splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and not fields[0].startswith("#"):
+            add(fields[0])
+    near = [root, os.path.dirname(os.path.abspath(root))]
+    for folder in near:
+        text = text_of(os.path.join(folder, "netlify.toml"))
+        if text:
+            text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("#"))
+            for block in text.split("[[redirects]]")[1:]:
+                found = _TOML_FROM.search(block.split("[[", 1)[0])
+                if found:
+                    add(found.group(1))
+            break
+    for folder in near:
+        text = text_of(os.path.join(folder, "vercel.json"))
+        if not text:
+            continue
+        try:
+            data = json.loads(text)
+        except (ValueError, RecursionError):
+            data = {}
+        if isinstance(data, dict):
+            rewrites_forms = bool(data.get("cleanUrls")) or isinstance(data.get("trailingSlash"), bool)
+            for field in ("redirects", "rewrites"):
+                for entry in data.get(field) or ():
+                    if isinstance(entry, dict) and isinstance(entry.get("source"), str):
+                        add(entry["source"])
+        break
+    return rules, rewrites_forms
+
+
 def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     """
     Адрес плоской страницы `filter.html` — в той форме, в какой на неё
@@ -1912,26 +1972,62 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     Pelican, mdBook и Sphinx отдают `filter.html`. Next.js-экспорт кладёт
     `about.html`, а ссылается на `/about` — тогда адрес `/about`. Если ссылок
     нет, берётся `filter.html`: он работает на любом статическом хостинге.
+    Ссылки `/filter/` за адрес не голосуют: этой формы хостинг не отдаёт.
+
+    Здесь же отмечаются ссылки в такой форме — `/faq/` при `faq.html` и
+    `/about.html` при `about/index.html` (`_wrong_forms` страницы): `url_key`
+    сводит их к той же странице, а живой хостинг отвечает 404. Ссылка, которую
+    ловит правило перенаправления хостинга, не отмечается.
     """
     votes = defaultdict(Counter)
+    written = []
     for page in pages:
-        for key, form in page.__dict__.pop("_link_forms", ()):
+        forms = page.__dict__.pop("_link_forms", ())
+        written.append((page, forms))
+        for key, form in forms:
             votes[key][form] += 1
-    order = {"file": 0, "bare": 1, "slash": 2}
+    redirects, host_rewrites = host_redirect_rules(root)
+    kinds, flat = {}, []
     for page in pages:
         name = os.path.basename(page.path or "").lower()
-        if (not name.endswith((".html", ".htm")) or name.startswith("index.")
-                or page.__dict__.get("_url_declared")):
-            continue
-        counted = votes.get(page.key)
+        kind = None
+        if name.endswith((".html", ".htm")) and not page.__dict__.get("_url_declared"):
+            kind = "folder" if name.startswith("index.") else "flat"
+        if kind == "flat":
+            flat.append(page)
+        # `a.html` рядом с `a/index.html`: какую форму отдаст хостинг, не понять.
+        key = page.key
+        kinds[key] = kind if kinds.get(key, kind) == kind else None
+    order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
+    usable = order if host_rewrites else {"file": 0, "bare": 1}
+    for page in flat:
+        counted = {f: n for f, n in (votes.get(page.key) or {}).items() if f in usable}
         form = (min(counted, key=lambda f: (-counted[f], order[f])) if counted else "file")
-        if form == "slash":
+        if form in ("slash", "index"):
             continue
         file_url = _file_url(page.path, root, base_url)
         if form == "bare":
             file_url = _EXT_RE.sub("", file_url)
         parts = urlsplit(file_url)
         page.url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    if host_rewrites:
+        return
+    base = urlsplit(base_url).path.rstrip("/")
+    suffix = {("folder", "file"): ".html", ("flat", "slash"): "/",
+              ("flat", "index"): "/index.html"}
+    for page, forms in written:
+        wrong = []
+        for key, form in forms:
+            tail = suffix.get((kinds.get(key), form))
+            if not tail:
+                continue
+            path = "/" + key.split("/", 3)[-1] if key.count("/") >= 3 else "/"
+            path = path.rstrip("/") + tail
+            local = path[len(base):] if base and path.startswith(base + "/") else path
+            if not any(regex.match(local) for regex in redirects):
+                wrong.append((key, path))
+        if wrong:
+            page.__dict__["_wrong_forms"] = wrong
 
 
 FETCH_MANIFEST = "fetch.json"

@@ -135,6 +135,8 @@ WHY = {
    "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads.",
  "dataset-unbound":
    "The dataset was given, but fewer than half of the pages were bound to its rows \u2014 so the numbers on the rest were never checked against anything, and a clean fact check means nothing. A page is bound by `keyword:` in its front matter, by `<meta name=\"keyword\">`, by a `slug`/`url`/`path` column in the dataset matching its address, by its folder name, or by its title. The run also lists the dataset rows that have no page at all: a generation failure or a filter.",
+ "wrong-link-form":
+   "A link that reaches a page of the build only because the checks forgive the difference: `/Blog/Tag/` for `blog/tag/`, `/about.html` for `about/index.html`, `/faq/` for `faq.html`. GitHub Pages, S3 and nginx on Linux are case-sensitive and map URL forms by fixed rules: a folder page is served at `/about/` and `/about`, a flat file at `/faq.html` (and at `/faq` on GitHub Pages, Netlify and Cloudflare), and every other form is a 404. A rule in `_redirects`, `netlify.toml` or `vercel.json` that catches the link, or `cleanUrls` / `trailingSlash` in vercel.json, silences it.",
  "broken-link":
    "A link into a section of the build that points at a page the build does "
    "not have is a 404 on the live site. On a generated site it is usually a "
@@ -370,7 +372,7 @@ FAMILIES = [
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
   ["noindex", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
-   "hub-missing-links", "deep", "js-shell", "heavy-html"]),
+   "wrong-link-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
 
  ("content", "Content quality at scale",
   "The failures that only appear when pages are compared with each other. A "

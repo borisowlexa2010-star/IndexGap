@@ -31,6 +31,8 @@ MESSAGES = {
     "Проверь шаблон: canonical должен указывать на саму страницу. Сейчас она отдаёт вес другой и выпадает из индекса.":
         "Check the template: the canonical must point at the page itself. Right "
         "now it hands its weight to another page and drops out of the index.",
+    "Пиши ссылку в той форме, в какой страница лежит в сборке: тот же регистр букв, /about/ для about/index.html, /faq.html или /faq для faq.html. Если хостинг сам перенаправляет эту форму — добавь правило в _redirects, netlify.toml или vercel.json, и находка уйдёт.":
+        "Write the link in the form the page has in the build: the same letter case, /about/ for about/index.html, /faq.html or /faq for faq.html. If the host redirects that form itself, add the rule to _redirects, netlify.toml or vercel.json and the finding goes away.",
     "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
         "The links point at pages the build does not have. Find where the "
         "template takes these addresses from, and either remove the link or "

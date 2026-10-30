@@ -16,6 +16,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from urllib.parse import urlsplit
 
 import language  # noqa: F401  — закрепляет русский язык вывода
 from indexgap import checks, core
@@ -175,6 +176,120 @@ class Listings(Site):
         found = self.missing(files)
         self.assertEqual(len(found), 1)
         self.assertIn("5", found[0][3])
+
+
+class Broken(Site):
+    def site(self, *extra, **files):
+        base = {"index.html": html("Home", links("/plumbing/", "/plumbing/boston/", *extra)),
+                "plumbing/index.html": html("Plumbing", links("/plumbing/boston/")),
+                "plumbing/boston/index.html": html("Boston", links("/plumbing/")),
+                "guides/index.html": html("Guides", links("/"))}
+        base.update({k.replace("__", "/"): v for k, v in files.items()})
+        return base
+
+    def broken(self, files):
+        return " ".join(i[3] for i in self.of(files, "broken-link"))
+
+    def test_a_dotted_slug_is_a_page_not_a_file(self):
+        for slug in ("/plumbing/v1.2/", "/guides/gost-12.4.011/", "/guides/node.js/",
+                     "/guides/asp.net"):
+            with self.subTest(slug=slug):
+                self.assertIn(slug.rstrip("/"), self.broken(self.site(slug)))
+
+    def test_files_are_still_not_pages(self):
+        found = self.broken(self.site("/files/price.pdf", "/img/a.webp", "/guides/app.js",
+                                      "/fonts/a.woff2", "/feed.atom", "/data.csv"))
+        self.assertEqual(found, "")
+
+    def test_a_file_of_the_build_is_not_broken_whatever_its_extension(self):
+        found = self.broken(self.site("/download/setup.exe", "/guides/v1.2.tar.xz",
+                                      **{"download__setup.exe": "MZ",
+                                         "guides__v1.2.tar.xz": "x"}))
+        self.assertEqual(found, "")
+
+    def test_a_folder_with_only_files_is_not_a_page(self):
+        found = self.broken(self.site("/downloads/", **{"downloads__x.pdf": "%PDF"}))
+        self.assertIn("/downloads", found)
+
+    def test_a_folder_with_a_server_route_is_a_page(self):
+        found = self.broken(self.site("/start", **{"start__page.js": "module.exports = {}"}))
+        self.assertEqual(found, "")
+
+    def test_a_link_in_the_wrong_case(self):
+        files = self.site("/Plumbing/Boston/")
+        self.assertEqual(self.of(files, "broken-link"), [])
+        found = self.of(files, "wrong-link-form")
+        self.assertEqual(len(found), 1)
+        self.assertIn("/Plumbing/Boston", found[0][3])
+        self.assertIn("/plumbing/boston", found[0][3])
+
+    def test_case_of_the_host_and_of_percent_codes_does_not_matter(self):
+        files = self.site("https://EXAMPLE.com/plumbing/boston/", "/%d0%b1%d0%bb%d0%be%d0%b3/",
+                          **{"блог/index.html": html("Блог", links("/"))})
+        self.assertEqual(self.broken(files), "")
+        self.assertEqual(self.of(files, "wrong-link-form"), [])
+
+
+class HostForms(Site):
+    def site(self, *hrefs, site="https://example.com", parent=None, **files):
+        prefix = urlsplit(site).path.rstrip("/")
+        base = {"index.html": html("Home", links(*(prefix + h for h in hrefs))),
+                "about/index.html": html("About us", links(prefix + "/")),
+                "faq.html": html("Questions", links(prefix + "/"))}
+        base.update({k.replace("__", "/"): v for k, v in files.items()})
+        return self.run_checks(base, site, parent=parent)
+
+    def found(self, *hrefs, **kw):
+        pages, result = self.site(*hrefs, **kw)
+        self.assertEqual([i for i in result["issues"] if i[2] == "broken-link"], [])
+        return [i[3] for i in result["issues"] if i[2] == "wrong-link-form"]
+
+    def test_html_link_to_a_folder_page(self):
+        found = self.found("/about.html")
+        self.assertEqual(len(found), 1)
+        self.assertIn("/about.html", found[0])
+        self.assertIn("/about/", found[0])
+
+    def test_slash_link_to_a_flat_page(self):
+        found = self.found("/faq/")
+        self.assertEqual(len(found), 1)
+        self.assertIn("/faq/", found[0])
+        self.assertIn("/faq.html", found[0])
+
+    def test_the_slash_form_never_becomes_the_address_of_a_flat_page(self):
+        pages, _ = self.site("/faq/", "/faq/")
+        urls = sorted(p.url for p in pages)
+        self.assertIn("https://example.com/faq.html", urls)
+        self.assertNotIn("https://example.com/faq/", urls)
+
+    def test_forms_every_static_host_serves(self):
+        self.assertEqual(self.found("/about/", "/about", "/about/index.html",
+                                    "/faq.html", "/faq"), [])
+
+    def test_a_flat_file_next_to_a_folder_of_the_same_name(self):
+        # Какую из двух форм отдаст хостинг, не понять — и судить не о чем.
+        pages, result = self.site("/faq/", "/faq.html", **{"faq__index.html": html("FAQ index")})
+        self.assertNotIn("broken-link", [i[2] for i in result["issues"]])
+        self.assertNotIn("wrong-link-form", [i[2] for i in result["issues"]])
+
+    def test_a_sub_path_site(self):
+        found = self.found("/faq/", site="https://user.github.io/repo/")
+        self.assertEqual(len(found), 1)
+
+    def test_a_redirect_rule_covers_the_link(self):
+        cases = [{"_redirects": "/faq/  /faq  301\n/about.html /about/ 301\n"},
+                 {"_redirects": "/*  /index.html  200\n"}]
+        for files in cases:
+            with self.subTest(files=files):
+                self.assertEqual(self.found("/faq/", "/about.html", **files), [])
+        toml = ('[[redirects]]\n  from = "/faq/"\n  to = "/faq"\n'
+                '[[redirects]]\n  from = "/about.html"\n  to = "/about/"\n')
+        self.assertEqual(self.found("/faq/", "/about.html", parent={"netlify.toml": toml}), [])
+        vercel = '{"redirects": [{"source": "/faq/", "destination": "/faq"}]}'
+        self.assertEqual(len(self.found("/faq/", "/about.html",
+                                        parent={"vercel.json": vercel})), 1)
+        self.assertEqual(self.found("/faq/", "/about.html",
+                                    parent={"vercel.json": '{"cleanUrls": true}'}), [])
 
 
 if __name__ == "__main__":
