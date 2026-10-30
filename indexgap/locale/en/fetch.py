@@ -103,4 +103,11 @@ MESSAGES = {
     "увидит. Повтори с --render":
         "{a0} page(s) look like empty JS shells: JavaScript draws the text, and check will "
         "not see it. Rerun with --render",
+    "--browser-no-sandbox относится к --render — без него не нужен":
+        "--browser-no-sandbox belongs to --render — it is not needed without it",
+    "под root на Linux Chromium без песочницы не запускается, а песочница — главная защита от чужого JavaScript. Запусти fetch не под root или, если понимаешь риск (контейнер, который выбрасывается после прогона), добавь --browser-no-sandbox":
+        "as root on Linux Chromium does not start with its sandbox, and the sandbox is "
+        "the main protection against someone else's JavaScript. Run fetch as another "
+        "user or, if you accept the risk (a container thrown away after the run), add "
+        "--browser-no-sandbox",
 }

@@ -503,4 +503,6 @@ MESSAGES = {
         "for pages that JavaScript draws",
     "путь к браузеру для --render, если он не нашёлся сам":
         "path to the browser for --render when it is not found on its own",
+    "запускать браузер без песочницы — только в одноразовом контейнере под root":
+        "run the browser without its sandbox — only in a throwaway container as root",
 }

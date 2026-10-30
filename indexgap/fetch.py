@@ -258,12 +258,13 @@ class Crawl:
     """Состояние одного обхода: что куда записано, кто чей файл занял."""
 
     def __init__(self, site: str, out_dir: str, delay: float, follow: bool = False,
-                 browser: str = ""):
+                 browser: str = "", no_sandbox: bool = False):
         self.site = site
         self.out = out_dir
         self.pacer = _Pacer(delay)
         self.follow = follow
         self.browser = browser
+        self.no_sandbox = no_sandbox
         self.robots = {"found": False, "rules": {}, "sitemaps": []}
         self.lock = threading.Lock()
         # Имя файла в нижнем регистре → адрес: macOS и Windows не различают
@@ -448,7 +449,8 @@ class Crawl:
         if self.browser:
             # Браузер запрашивает страницу ещё раз — пауза та же, что у запроса.
             self.pacer.wait()
-            dom, error = render(self.browser, _quote(record["final_url"]), self.site)
+            dom, error = render(self.browser, _quote(record["final_url"]), self.site,
+                                self.no_sandbox)
             if dom is None:
                 record["render_error"] = error
             else:
@@ -564,19 +566,47 @@ def find_browser(given: str = None) -> str:
                          a0=", ".join(BROWSER_NAMES)))
 
 
-def browser_args(browser: str, url: str, profile: str = "") -> list:
-    """Список аргументов, не строка: shell между пакетом и браузером нет."""
+_BATCH_URL = re.compile(r"https?://[A-Za-z0-9.:/_~\-]+", re.ASCII)
+
+
+def _site_hosts(site: str) -> list:
+    host = (urlsplit(site).hostname or "").lower()
+    bare = host[4:] if host.startswith("www.") else host
+    return sorted({host, bare, "www." + bare} - {"", "www."})
+
+
+def browser_args(browser: str, url: str, profile: str = "", site: str = "",
+                 no_sandbox: bool = False) -> list:
+    """
+    Список аргументов, не строка: shell между пакетом и браузером нет.
+
+    Страница сама тянет скрипты, шрифты и API — в том числе с чужих хостов,
+    из внутренней сети и с 169.254.169.254. Браузер выпускается только на
+    сайт: остальные имена не разрешаются, а всё, что идёт не на сайт, в том
+    числе по IP и на loopback, уходит в мёртвый прокси.
+    """
     args = [browser, "--headless=new", "--disable-gpu"]
-    # Песочница Chromium не стартует под root — это контейнеры и CI на Linux.
-    if sys.platform.startswith("linux") and hasattr(os, "geteuid") and os.geteuid() == 0:
+    if no_sandbox:
+        # Только по явной просьбе: песочница — главная защита от чужого JS.
         args.append("--no-sandbox")
     args += ["--no-first-run", "--no-default-browser-check"]
+    hosts = _site_hosts(site or url)
+    if hosts:
+        args.append("--host-resolver-rules=MAP * ~NOTFOUND, "
+                    + ", ".join(f"EXCLUDE {h}" for h in hosts))
+        args += ["--proxy-server=127.0.0.1:9",
+                 "--proxy-bypass-list=" + ";".join(hosts + ["<-loopback>"])]
     if profile:
         # Свой профиль на каждый вызов: открытый Chrome человека не трогается.
         args.append("--user-data-dir=" + profile)
     args += ["--user-agent=" + core.USER_AGENT, "--dump-dom",
              f"--virtual-time-budget={RENDER_BUDGET_MS}", url]
     return args
+
+
+def needs_no_sandbox() -> bool:
+    """Chromium без песочницы не стартует под root — это контейнеры и CI на Linux."""
+    return sys.platform.startswith("linux") and hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def _stop(proc) -> None:
@@ -603,19 +633,24 @@ def _stop(proc) -> None:
         pass
 
 
-def render(browser: str, url: str, site: str) -> tuple:
+def render(browser: str, url: str, site: str, no_sandbox: bool = False) -> tuple:
     """
     (DOM в байтах, "") или (None, причина). Адрес проверяется до запуска:
-    он пришёл из sitemap или ссылки чужого сервера.
+    он пришёл из sitemap или ссылки чужого сервера. Браузер в `.bat`/`.cmd`
+    запускает cmd, а он разбирает `& | ^ %` в аргументах — для него адрес
+    только из букв, цифр и `.:/_~-`.
     """
-    if not _URL_ARG.fullmatch(url or "") or not same_site(url, site):
+    batch = browser.lower().endswith((".bat", ".cmd"))
+    pattern = _BATCH_URL if batch else _URL_ARG
+    if not pattern.fullmatch(url or "") or not same_site(url, site):
         return None, tr("адрес не http(s) на сайте {a0} или с пробелом — браузеру не "
                         "передаётся", a0=site)
     profile = tempfile.mkdtemp(prefix="indexgap-render-")
     extra = {} if os.name == "nt" else {"start_new_session": True}
     try:
         try:
-            proc = subprocess.Popen(browser_args(browser, url, profile), shell=False,
+            proc = subprocess.Popen(browser_args(browser, url, profile, site, no_sandbox),
+                                    shell=False,
                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, **extra)
         except OSError as exc:
@@ -654,7 +689,7 @@ def _empty_dir(path: str) -> None:
 
 def run(site: str, out_dir: str, sitemaps=None, limit: int = None, all_pages: bool = False,
         delay: float = 0.5, jobs: int = 4, progress=None, follow: bool = False,
-        render_pages: bool = False, browser: str = None) -> dict:
+        render_pages: bool = False, browser: str = None, no_sandbox: bool = False) -> dict:
     """Весь обход. Возвращает сводку; манифест и файлы уже на диске."""
     site = check_site(site)
     if all_pages and limit not in (None, 0):
@@ -672,7 +707,15 @@ def run(site: str, out_dir: str, sitemaps=None, limit: int = None, all_pages: bo
         raise SourceError(tr("--delay не может быть отрицательным"))
     if browser and not render_pages:
         raise SourceError(tr("--browser задаёт браузер для --render — без --render он не нужен"))
+    if no_sandbox and not render_pages:
+        raise SourceError(tr("--browser-no-sandbox относится к --render — без него не нужен"))
     found_browser = find_browser(browser) if render_pages else ""
+    if render_pages and needs_no_sandbox() and not no_sandbox:
+        raise SourceError(tr(
+            "под root на Linux Chromium без песочницы не запускается, а песочница — главная "
+            "защита от чужого JavaScript. Запусти fetch не под root или, если понимаешь "
+            "риск (контейнер, который выбрасывается после прогона), добавь "
+            "--browser-no-sandbox"))
     given = list(sitemaps or ())
     for source in given:
         if not source.startswith(("http://", "https://")):
@@ -683,7 +726,8 @@ def run(site: str, out_dir: str, sitemaps=None, limit: int = None, all_pages: bo
                                  "не ходит", a0=source, a1=site))
     created = not os.path.exists(out_dir)
     _empty_dir(out_dir)
-    crawl = Crawl(site, out_dir, delay, follow=follow, browser=found_browser)
+    crawl = Crawl(site, out_dir, delay, follow=follow, browser=found_browser,
+                  no_sandbox=no_sandbox)
     try:
         return _crawl(crawl, given, limit, jobs, progress)
     except SourceError:
