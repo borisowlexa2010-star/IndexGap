@@ -493,4 +493,14 @@ MESSAGES = {
         "how many requests run at once, 1 to {a0}",
     "сколько страниц скачать, по умолчанию {a0}; 0 — все, только вместе с --all":
         "how many pages to fetch, {a0} by default; 0 means all, only together with --all",
+    "идти и по ссылкам: от главной и адресов sitemap, в ширину; покажет страницы, которых "
+    "нет в sitemap, и адреса sitemap, на которые не ведёт ни одна ссылка":
+        "follow links too: from the home page and the sitemap addresses, breadth first; "
+        "shows pages missing from the sitemap and sitemap addresses no link leads to",
+    "сохранять DOM, который нарисовал установленный Chrome или Chromium, а не исходный "
+    "HTML — для страниц, которые рисует JavaScript":
+        "save the DOM an installed Chrome or Chromium rendered instead of the raw HTML — "
+        "for pages that JavaScript draws",
+    "путь к браузеру для --render, если он не нашёлся сам":
+        "path to the browser for --render when it is not found on its own",
 }

@@ -1109,7 +1109,8 @@ def cmd_fetch(args):
 
     manifest = fetch.run(args.site, args.out_dir, sitemaps=args.sitemap, limit=args.limit,
                          all_pages=args.all, delay=args.delay, jobs=args.jobs,
-                         progress=progress)
+                         progress=progress, follow=args.crawl, render_pages=args.render,
+                         browser=args.browser)
     return fetch.print_summary(args.out_dir, manifest)
 
 
@@ -1957,6 +1958,15 @@ def build_parser():
     p.add_argument("--jobs", type=int, default=4,
                    help=tr("сколько запросов идёт одновременно, от 1 до {a0}",
                            a0=fetch.MAX_JOBS))
+    p.add_argument("--crawl", action="store_true",
+                   help=tr("идти и по ссылкам: от главной и адресов sitemap, в ширину; "
+                           "покажет страницы, которых нет в sitemap, и адреса sitemap, "
+                           "на которые не ведёт ни одна ссылка"))
+    p.add_argument("--render", action="store_true",
+                   help=tr("сохранять DOM, который нарисовал установленный Chrome или "
+                           "Chromium, а не исходный HTML — для страниц, которые рисует JavaScript"))
+    p.add_argument("--browser", metavar="PATH",
+                   help=tr("путь к браузеру для --render, если он не нашёлся сам"))
     p.set_defaults(func=cmd_fetch)
     ap._subparsers_map = dict(sub.choices)
     return ap
