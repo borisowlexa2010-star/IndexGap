@@ -54,6 +54,14 @@ RESERVED = {"robots.txt", "_headers", core.FETCH_MANIFEST}
 _SAFE = ":/?&=%#+,;@~-._!$'()*[]"
 
 
+
+def _safe(text) -> str:
+    """
+    Строка с чужого сервера — в консоль и лог CI без управляющих знаков:
+    `Location: /a\n::error::…` иначе стал бы командой GitHub Actions.
+    """
+    return core._CONTROL.sub(lambda m: "%%%02X" % ord(m.group()), str(text))
+
 def _quote(url: str) -> str:
     """Пробел или кириллица в адресе роняли http.client раньше запроса."""
     return quote(urldefrag(url)[0], safe=_SAFE)
@@ -589,7 +597,7 @@ def print_summary(out_dir: str, manifest: dict) -> int:
                 and not _is_html(r["content_type"], b"")]
     unsaved = [r for r in records if r.get("note") and r["status"] == 200 and not r["file"]]
     for note in manifest.get("notes") or ():
-        print(f"  ! {note}")
+        print(f"  ! {_safe(note)}")
     print(tr("Адресов в sitemap: {a0} (sitemap-файлов: {a1})", a0=manifest["sitemap_urls"],
              a1=len(manifest["sitemaps"])))
     if manifest["other_host"]:
@@ -613,15 +621,15 @@ def print_summary(out_dir: str, manifest: dict) -> int:
     if over:
         print(tr("  больше 2 МБ: {a0} — Googlebot читает только первые 2 МБ HTML", a0=len(over)))
         for r in over[:5]:
-            print(f"      {r['final_url']}")
+            print(f"      {_safe(r['final_url'])}")
     if unsaved:
         print(tr("  ответ 200, но не сохранены: {a0}", a0=len(unsaved)))
         for r in unsaved[:5]:
-            print(f"      {r['final_url']} — {r['note']}")
+            print(f"      {_safe(r['final_url'])} — {_safe(r['note'])}")
     print(tr("Записано: {a0}", a0=os.path.join(out_dir, core.FETCH_MANIFEST)))
     if not saved:
         print(tr("Ни одной страницы не сохранено — проверять нечего."))
         return 1
     print(tr("Дальше:"))
-    print("  " + next_command(out_dir, manifest))
+    print("  " + _safe(next_command(out_dir, manifest)))
     return 0
