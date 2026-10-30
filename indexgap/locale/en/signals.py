@@ -25,4 +25,31 @@ MESSAGES = {
     "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; сожми их или отдай WebP/AVIF":
         "images heavier than 1 MB in the build: {a0} — {a1}. They slow the page down on a "
         "phone; compress them or serve WebP/AVIF",
+    "страница объявляет lang=«{a0}», а {a1:.0%} букв её текста — {a2}. Поисковик и экранный диктор верят lang и прочтут страницу не на том языке":
+        "the page declares lang=“{a0}”, and {a1:.0%} of the letters in its text are {a2}. "
+        "Search engines and screen readers trust lang and will read the page as the "
+        "wrong language",
+    "латиница": "Latin script",
+    "кириллица": "Cyrillic script",
+    "греческое письмо": "Greek script",
+    "армянское письмо": "Armenian script",
+    "еврейское письмо": "Hebrew script",
+    "арабское письмо": "Arabic script",
+    "деванагари": "Devanagari",
+    "бенгальское письмо": "Bengali script",
+    "гуджаратское письмо": "Gujarati script",
+    "тамильское письмо": "Tamil script",
+    "телугу": "Telugu script",
+    "каннада": "Kannada script",
+    "малаялам": "Malayalam script",
+    "сингальское письмо": "Sinhala script",
+    "тайское письмо": "Thai script",
+    "лаосское письмо": "Lao script",
+    "бирманское письмо": "Myanmar script",
+    "грузинское письмо": "Georgian script",
+    "эфиопское письмо": "Ethiopic script",
+    "кхмерское письмо": "Khmer script",
+    "хангыль": "Hangul",
+    "японская кана": "Japanese kana",
+    "китайские иероглифы": "Chinese characters",
 }

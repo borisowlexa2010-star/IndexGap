@@ -306,4 +306,7 @@ MESSAGES = {
         "canonical and index. If it is not, keep it closed, but remove hreflang "
         "from it and from the pages that point at it: right now the signals "
         "contradict each other and the search engine picks for itself.",
+    "Поставь в шаблоне <html lang> по языку текста. На многоязычном сайте бери его из данных страницы, а не из общего шаблона.":
+        "Set <html lang> in the template to the language of the text. On a multilingual "
+        "site take it from the page's data, not from the shared template.",
 }

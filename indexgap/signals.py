@@ -17,8 +17,8 @@ import re
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
-from .core import ALWAYS_SKIP, tokenize, url_key
-from .i18n import tr
+from .core import ALWAYS_SKIP, _CODE_TAG, tokenize, url_key
+from .i18n import N_, tr
 
 # Googlebot читает первые 2 МБ поддерживаемого файла и отдаёт в индекс то, что
 # успел прочитать (developers.google.com/search/docs/crawling-indexing/googlebot,
@@ -206,6 +206,130 @@ def page_signals(pages: list, today: datetime.date = None) -> list:
             issues.append(("warning", page.url, "heavy-html", tr(
                 "HTML весит {a0:.1f} МБ: Googlebot читает первые 2 МБ файла, остальное в "
                 "индекс не попадает", a0=size / 1024 / 1024)))
+    return issues
+
+
+# ── lang против письма ───────────────────────────────────────────────────────
+
+# Письмо: название для сообщения и знаки. Считаются только буквы.
+SCRIPTS = {
+    "latin": (N_("латиница"), "A-Za-z\u00c0-\u024f\u1e00-\u1eff"),
+    "cyrillic": (N_("кириллица"), "\u0400-\u052f\u1c80-\u1c8f\u2de0-\u2dff\ua640-\ua69f"),
+    "greek": (N_("греческое письмо"), "\u0370-\u03ff\u1f00-\u1fff"),
+    "armenian": (N_("армянское письмо"), "\u0530-\u058f"),
+    "hebrew": (N_("еврейское письмо"), "\u0590-\u05ff\ufb1d-\ufb4f"),
+    "arabic": (N_("арабское письмо"),
+               "\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff"),
+    "devanagari": (N_("деванагари"), "\u0900-\u097f"),
+    "bengali": (N_("бенгальское письмо"), "\u0980-\u09ff"),
+    "gujarati": (N_("гуджаратское письмо"), "\u0a80-\u0aff"),
+    "tamil": (N_("тамильское письмо"), "\u0b80-\u0bff"),
+    "telugu": (N_("телугу"), "\u0c00-\u0c7f"),
+    "kannada": (N_("каннада"), "\u0c80-\u0cff"),
+    "malayalam": (N_("малаялам"), "\u0d00-\u0d7f"),
+    "sinhala": (N_("сингальское письмо"), "\u0d80-\u0dff"),
+    "thai": (N_("тайское письмо"), "\u0e00-\u0e7f"),
+    "lao": (N_("лаосское письмо"), "\u0e80-\u0eff"),
+    "myanmar": (N_("бирманское письмо"), "\u1000-\u109f"),
+    "georgian": (N_("грузинское письмо"), "\u10a0-\u10ff\u1c90-\u1cbf"),
+    "ethiopic": (N_("эфиопское письмо"), "\u1200-\u139f"),
+    "khmer": (N_("кхмерское письмо"), "\u1780-\u17ff"),
+    "hangul": (N_("хангыль"), "\u1100-\u11ff\u3130-\u318f\uac00-\ud7af"),
+    "kana": (N_("японская кана"), "\u3040-\u30ff\u31f0-\u31ff\uff66-\uff9f"),
+    "han": (N_("китайские иероглифы"),
+            "\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002ffff"),
+}
+_SCRIPT_RE = {name: re.compile(f"[{chars}]+") for name, (_, chars) in SCRIPTS.items()}
+_LETTERS = re.compile(r"[^\W\d_]+")
+
+_BY_LANG = {"ja": {"han", "kana"}, "ko": {"hangul", "han"}}
+for _script, _codes in (
+        ("latin", "en de fr es it pt nl sv da no nb nn fi pl cs sk sl hr bs ro hu tr vi id "
+                  "ms tl fil et lv lt is ga cy eu ca gl sq af sw mt lb eo la oc br fy gd "
+                  "zu xh yo ha ig so mi haw sm to qu ht jv su ceb"),
+        ("cyrillic", "ru uk be bg mk kk ky tg mn ba tt cv ce os"),
+        ("greek", "el"), ("armenian", "hy"), ("georgian", "ka"),
+        ("hebrew", "he iw yi"), ("arabic", "ar fa ur ps ug sd ckb"),
+        ("devanagari", "hi mr ne sa"), ("bengali", "bn as"), ("gujarati", "gu"),
+        ("tamil", "ta"), ("telugu", "te"), ("kannada", "kn"), ("malayalam", "ml"),
+        ("sinhala", "si"), ("thai", "th"), ("lao", "lo"), ("myanmar", "my"),
+        ("khmer", "km"), ("ethiopic", "am ti"), ("han", "zh yue")):
+    for _code in _codes.split():
+        _BY_LANG[_code] = {_script}
+# Подтег письма (`sr-Latn`, `zh-Hant`) говорит сам за себя и снимает
+# двусмысленность языков с двумя письмами: sr, az, uz, ku, pa без него не судим.
+_BY_SUBTAG = {"latn": {"latin"}, "cyrl": {"cyrillic"}, "grek": {"greek"},
+              "arab": {"arabic"}, "hebr": {"hebrew"}, "deva": {"devanagari"},
+              "beng": {"bengali"}, "thai": {"thai"}, "geor": {"georgian"},
+              "armn": {"armenian"}, "hans": {"han"}, "hant": {"han"}, "hani": {"han"},
+              "jpan": {"han", "kana"}, "kore": {"hangul", "han"}, "hang": {"hangul"}}
+
+LANG_SCRIPT_MIN_LETTERS = 200
+LANG_SCRIPT_SHARE = 0.8
+LANG_SCRIPT_SAMPLE = 3000
+
+
+def declared_scripts(lang: str) -> set:
+    """Каким письмом пишется объявленный язык. Пустое множество — не судим."""
+    parts = re.split(r"[-_]", (lang or "").strip().lower())
+    for part in parts[1:]:
+        if len(part) == 4 and part.isalpha():
+            return set(_BY_SUBTAG.get(part, ()))
+    return set(_BY_LANG.get(parts[0], ()))
+
+
+def _count(rx, letters: str) -> int:
+    # Считаются серии, а не знаки: findall по одному знаку вдесятеро медленнее.
+    return sum(map(len, rx.findall(letters)))
+
+
+def text_script(text: str, expected: set = frozenset()) -> tuple:
+    """
+    (письмо, доля букв, число букв) — самое частое письмо текста. Если
+    ожидаемых писем больше пятой части, другое не наберёт восьми десятых:
+    остальные не считаются, и ответ — первое из ожидаемых.
+    """
+    text = text or ""
+    if len(text) > 2 * LANG_SCRIPT_SAMPLE:
+        # Начало и конец: двуязычная страница часто — две половины подряд.
+        text = text[:LANG_SCRIPT_SAMPLE] + "\n" + text[-LANG_SCRIPT_SAMPLE:]
+    letters = "".join(_LETTERS.findall(text))
+    if not letters:
+        return "", 0.0, 0
+    counts = {name: _count(_SCRIPT_RE[name], letters) for name in sorted(expected)}
+    if sum(counts.values()) > len(letters) * (1 - LANG_SCRIPT_SHARE):
+        script = max(counts, key=counts.get)
+        return script, counts[script] / len(letters), len(letters)
+    for name, rx in _SCRIPT_RE.items():
+        if name not in counts:
+            counts[name] = _count(rx, letters)
+    script = max(counts, key=counts.get)
+    return script, counts[script] / len(letters), len(letters)
+
+
+def lang_script(pages: list) -> list:
+    """
+    `lang` против письма текста. Текст — абзацы основного блока, как у проверок
+    содержания: меню, подвал и примеры кода не в счёт. Судим, только когда букв
+    не меньше двухсот и восемь из десяти — письмом, которым объявленный язык
+    не пишется. Двуязычная страница молчит.
+    """
+    issues = []
+    for page in sorted(pages, key=lambda p: p.url):
+        expected = declared_scripts(page.lang)
+        if not expected:
+            continue
+        script, share, letters = text_script("\n".join(page.paragraphs or ()), expected)
+        if (letters < LANG_SCRIPT_MIN_LETTERS or share < LANG_SCRIPT_SHARE
+                or script in expected):
+            continue
+        # Без прозы абзацами становятся код и таблицы, а код — латиница.
+        if script == "latin" and _CODE_TAG.search(page.raw or "", 0, 400_000):
+            continue
+        issues.append(("warning", page.url, "lang-script-mismatch", tr(
+            "страница объявляет lang=«{a0}», а {a1:.0%} букв её текста — {a2}. "
+            "Поисковик и экранный диктор верят lang и прочтут страницу не на том языке",
+            a0=page.lang.strip(), a1=share, a2=tr(SCRIPTS[script][0]))))
     return issues
 
 

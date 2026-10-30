@@ -336,4 +336,7 @@ MESSAGES = {
         '<th>field</th><th class="n">pages</th><th>for example</th></tr></thead><tbody>',
     '<div class="empty">Сборки не различаются ничем, что видит поисковик.</div>':
         '<div class="empty">The builds differ in nothing a search engine sees.</div>',
+    "lang страницы говорит одно, а текст написан другим письмом: поисковик и экранный диктор поймут язык неверно.":
+        "The page's lang says one thing and the text is written in another script: search "
+        "engines and screen readers will get the language wrong.",
 }
