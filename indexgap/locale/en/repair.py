@@ -78,6 +78,8 @@ MESSAGES = {
         "Find what inflates the HTML: embedded hydration data, inline SVG, huge tables. Move them to separate files or split the page.",
     "Сожми картинки и отдай WebP или AVIF; для превью — отдельные уменьшенные копии.":
         "Compress the images and serve WebP or AVIF; make separate small copies for previews.",
+    "Свяжи страницы со строками: добавь в датасет колонку slug или url с адресом страницы, или пиши ключ строки в `keyword:` во фронтматтере, или <meta name=\"keyword\"> в шаблоне.":
+        "Bind pages to rows: add a slug or url column with the page address to the dataset, or write the row key into `keyword:` in the front matter, or <meta name=\"keyword\"> in the template.",
     "Поставь ссылки на эту страницу с хабовых страниц раздела. Анкор — описательный, не «подробнее».":
         "Link to this page from the section's hub pages. Make the anchor "
         "descriptive, not “read more”.",

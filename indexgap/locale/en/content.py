@@ -9,6 +9,10 @@ MESSAGES = {
         "the model's reply was left instead of the page text: “{a0}”",
     "текст в неверной кодировке: «{a0}» — файл сохранён в одной кодировке, а прочитан в другой":
         "text in the wrong encoding: “{a0}” — saved in one encoding and read in another",
+    "сверка с датасетом покрыла {a0} из {a1} страниц — числа остальных не проверялись. Свяжи страницы со строками: колонка slug или url в датасете, `keyword:` во фронтматтере или <meta name=\"keyword\"> в шаблоне":
+        "the dataset check covered {a0} of {a1} pages — the numbers of the rest were not "
+        "checked. Bind pages to rows: a slug or url column in the dataset, `keyword:` in "
+        "the front matter or <meta name=\"keyword\"> in the template",
     " и ещё {a0}": " and {a0} more",
     "status: {a0} — страница помечена как незаконченная":
         "status: {a0} — the page is marked unfinished",

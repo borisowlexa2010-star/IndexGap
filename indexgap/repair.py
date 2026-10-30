@@ -68,6 +68,7 @@ FIX = {
     "no-viewport": N_("Добавь в шаблон <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">."),
     "heavy-html": N_("Найди, что раздувает HTML: встроенные данные для гидратации, inline-SVG, огромные таблицы. Вынеси их в отдельные файлы или разбей страницу."),
     "heavy-images": N_("Сожми картинки и отдай WebP или AVIF; для превью — отдельные уменьшенные копии."),
+    "dataset-unbound": N_("Свяжи страницы со строками: добавь в датасет колонку slug или url с адресом страницы, или пиши ключ строки в `keyword:` во фронтматтере, или <meta name=\"keyword\"> в шаблоне."),
     "broken-link": N_("Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт "
                       "эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер "
                       "перенаправляет эти адреса — проверь, что перенаправление действительно есть."),
@@ -187,7 +188,7 @@ FIX = {
 GROUPED = {"near-duplicate", "similar"}
 SITE_LEVEL = {"robots-blocks-all", "ai-crawler-blocked", "robots-no-sitemap",
               "robots-unreadable", "no-robots", "hreflang-static-cluster",
-              "translations-parked", "heavy-images"}
+              "translations-parked", "heavy-images", "dataset-unbound"}
 
 HEADER = "<!-- indexgap-brief -->"
 

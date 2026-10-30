@@ -182,6 +182,8 @@ MESSAGES = {
         "HTML heavier than 2 MB: Googlebot reads the first 2 MB, the tail of the page does not reach the index.",
     "Картинки тяжелее 1 МБ замедляют загрузку на телефоне.":
         "Images heavier than 1 MB slow loading down on a phone.",
+    "Сверка с датасетом покрыла меньше половины страниц: числа остальных не проверены, и «критичных 0» ничего о них не говорит.":
+        "The dataset check covered less than half of the pages: the numbers of the rest were not checked, and \"0 critical\" says nothing about them.",
     "На страницу не ведёт ни одна внутренняя ссылка. В sitemap она есть, но краулер до неё не дойдёт. Поставь ссылки с хабовых страниц раздела.":
         "No internal link points at this page. It is in the sitemap, but the "
         "crawler will not get there. Link to it from the section's hub pages.",
