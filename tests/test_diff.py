@@ -102,8 +102,9 @@ class Diff(unittest.TestCase):
         code, data = self.run_diff("--strict")
         self.assertEqual(code, 0)
         self.assertIn(("page-redirected", SITE + "/city/c3/"), self.codes(data, "info"))
-        self.assertEqual(data["redirects"], [os.path.relpath(
-            os.path.join(self.new.root, "_redirects"))])
+        # Путь печатается относительным, а на другом диске Windows — как есть.
+        self.assertEqual([os.path.abspath(p) for p in data["redirects"]],
+                         [os.path.abspath(os.path.join(self.new.root, "_redirects"))])
 
     def test_a_redirect_to_a_page_that_is_also_gone_is_a_warning(self):
         self.new.remove("city/c3")

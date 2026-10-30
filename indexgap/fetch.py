@@ -581,6 +581,11 @@ def next_command(out_dir: str, manifest: dict) -> str:
     parts = ["indexgap", "check", out_dir, "--site", manifest["site"]]
     for rel in manifest.get("root_sitemaps") or ():
         parts += ["--sitemap", os.path.join(out_dir, *rel.split("/"))]
+    if os.name == "nt":
+        # cmd и PowerShell не понимают одинарных кавычек shlex: путь
+        # `'C:\\…\\live'` они передали бы вместе с кавычками.
+        import subprocess
+        return subprocess.list2cmdline(parts)
     return " ".join(shlex.quote(p) for p in parts)
 
 
