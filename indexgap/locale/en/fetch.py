@@ -110,4 +110,9 @@ MESSAGES = {
         "the main protection against someone else's JavaScript. Run fetch as another "
         "user or, if you accept the risk (a container thrown away after the run), add "
         "--browser-no-sandbox",
+    "--browser {a0}: пакетный файл .bat/.cmd браузером быть не может — cmd заново разбирает его аргументы. Укажи .exe браузера":
+        "--browser {a0}: a .bat/.cmd batch file cannot be the browser — cmd re-parses "
+        "its arguments. Give the browser's .exe",
+    "пакетный файл .bat/.cmd браузером быть не может":
+        "a .bat/.cmd batch file cannot be the browser",
 }

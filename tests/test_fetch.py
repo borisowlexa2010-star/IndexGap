@@ -668,6 +668,7 @@ sys.stdout.buffer.write(dom.encode("utf-8"))
 """
 
 
+@unittest.skipIf(os.name == "nt", "поддельный браузер — скрипт; на Windows им был бы .bat")
 class RenderCase(FetchCase):
     make = staticmethod(shell_site)
 
@@ -681,12 +682,9 @@ class RenderCase(FetchCase):
         os.chmod(script, 0o755)
         self.argv_log = os.path.join(tools, "argv.log")
         self.hang = os.path.join(tools, "hang")
-        if os.name == "nt":
-            self.browser = os.path.join(tools, "browser.bat")
-            with open(self.browser, "w", encoding="utf-8") as fh:
-                fh.write(f'@"{sys.executable}" "{script}" %*\n')
-        else:
-            self.browser = script
+        # На Windows поддельный браузер был бы .bat, а его пакет отвергает
+        # нарочно (cmd заново разбирает аргументы); настоящий Chrome — .exe.
+        self.browser = script
         timeout = mock.patch.object(fetch, "RENDER_TIMEOUT", 3)
         timeout.start()
         self.addCleanup(timeout.stop)
@@ -857,13 +855,16 @@ class TestRenderUnits(unittest.TestCase):
         self.assertEqual(conn.recv(100), b"")
         conn.close()
 
-    def test_a_batch_browser_gets_only_plain_urls(self):
-        for url in ("https://e.com/a&calc/", "https://e.com/%PATH%/", "https://e.com/(x)/"):
-            with self.subTest(url=url):
-                dom, error = fetch.render("C:\\tools\\chrome.bat", url, "https://e.com/")
-                self.assertIsNone(dom)
-                self.assertTrue(error)
+    def test_a_batch_file_is_never_a_browser(self):
+        dom, error = fetch.render("C:\\tools\\chrome.bat", "https://e.com/", "https://e.com/")
+        self.assertIsNone(dom)
+        self.assertIn(".bat", error)
+        tools = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tools, True)
+        bat = os.path.join(tools, "chrome.cmd")
+        with open(bat, "w", encoding="utf-8") as fh:
+            fh.write("@echo off\n")
+        os.chmod(bat, 0o755)
+        with self.assertRaises(fetch.SourceError):
+            fetch.find_browser(bat)
 
-
-if __name__ == "__main__":
-    unittest.main()
