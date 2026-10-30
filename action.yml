@@ -100,7 +100,8 @@ runs:
         echo "code=$code" >> "$GITHUB_OUTPUT"
 
     - name: Keep the report
-      if: always()
+      # Без каталога путь стал бы «/» — загружать нечего, а не всё подряд.
+      if: always() && steps.check.outputs.dir != ''
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.artifact }}
