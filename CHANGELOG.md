@@ -55,7 +55,7 @@ What 1.16.0 left open, closed — and three commands the package was missing.
 interned; a 3,000-page, 211 MB build peaks at 710 MB instead of 907 MB, with
 byte-identical output.
 
-1,141 tests on 3.9, 3.12 and 3.15.
+1,142 tests on 3.9, 3.12 and 3.15.
 
 ## 1.16.0 — 2026-10-30
 

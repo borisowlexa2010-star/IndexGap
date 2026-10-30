@@ -462,5 +462,18 @@ class ConsoleSafety(unittest.TestCase):
         from indexgap import fetch
         self.assertEqual(fetch._safe("/a\n::error::x\x1b[31m"), "/a%0A::error::x%1B[31m")
 
+
+class WindowsCommand(unittest.TestCase):
+    def test_a_hostile_sitemap_name_never_reaches_the_command(self):
+        from indexgap import fetch
+        with mock.patch.object(fetch.os, "name", "nt"):
+            line = fetch.next_command("C:\\live", {
+                "site": "https://example.com/",
+                "root_sitemaps": ["a&calc.xml", "b%PATH%.xml", "c d.xml", "sitemap.xml"]})
+        self.assertNotIn("%PATH%", line)
+        self.assertRegex(line, r'"C:\\live.a&calc\.xml"')
+        self.assertRegex(line, r'"C:\\live.c d\.xml"')
+        self.assertIn("--site https://example.com/", line)
+
 if __name__ == "__main__":
     unittest.main()
