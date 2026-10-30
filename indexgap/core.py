@@ -1727,28 +1727,92 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
 
 # ── X-Robots-Tag из файлов хостинга ──────────────────────────────────────────
 
+def _group_end(pattern: str, i: int) -> int:
+    """Индекс закрывающей скобки группы, открытой в `pattern[i]`, или -1."""
+    depth, n, in_class = 0, i, False
+    while n < len(pattern):
+        ch = pattern[n]
+        if ch == "\\":
+            n += 2
+            continue
+        if in_class:
+            in_class = ch != "]"
+        elif ch == "[":
+            in_class = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if not depth:
+                return n
+        n += 1
+    return -1
+
+
 def _route_regex(pattern: str):
-    """`/glossary/*` (Netlify) или `/glossary/(.*)`, `/:slug*` (Vercel) → выражение."""
+    """
+    `/glossary/*` (Netlify) или `/glossary/(.*)`, `/:slug*` (Vercel) → выражение.
+
+    Vercel пишет `source` на языке path-to-regexp: `:slug` — сегмент,
+    `:slug*` — хвост, `:id(\d+)` и `((?!blog).*)` — группы с выражением,
+    `{/:page}?` — необязательная часть, `\.` — буквальная точка. Раньше
+    группы становились буквальным текстом и правило не совпадало ни с чем.
+    Шаблон, который не разобрать, даёт None: правило пропускается, а не
+    закрывает или открывает всё подряд.
+    """
     out, i = [], 0
     while i < len(pattern):
         ch = pattern[i]
-        if pattern.startswith("(.*)", i):
-            out.append(".*")
-            i += 4
+        if ch == "\\" and i + 1 < len(pattern):
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
             continue
-        if ch == "*":
+        if ch == "(":
+            close = _group_end(pattern, i)
+            if close < 0:
+                return None
+            out.append("(?:" + pattern[i + 1:close].replace("(?<", "(?P<")
+                       .replace("(?P<=", "(?<=").replace("(?P<!", "(?<!") + ")")
+            i = close + 1
+            continue
+        if ch == ")":
+            return None
+        if ch == "{":
+            out.append("(?:")
+        elif ch == "}":
+            out.append(")")
+        elif ch in "?+" and pattern[i - 1:i] in (")", "}"):
+            out.append(ch)
+        elif ch == "*" and pattern[i - 1:i] in (")", "}"):
+            out.append("*")
+        elif ch == "*":
             out.append(".*")
         elif ch == ":":
-            m = re.match(r":\w+(\*|\+)?", pattern[i:])
-            if m:
-                out.append(".*" if m.group(1) else "[^/]+")
-                i += len(m.group(0))
+            m = re.match(r":\w+", pattern[i:])
+            if not m:
+                out.append(re.escape(ch))
+                i += 1
                 continue
-            out.append(re.escape(ch))
+            i += len(m.group(0))
+            if pattern.startswith("(", i):
+                continue                  # выражение сегмента — следующая группа
+            mod = pattern[i:i + 1]
+            if mod in ("*", "+"):
+                out.append(".*" if mod == "*" else ".+")
+                i += 1
+            elif mod == "?":
+                out.append("[^/]*")
+                i += 1
+            else:
+                out.append("[^/]+")
+            continue
         else:
             out.append(re.escape(ch))
         i += 1
-    return re.compile("".join(out) + "$")
+    try:
+        return re.compile("".join(out) + "$")
+    except (re.error, OverflowError, RecursionError):
+        return None
 
 
 _TOML_FOR = re.compile(r"""^\s*for\s*=\s*["']([^"']+)["']""", re.M)
@@ -1881,6 +1945,12 @@ def header_noindex_rules(root: str, host: str = "") -> list:
 
 def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -> None:
     rules = header_noindex_rules(root, urlsplit(base_url).netloc)
+    for regex, source, pattern, closes in rules:
+        if regex is None and closes:
+            problems.append(tr("{a0}: шаблон {a1} не разобран — какие страницы закрывает "
+                               "его X-Robots-Tag: noindex, не проверялось",
+                               a0=source, a1=pattern))
+    rules = [rule for rule in rules if rule[0] is not None]
     if not any(closes for *_, closes in rules):
         return
     base = urlsplit(base_url).path.rstrip("/")
