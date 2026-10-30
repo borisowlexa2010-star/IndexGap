@@ -266,10 +266,12 @@ MESSAGES = {
         "file. Keep your own edits in the pages, not in them.",
 
     # ── находки, у которых наряд раньше выходил пустым ────────────────────────
-    "Реши, что делать с группой целиком: оставить одну страницу и увести остальные canonical'ом на неё — или развести их по разным интентам. Одну страницу из группы починить нельзя.":
-        "Decide what to do with the whole group: keep one page and "
-        "canonical the rest to it, or pull them apart by intent. A single "
-        "page out of the group cannot be fixed alone.",
+    "Реши, что делать с группой целиком. Разные запросы (города, модели) — дай каждой странице свои данные из датасета: цены, адреса, отзывы, а не другое имя в том же тексте. Один запрос — оставь одну страницу и уведи остальные на неё редиректом. Одну страницу из группы починить нельзя.":
+        "Decide what to do with the whole group. Different queries (cities, "
+        "models): give each page its own data from the dataset — prices, "
+        "addresses, reviews — not another name in the same text. One query: keep "
+        "one page and redirect the rest to it. A single page out of the group "
+        "cannot be fixed alone.",
     "Проверь, не выросли ли эти страницы из двух ключей с одним интентом. Если да — объединяй; если нет, добавь каждой то, чего нет у соседней.":
         "Check whether these pages grew out of two keywords with one "
         "intent. If they did, merge them; if not, give each of them what "

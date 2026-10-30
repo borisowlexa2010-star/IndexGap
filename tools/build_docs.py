@@ -176,8 +176,10 @@ WHY = {
    "impression, and none of them answers its own query.",
  "near-duplicate":
    "Near-duplicates are a group problem: a single page out of a cluster of "
-   "twenty cannot be fixed alone. Either one is kept and the rest point at it, "
-   "or the whole group is pulled apart by intent.",
+   "twenty cannot be fixed alone. When the pages target different queries "
+   "(one per city or model), the fix is each page's own data, not a canonical: "
+   "a canonical would hide the pages the site was built for. When the query is "
+   "the same, keep one page and redirect the rest to it.",
  "similar":
    "Weaker than a near-duplicate, but the same shape. Worth reading as a "
    "warning that two keywords with the same intent produced two competing "
