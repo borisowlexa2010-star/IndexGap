@@ -292,5 +292,56 @@ class HostForms(Site):
                                     parent={"vercel.json": '{"cleanUrls": true}'}), [])
 
 
+class VercelSources(Site):
+    """`source` в vercel.json — синтаксис path-to-regexp, с группами-выражениями."""
+
+    def matches(self, pattern, path):
+        regex = core._route_regex(pattern)
+        return bool(regex and regex.match(path))
+
+    def test_groups_with_expressions(self):
+        cases = [("/blog/:slug((?!draft).*)", "/blog/hello/", True),
+                 ("/blog/:slug((?!draft).*)", "/blog/draft-1/", False),
+                 ("/(.*)\\.pdf", "/files/a.pdf", True),
+                 ("/(.*)\\.pdf", "/files/a/", False),
+                 ("/((?!blog).*)", "/docs/b/", True),
+                 ("/((?!blog).*)", "/blog/a/", False),
+                 ("/:id(\\d+)", "/123", True),
+                 ("/:id(\\d+)", "/abc", False),
+                 ("/docs{/:page}?", "/docs", True),
+                 ("/docs{/:page}?", "/docs/a", True),
+                 ("/glossary/(.*)", "/glossary/c/", True),
+                 ("/glossary/*", "/glossary/c/", True),
+                 ("/blog/:path*", "/blog/a/", True),
+                 ("/a.b/:x", "/aXb/1", False)]
+        for pattern, path, expected in cases:
+            with self.subTest(pattern=pattern, path=path):
+                self.assertEqual(self.matches(pattern, path), expected)
+
+    def test_a_pattern_it_cannot_read_is_skipped(self):
+        for pattern in ("/(unclosed", "/:x([z-a])", "/(a))"):
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(core._route_regex(pattern))
+
+    def test_a_negative_lookahead_rule_closes_the_rest(self):
+        vercel = ('{"headers": [{"source": "/((?!blog).*)", "headers": '
+                  '[{"key": "X-Robots-Tag", "value": "noindex"}]}]}')
+        files = {"index.html": html("Home", links("/blog/a/", "/docs/b/")),
+                 "blog/a/index.html": html("Blog a", links("/")),
+                 "docs/b/index.html": html("Docs b", links("/"))}
+        root = self.write(files, {"vercel.json": vercel})
+        pages = core.load_pages(root, "https://example.com")[0]
+        closed = sorted(p.url for p in pages if p.noindex)
+        self.assertEqual(closed, ["https://example.com/", "https://example.com/docs/b/"])
+
+    def test_an_unreadable_rule_closes_nothing_and_says_so(self):
+        vercel = ('{"headers": [{"source": "/(unclosed", "headers": '
+                  '[{"key": "X-Robots-Tag", "value": "noindex"}]}]}')
+        root = self.write({"index.html": html("Home")}, {"vercel.json": vercel})
+        pages, problems = core.load_pages(root, "https://example.com")
+        self.assertEqual([p.url for p in pages if p.noindex], [])
+        self.assertTrue(any("/(unclosed" in p for p in problems), problems)
+
+
 if __name__ == "__main__":
     unittest.main()
