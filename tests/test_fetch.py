@@ -456,5 +456,11 @@ class TestEnglish(FetchCase):
         self.assertEqual(re.findall(r"[А-Яа-яЁё]", out.replace("кириллица", "")), [], out)
 
 
+
+class ConsoleSafety(unittest.TestCase):
+    def test_remote_text_cannot_inject_ci_commands(self):
+        from indexgap import fetch
+        self.assertEqual(fetch._safe("/a\n::error::x\x1b[31m"), "/a%0A::error::x%1B[31m")
+
 if __name__ == "__main__":
     unittest.main()
