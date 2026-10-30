@@ -92,6 +92,14 @@ class Hubs(Site):
         found = self.missing(self.hub(kids, kids[:2], kid_body=nearby))
         self.assertEqual(len(found), 1)
 
+    def test_a_canonical_twin_is_not_a_missing_kid(self):
+        kids = ["alpha", "beta", "gamma"]
+        files = self.hub(kids, kids)
+        files["products/alpha-print/index.html"] = html(
+            "Product alpha print", '<a href="/products/">up</a>').replace(
+            "</title>", '</title><link rel="canonical" href="https://example.com/products/alpha/">')
+        self.assertEqual(self.missing(files), [])
+
     def test_real_pagination_still_counts(self):
         kids = ["alpha", "beta", "gamma"]
         files = self.hub(kids, kids[:2])
