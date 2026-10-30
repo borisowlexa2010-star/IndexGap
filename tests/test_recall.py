@@ -73,6 +73,19 @@ class RobotsRules(unittest.TestCase):
         self.assertTrue(aeo.robots_allows(r, "/pros/"))
         self.assertFalse(aeo.robots_allows(r, "/tmp/x"))
 
+    def test_non_latin_rules_match_in_any_spelling(self):
+        for rule in ("/каталог/", "/%d0%ba%d0%b0%d1%82%d0%b0%d0%bb%d0%be%d0%b3/",
+                     "/%D0%BA%D0%B0%D1%82%D0%B0%D0%BB%D0%BE%D0%B3/"):
+            with self.subTest(rule=rule):
+                r = self.robots(f"User-agent: *\nDisallow: {rule}\n")
+                self.assertFalse(aeo.robots_allows(r, "/%D0%BA%D0%B0%D1%82%D0%B0%D0%BB%D0%BE%D0%B3/a/"))
+                self.assertFalse(aeo.robots_allows(r, "/каталог/a/"))
+                self.assertTrue(aeo.robots_allows(r, "/pros/"))
+
+    def test_a_versioned_agent_name_is_the_same_crawler(self):
+        r = self.robots("User-agent: *\nDisallow:\n\nUser-agent: Googlebot/2.1\nDisallow: /tmp/\n")
+        self.assertFalse(aeo.robots_allows(r, "/tmp/x"))
+
     def test_empty_disallow_allows(self):
         self.assertTrue(aeo.robots_allows(self.robots("User-agent: *\nDisallow:\n"), "/a/"))
 
@@ -154,6 +167,14 @@ class HeaderFiles(Fixture):
                 pages = self.site({"_headers": f"{rule}\n  X-Robots-Tag: noindex\n"})
                 self.assertFalse(any(p.noindex for p in pages.values()))
         pages = self.site({"_headers": "https://example.com/glossary/*\n  X-Robots-Tag: noindex\n"})
+        self.assertTrue(pages[SITE + "/glossary/drain/"].noindex)
+
+    def test_a_header_for_another_bot_does_not_close_for_google(self):
+        for value in ("googlebot-news: noindex", "bingbot: noindex", "otherbot: none"):
+            with self.subTest(value=value):
+                pages = self.site({"_headers": f"/glossary/*\n  X-Robots-Tag: {value}\n"})
+                self.assertFalse(pages[SITE + "/glossary/drain/"].noindex)
+        pages = self.site({"_headers": "/glossary/*\n  X-Robots-Tag: googlebot: noindex\n"})
         self.assertTrue(pages[SITE + "/glossary/drain/"].noindex)
 
     def test_a_removed_header_reopens_the_page(self):

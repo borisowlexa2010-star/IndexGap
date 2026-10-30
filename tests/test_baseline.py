@@ -105,6 +105,30 @@ class Baseline(unittest.TestCase):
         self.assertEqual(self.check("--baseline", self.base, "--strict", "--out", self.base), 0)
         self.assertEqual(self.data(self.base)["baseline"]["new"], [])
 
+    def test_a_baseline_saved_with_a_bom_is_read(self):
+        with open(self.base, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(self.base, "w", encoding="utf-8-sig") as fh:
+            fh.write(text)
+        out = os.path.join(self.dir, "now.json")
+        self.assertEqual(self.check("--baseline", self.base, "--strict", "--out", out), 0)
+
+    def test_a_swapped_subject_is_a_new_finding(self):
+        old = [{"level": "critical", "url": "robots.txt", "code": "ai-crawler-blocked",
+                "message": "PerplexityBot закрыт: ответы Perplexity"}]
+        now = [("critical", "robots.txt", "ai-crawler-blocked", "OAI-SearchBot закрыт: ChatGPT")]
+        diff = cli.compare_baseline(now, old)
+        self.assertEqual(len(diff["new"]), 1)
+        self.assertEqual(len(diff["fixed"]), 1)
+        old = [{"level": "warning", "url": SITE + "/a/", "code": "broken-link",
+                "message": "ссылок на страницы, которых нет в сборке: 1 — /old"}]
+        same = [("warning", SITE + "/a/", "broken-link",
+                 "links to pages missing from the build: 1 — /old")]
+        self.assertEqual(cli.compare_baseline(same, old)["new"], [])
+        moved = [("warning", SITE + "/a/", "broken-link",
+                  "ссылок на страницы, которых нет в сборке: 1 — /new")]
+        self.assertEqual(len(cli.compare_baseline(moved, old)["new"]), 1)
+
     def test_a_foreign_file_is_refused(self):
         foreign = os.path.join(self.dir, "package.json")
         with open(foreign, "w", encoding="utf-8") as fh:
@@ -129,6 +153,13 @@ class ExitCodes(Baseline):
         self.assertEqual(self.check("--sitemap", os.path.join(self.dir, "nope.xml"),
                                     "--out", os.path.join(self.dir, "x.json")), 2)
         self.assertIn("nope.xml", self.stderr.getvalue())
+
+    def test_an_unreadable_sitemap_is_an_error(self):
+        bad = os.path.join(self.dir, "sitemap.xml")
+        with open(bad, "w", encoding="utf-8") as fh:
+            fh.write("<!doctype html><html><body>404</body></html>")
+        self.assertEqual(self.check("--sitemap", bad, "--out", os.path.join(self.dir, "x.json")), 2)
+        self.assertIn("sitemap", self.stderr.getvalue())
 
     def test_a_missing_robots_file_is_an_error(self):
         self.assertEqual(self.check("--robots", os.path.join(self.dir, "robots.txt"),
