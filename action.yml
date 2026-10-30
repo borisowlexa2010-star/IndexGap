@@ -59,14 +59,19 @@ runs:
       shell: bash
       env:
         INDEXGAP_LANG: en
+        # Сводка пишется в файл шага: на Windows без этого — cp1252 и падение
+        # на первом кириллическом адресе.
+        PYTHONUTF8: "1"
         IG_ROOT: ${{ inputs.root }}
         IG_SITE: ${{ inputs.site }}
         IG_BASELINE: ${{ inputs.baseline }}
         IG_STRICT: ${{ inputs.strict }}
         IG_ARGS: ${{ inputs.args }}
       run: |
-        out="$RUNNER_TEMP/indexgap"
-        mkdir -p "$out"
+        # Свой каталог на каждый запуск: второй вызов действия в той же job
+        # не должен показывать отчёт первого, если сам упал на входе.
+        out="$(mktemp -d "$RUNNER_TEMP/indexgap-XXXXXX")"
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
         cmd=(indexgap check)
         [ -n "$IG_ROOT" ] && cmd+=("$IG_ROOT")
         [ -n "$IG_SITE" ] && cmd+=(--site "$IG_SITE")
@@ -74,7 +79,12 @@ runs:
         [ "$IG_STRICT" = "true" ] && cmd+=(--strict)
         # Extra arguments are split like a shell would, without running them.
         if [ -n "$IG_ARGS" ]; then
-          eval "extra=($(printf '%s' "$IG_ARGS" | python -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in shlex.split(sys.stdin.read())))'))"
+          # Незакрытая кавычка — ошибка, а не тихо потерянные аргументы.
+          if ! quoted="$(printf '%s' "$IG_ARGS" | python -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in shlex.split(sys.stdin.read())))')"; then
+            echo "::error title=indexgap::cannot split args (unbalanced quote?): $IG_ARGS"
+            exit 2
+          fi
+          eval "extra=($quoted)"
           cmd+=("${extra[@]}")
         fi
         cmd+=(--out "$out/indexgap-check.html")
@@ -94,7 +104,7 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.artifact }}
-        path: ${{ runner.temp }}/indexgap/
+        path: ${{ steps.check.outputs.dir }}/
         if-no-files-found: ignore
         overwrite: true
 
