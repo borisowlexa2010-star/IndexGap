@@ -1097,7 +1097,7 @@ CODE_WEIGHT = {
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
     "hreflang-no-self": 5, "hreflang-no-return": 6,
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
-    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19,
+    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
     "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
@@ -1815,6 +1815,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     from . import signals
     living = [p for p in pages if p.url not in shells]
     issues += signals.page_signals(living)
+    issues += signals.lang_script(living)
     issues += signals.stale_years([p for p in living if p.url not in spared])
     # Двойник с canonical на другую страницу — не ребёнок, которого хаб забыл.
     from .publish import indexable as _indexable

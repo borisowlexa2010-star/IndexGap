@@ -277,6 +277,8 @@ WHY = {
    "The declared language does not match the language the page is actually "
    "written in. This is the failure that sends a Spanish reader to an English "
    "page and counts as a correct result.",
+ "lang-script-mismatch":
+   "The page declares one language in `<html lang>` and is written in a script that language does not use: Chinese text under `lang=\"en\"`, Korean under `en-US`. Search engines and screen readers trust `lang`, and so do hreflang checks and the per-language thresholds of this package. Only the main text counts — menus, footers and code samples do not — and the finding needs at least 200 letters, eight in ten of them in the other script, so a bilingual page stays silent. Languages written in two scripts (Serbian, Azerbaijani, Uzbek) are judged only with a script subtag such as `sr-Latn`. A whole site with the wrong `lang` is one template line and is reported once.",
  "hreflang-canonical-conflict":
    "The canonical points at another language while hreflang says the versions "
    "are equals. The two signals contradict each other, and the engine resolves "
@@ -396,7 +398,8 @@ FAMILIES = [
   "template gets wrong in three different ways. These checks validate the "
   "cluster as a whole rather than the tag in isolation.",
   ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
-   "hreflang-unknown-target", "hreflang-lang-mismatch", "hreflang-canonical-conflict",
+   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch",
+   "hreflang-canonical-conflict",
    "hreflang-target-blocked", "hreflang-static-cluster"]),
 
  ("aeo", "AI search and answer extraction",
