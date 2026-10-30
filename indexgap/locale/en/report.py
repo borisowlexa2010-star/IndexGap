@@ -196,8 +196,11 @@ MESSAGES = {
     "Нет title.": "No title.",
     "Нет машиночитаемой даты.": "No machine-readable date.",
     "Нет ни списков, ни таблиц.": "Neither lists nor tables.",
-    "Ни один подзаголовок не сформулирован как вопрос.":
-        "Not a single subheading is phrased as a question.",
+    "Ни один подзаголовок не сформулирован как вопрос. Это эвристика из корреляционных исследований, а не требование поисковика: вопросы в подзаголовках упрощают цитирование, но переписывать под них живой текст не обязательно.":
+        "Not a single subheading is phrased as a question. This is a heuristic from "
+        "correlation studies, not a search engine requirement: question subheadings "
+        "make a page easier to quote, but there is no need to rewrite good text "
+        "around them.",
     "Одинаковое начало текста на многих страницах.":
         "Many pages open with the same sentence.",
     "Одинаковый description у нескольких страниц.":
@@ -212,8 +215,10 @@ MESSAGES = {
     "Отчёт конвейера": "Pipeline report",
     "Очень длинные абзацы плохо извлекаются.":
         "Very long paragraphs extract badly.",
-    "Первый абзац длинноват для цитирования.":
-        "The first paragraph is a bit long to quote.",
+    "Первый абзац длинноват для цитирования. Это эвристика, а не правило поисковика: ИИ-ответы чаще берут короткий самостоятельный ответ, но длинный абзац их не запрещает.":
+        "The first paragraph is a bit long to quote. This is a heuristic, not a "
+        "search engine rule: AI answers more often lift a short self-contained "
+        "answer, but a long paragraph does not rule a page out.",
     "Первый абзац слишком короткий для самостоятельного ответа.":
         "The first paragraph is too short to stand as an answer.",
     "Первый абзац — разгон, а не ответ. Именно первый абзац цитируют ИИ-поиск и блок быстрых ответов.":
@@ -221,9 +226,11 @@ MESSAGES = {
         "exactly what AI search and the featured-answer block quote.",
     "Похожа на другую страницу, но ниже порога дубля. Повод посмотреть.":
         "Similar to another page but below the duplicate threshold. Worth a look.",
-    "Почти совпадает с другой страницей. Поисковик оставит одну. Перепиши под другой интент или оставь одну с canonical.":
-        "Nearly identical to another page. The engine will keep one. Rewrite it for "
-        "a different intent, or keep one and point the canonical at it.",
+    "Почти совпадает с другой страницей. Поисковик оставит одну. Если у страниц разные запросы (город, модель, услуга), дай каждой свои данные — canonical здесь спрячет страницы, ради которых их делали. Если запрос один — оставь одну страницу и уведи остальные на неё.":
+        "Nearly identical to another page. The engine will keep one. If the pages "
+        "target different queries (city, model, service), give each its own data — "
+        "a canonical here would hide the very pages they were built for. If the "
+        "query is the same, keep one page and send the rest to it.",
     "Слишком много кликов от главной.": "Too many clicks from the home page.",
     "Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots.":
         "The page is closed to indexing. If that is a template mistake, remove the "
