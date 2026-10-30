@@ -468,22 +468,73 @@ def _ld_numbers(node, depth=0, inside_rating=False):
                                    inside_rating or low == "aggregaterating")
 
 
-def _ld_numbers_missing(data, page) -> list:
+_LOOSE_GROUPS = re.compile(r"\d(?:[\d,'’\u00a0\u202f ]*\d)?")
+_THOUSANDS = re.compile(r"(\d+(?:[.,]\d+)?)\s?(?:k|K|тыс\.?|к)(?![\w])")
+
+
+def _visible_numbers(text: str) -> tuple:
+    """
+    Числа видимого текста в трёх видах: значения, цифры без разделителей и
+    «тысячи». Цифры без разделителей ловят то, что значения не ловят:
+    `$16<sup>99</sup>` (склеено в 1699), индийское `1,60,000`, швейцарское
+    `1'600.00`. «1.2K reviews» и «$1.6k» — округлённые тысячи.
+    """
     from .content import NUMBER, _norm_number
-    seen = set()
-    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    values, digits, thousands = set(), set(), []
     for raw in re.findall(r"(?<![\d.,])(" + NUMBER + r")", text):
         try:
-            seen.add(round(float(_norm_number(raw)), 4))
+            values.add(round(float(_norm_number(raw)), 4))
         except ValueError:
-            continue
+            pass
+    for raw in _LOOSE_GROUPS.findall(text):
+        digits.add(re.sub(r"\D", "", raw).lstrip("0") or "0")
+    for m in _THOUSANDS.finditer(text):
+        try:
+            thousands.append(float(m.group(1).replace(",", ".")) * 1000)
+        except ValueError:
+            pass
+    return values, digits, thousands
+
+
+def _shown(number: float, values: set, digits: set, thousands: list) -> bool:
+    if number in values:
+        return True
+    whole = int(number)
+    cents = int(round((number - whole) * 100))
+    if cents:
+        # $16<sup>99</sup> — «1699»; <span>16</span><span>.99</span> — «16» и «99».
+        if f"{whole}{cents:02d}".lstrip("0") in digits:
+            return True
+        if str(whole) in digits and f"{cents:02d}".lstrip("0") in digits:
+            return True
+    elif str(whole) in digits or f"{whole}00" in digits:
+        return True
+    return any(abs(t - number) <= number * 0.1 for t in thousands if number >= 1000)
+
+
+def _ld_value(value):
+    """Число из поля разметки: `1600`, `"1,600.00"`, а и `"$1,600"`, `"1600 USD"`."""
+    from .content import NUMBER, _norm_number
+    text = str(value).strip()
+    try:
+        return round(float(_norm_number(text.replace(" ", ""))), 4)
+    except ValueError:
+        found = re.search(NUMBER, text)
+        if not found:
+            return None
+        try:
+            return round(float(_norm_number(found.group(0))), 4)
+        except ValueError:
+            return None
+
+
+def _ld_numbers_missing(data, page) -> list:
+    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    values, digits, thousands = _visible_numbers(text)
     out = []
     for field, value in _ld_numbers(data):
-        try:
-            number = round(float(_norm_number(str(value).replace(" ", ""))), 4)
-        except ValueError:
-            continue
-        if number <= 0 or number in seen:
+        number = _ld_value(value)
+        if number is None or number <= 0 or _shown(number, values, digits, thousands):
             continue
         shown = f"{field} {value}"
         if shown not in out:
