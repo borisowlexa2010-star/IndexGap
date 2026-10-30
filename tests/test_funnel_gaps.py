@@ -33,13 +33,13 @@ class TestUnknownUrls(unittest.TestCase):
         found = self.group(["//stage1.example.com/sign-in", "//gitlab.example.com/",
                             "//example.com/gone"])
         self.assertEqual(sorted(found["other_hosts"]),
-                         ["//gitlab.example.com/", "//stage1.example.com/sign-in"])
-        self.assertEqual(found["missing"], ["//example.com/gone"])
+                         ["https://gitlab.example.com/", "https://stage1.example.com/sign-in"])
+        self.assertEqual(found["missing"], ["https://example.com/gone"])
 
     def test_files_are_not_mistaken_for_lost_pages(self):
         found = self.group(["//example.com/assets/hero.webp", "//example.com/doc.pdf"])
         self.assertEqual(sorted(found["files"]),
-                         ["//example.com/assets/hero.webp", "//example.com/doc.pdf"])
+                         ["https://example.com/assets/hero.webp", "https://example.com/doc.pdf"])
         self.assertEqual(found["missing"], [])
 
     def test_hosts_are_grouped_for_the_report(self):
@@ -50,7 +50,7 @@ class TestUnknownUrls(unittest.TestCase):
     def test_www_is_the_same_site(self):
         found = self.group(["//www.example.com/old"])
         self.assertEqual(found["other_hosts"], [])
-        self.assertEqual(found["missing"], ["//www.example.com/old"])
+        self.assertEqual(found["missing"], ["https://www.example.com/old"])
 
 
 class TestSeveralSitemaps(unittest.TestCase):

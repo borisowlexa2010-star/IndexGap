@@ -606,6 +606,7 @@ def cmd_check(args):
         "duplicates": [{"a": a.url, "b": b.url, "jaccard": j}
                        for a, b, j in analysis["duplicates"]],
         "duplicate_method": analysis.get("duplicate_method"),
+        "duplicate_method_label": analysis.get("duplicate_method_label"),
         "unique_share": analysis["unique_share"],
         "funnel": funnel_result,
         "causes": causes,
@@ -1012,12 +1013,16 @@ def cmd_doctor(args):
     specs = list(getattr(args, "indexed", None) or [])
     if getattr(args, "gsc", None):
         specs.append(f"google={args.gsc}")
-    near = doctor.near_page_one(specs, pages, args.site)
+    near = doctor.near_page_one(specs, pages, args.site, notes=notes)
     if near:
         print(tr("\nУ первой страницы выдачи — {a0} страниц(ы): позиция 8–20 и показы есть. "
                  "Доработать их дешевле, чем писать новые:", a0=len(near)))
         for row in near[:10]:
-            print(f"  {row['position']:>5}  {row['impressions']:>7}  {row['url']}")
+            # Позиция у каждого поисковика своя: строка называет свой, а рядом —
+            # где та же страница стоит у остальных.
+            elsewhere = ", ".join(f"{n}: {p}" for n, p in (row.get("elsewhere") or {}).items())
+            print(f"  {row['position']:>5}  {row['impressions']:>7}  {row['engine']:<8} {row['url']}"
+                  + (f"  ({elsewhere})" if elsewhere else ""))
 
     if causes:
         print(tr("\nПочему у страниц нет показов:") if funnel_result.get("impressions_only")
@@ -1125,8 +1130,8 @@ def _print_foreign(foreign: dict, limit: int = 10) -> None:
     if missing:
         print(tr("\nПоисковик знает страницы, которых нет среди файлов сайта ({a0}):",
                  a0=len(missing)))
-        for key in missing[:limit]:
-            print(f"         {key}")
+        for url in missing[:limit]:
+            print(f"         {url}")
         print(tr("         → удалены или переименованы. Если у страницы был трафик — "
                  "перенаправь её 301 на ближайшую живую; если нет — 410 достаточно."))
     if files:

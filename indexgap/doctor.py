@@ -304,18 +304,25 @@ def foreign_urls(funnel_result: dict, site: str = "") -> dict:
     def bare(value):
         return value[4:] if value.startswith("www.") else value
 
+    # Печатается и сохраняется адрес, как он стоял в выгрузке, а не ключ
+    # сравнения: `//demo.example/rent/nowhere` не откроешь и не найдёшь в панели.
+    exported = funnel_result.get("exported") or {}
+
+    def address(key):
+        return exported.get(key) or ("https:" + key if key.startswith("//") else key)
+
     home = bare(host(url_key(site))) if site else ""
     other, files, missing, by_host = [], [], [], {}
     for key in funnel_result.get("indexed_unknown") or ():
         where = bare(host(key))
         path = key.lstrip("/").partition("/")[2]
         if home and where != home:
-            other.append(key)
+            other.append(address(key))
             by_host[where] = by_host.get(where, 0) + 1
         elif _FILE.search(path.split("?")[0]):
-            files.append(key)
+            files.append(address(key))
         else:
-            missing.append(key)
+            missing.append(address(key))
     return {"other_hosts": sorted(other), "files": sorted(files),
             "missing": sorted(missing), "by_host": dict(sorted(by_host.items())),
             "exported": dict(funnel_result.get("exported") or {})}
@@ -711,7 +718,7 @@ def read_sources(specs: list, site: str = "") -> dict:
     индексом) и `by_source` (всё подряд, включая краулеры и сторонние сервисы).
     """
     out, extra, notes, unlabeled, kinds, cited = {}, {}, [], set(), {}, {}
-    impressions, excluded = set(), {}
+    impressions, listed, excluded = set(), set(), {}
     for spec in specs or ():
         name, path = sources.parse_spec(spec)
         header = read_indexed_header(path)
@@ -750,8 +757,8 @@ def read_sources(specs: list, site: str = "") -> dict:
             continue
         # «Эффективность» из Search Console — отчёт о показах: страница в индексе
         # без показов в него не попадает. Узнаётся по столбцу показов.
-        if kind == sources.INDEX and _has_impressions(header, path):
-            impressions.add(name)
+        if kind == sources.INDEX:
+            (impressions if _has_impressions(header, path) else listed).add(name)
         result = read_indexed(path, site, index_status=kind == sources.INDEX)
         notes += result.get("notes", [])
         urls = set(result["urls"])
@@ -786,73 +793,186 @@ def read_sources(specs: list, site: str = "") -> dict:
         notes.append(
             tr("панели вебмастера среди выгрузок нет. Воронка построена на том, что есть, но подпись шага это учитывает: ")
             + "; ".join(sources.describe(list(extra))) + ".")
+    # Две выгрузки под одной меткой, и одна из них — настоящий список индекса:
+    # отсутствие в нём уже что-то значит, и метка больше не «только показы».
     return {"by_engine": out, "by_source": extra, "kinds": kinds, "cited": cited,
-            "impressions": sorted(impressions), "excluded": excluded,
+            "impressions": sorted(impressions - listed), "excluded": excluded,
             "notes": notes, "unlabeled": sorted(unlabeled)}
 
 
-_POSITION_WORDS = ("position", "позиция", "posición", "posizione", "positie", "pozycja",
+# Слова заголовков из панелей на разных языках. Сравнение — по вхождению,
+# поэтому «impression» ловит и «Impressions», и «Impressões».
+_POSITION_WORDS = ("position", "позиция", "позиція", "posición", "posizione", "posição",
+                   "positie", "pozycja", "posisi", "konum", "sıralama", "vị trí",
                    "掲載順位", "排名", "순위")
+_IMPRESSION_WORDS = ("impression", "impr", "показ", "impresion", "impress",
+                     "affichage", "wyświetl", "vertoning", "gösterim", "visning",
+                     "tayangan", "hiển thị",
+                     "表示回数", "展示", "曝光", "노출", "การแสดงผล")
+_CLICK_WORDS = ("click", "клик", "клік", "переход", "clic", "klick", "klik", "tıklama",
+                "nhấp", "クリック", "点击", "點擊", "클릭", "การคลิก")
+# CTR на некоторых языках назван через клики: «Klickrate», «Tỷ lệ nhấp».
+_RATE_WORDS = ("ctr", "rate", "taux", "tasa", "quote", "oran", "rasio", "tỷ lệ",
+               "współczynnik", "доля", "частка")
 NEAR_FROM, NEAR_TO, NEAR_MIN_IMPRESSIONS = 8.0, 20.0, 50
 
 
-def _number(cell) -> float:
-    text = str(cell or "").strip().replace("\u00a0", "").replace(" ", "").rstrip("%")
-    if "," in text and "." not in text:
+def _number(cell, integer: bool = False) -> float:
+    """
+    Число из ячейки выгрузки; -1, если числа нет.
+
+    Показы и клики — целые, и разделитель в них может быть только разрядным:
+    `3,000`, `1.234`, `1 234` — тысячи, а не три и не одна целая. У позиции
+    запятая десятичная: `9,4` — это 9.4.
+    """
+    text = re.sub(r"[\s\u00a0\u202f\u2009']", "", str(cell or "")).rstrip("%")
+    if integer and re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", text):
+        text = re.sub(r"[.,]", "", text)
+    if "," in text and "." in text:
+        # Десятичный знак — тот, что стоит последним.
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
         text = text.replace(",", ".")
-    text = text.replace(",", "")
     try:
         return float(text)
     except ValueError:
         return -1.0
 
 
-def near_page_one(specs: list, pages: list, site: str = "") -> list:
+def _column(header: list, words: tuple, avoid: tuple = ()):
+    """
+    Столбец, чей заголовок назван одним из слов, — или None.
+
+    Целый заголовок сильнее целого слова в нём, а целое слово — вхождения:
+    «Средняя позиция показа» содержит «показ», но столбцом показов не стала
+    бы, даже стой она перед «Показами», — заголовки со словами из `avoid`
+    не рассматриваются вовсе.
+    """
+    best, score = None, 0
+    for i, cell in enumerate(header):
+        if any(w in cell for w in avoid):
+            continue
+        if cell in words:
+            got = 3
+        elif any(re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", cell) for w in words):
+            got = 2
+        elif any(w in cell for w in words):
+            got = 1
+        else:
+            continue
+        if got > score:
+            best, score = i, got
+    return best
+
+
+def _performance_rows(path: str, site: str, built: dict, notes: list) -> dict:
+    """
+    {ключ страницы: [показы, клики или None, сумма позиций с весом показов]}
+    из одной выгрузки показов — или пустой словарь, если это не она.
+
+    Строки одной страницы складываются: Search Console делит её на `#раздел`,
+    http и https, ссылки с `?utm_…`. Раньше из них оставалась самая крупная,
+    и показы занижались.
+    """
+    from urllib.parse import urljoin
+    try:
+        rows, _ = _read_rows(path)
+    except SourceError:
+        return {}
+    if not rows:
+        return {}
+    header = [str(h or "").strip().lower() for h in rows[0]]
+    imp = _column(header, _IMPRESSION_WORDS, avoid=_POSITION_WORDS + _RATE_WORDS)
+    if imp is None:
+        return {}
+    pos = _column(header, _POSITION_WORDS)
+    clicks = _column(header, _CLICK_WORDS,
+                     avoid=_POSITION_WORDS + _IMPRESSION_WORDS + _RATE_WORDS)
+    col, start = _url_column(rows)
+    if col is None:
+        return {}
+    if pos is None:
+        notes.append(tr(
+            "{a0}: столбец показов есть, а столбца позиции я не узнал — страницы "
+            "у первой страницы выдачи по этому файлу не искались. Заголовки файла: {a1}",
+            a0=os.path.basename(path), a1=", ".join(str(c) for c in rows[0][:8])))
+        return {}
+    out = {}
+    for row in rows[start:]:
+        if max(col, imp, pos) >= len(row):
+            continue
+        key = url_key(urljoin(site or "", str(row[col]).strip()))
+        # `/a/?utm_source=…` — это страница `/a/`, если такой с параметрами нет.
+        if key not in built and key.split("?", 1)[0] in built:
+            key = key.split("?", 1)[0]
+        if key not in built:
+            continue
+        impressions = _number(row[imp], integer=True)
+        position = _number(row[pos])
+        if impressions < 0 or position <= 0:
+            continue
+        got = out.setdefault(key, [0, None, 0.0])
+        got[0] += impressions
+        got[2] += position * impressions
+        if clicks is not None and clicks < len(row) and _number(row[clicks], integer=True) >= 0:
+            got[1] = (got[1] or 0) + _number(row[clicks], integer=True)
+    return out
+
+
+def near_page_one(specs: list, pages: list, site: str = "", notes: list = None) -> list:
     """
     Страницы у первой страницы выдачи: средняя позиция 8–20 и заметные показы.
 
     Берётся из выгрузки показов («Эффективность → Страницы»), где есть столбцы
     показов и позиции. Страница там уже нравится поисковику: доработать её
     дешевле, чем написать новую. Учитываются только страницы, которые есть в
-    сборке, — исчезнувшие этим списком не чинятся.
+    сборке и открыты для индекса, — исчезнувшие и закрытые этим списком не
+    чинятся.
+
+    Позиция у каждого поисковика своя, поэтому каждая строка называет свой,
+    а в `elsewhere` — позиции той же страницы у остальных: десятое место
+    в Bing при тридцать пятом в Google — не та же новость, что десятое в Google.
     """
-    from urllib.parse import urljoin
-    built = {p.key: p.url for p in pages}
-    best = {}
+    from .publish import indexable
+    notes = notes if notes is not None else []
+    built = {p.key: p.url for p in pages if indexable(p)}
+    by_engine = {}
     for spec in specs or ():
-        _name, path = sources.parse_spec(spec)
-        try:
-            rows, _ = _read_rows(path)
-        except SourceError:
+        name, path = sources.parse_spec(spec)
+        if not name:
+            guessed, _kind, _sure = sources.identify(path, read_indexed_header(path))
+            name = guessed or os.path.splitext(os.path.basename(path))[0].lower()
+        got = _performance_rows(path, site, built, notes)
+        if not got:
             continue
-        if not rows:
-            continue
-        header = [str(h or "").strip().lower() for h in rows[0]]
-        imp = next((i for i, h in enumerate(header)
-                    if any(w in h for w in _IMPRESSION_WORDS)), None)
-        pos = next((i for i, h in enumerate(header)
-                    if any(w in h for w in _POSITION_WORDS)), None)
-        col, start = _url_column(rows)
-        if imp is None or pos is None or col is None:
-            continue
-        for row in rows[start:]:
-            if max(col, imp, pos) >= len(row):
-                continue
-            key = url_key(urljoin(site or "", str(row[col]).strip()))
-            if key not in built:
-                continue
-            impressions, position = _number(row[imp]), _number(row[pos])
-            if NEAR_FROM <= position <= NEAR_TO and impressions >= NEAR_MIN_IMPRESSIONS:
-                current = best.get(key)
-                if current is None or impressions > current["impressions"]:
-                    best[key] = {"url": built[key], "impressions": int(impressions),
-                                 "position": round(position, 1)}
-    return sorted(best.values(), key=lambda r: (-r["impressions"], r["url"]))
+        # Одна и та же выгрузка дважды (`--gsc` и `--indexed google=`) не
+        # удваивает показы: из двух файлов одного поисковика берётся больший.
+        if sum(v[0] for v in got.values()) > sum(
+                v[0] for v in by_engine.get(name, {}).values()):
+            by_engine[name] = got
 
-
-_IMPRESSION_WORDS = ("impression", "impr", "показ", "impresion", "impress",
-                     "affichage", "wyświetl", "vertoning", "gösterim", "visning",
-                     "表示回数", "展示", "曝光", "노출", "การแสดงผล")
+    positions = {}
+    for name, got in by_engine.items():
+        for key, (impressions, _clicks, weighted) in got.items():
+            if impressions > 0:
+                positions.setdefault(key, {})[name] = round(weighted / impressions, 1)
+    out = []
+    for name, got in by_engine.items():
+        for key, (impressions, clicks, _weighted) in got.items():
+            position = positions.get(key, {}).get(name)
+            if position is None or impressions < NEAR_MIN_IMPRESSIONS:
+                continue
+            if NEAR_FROM <= position <= NEAR_TO:
+                out.append({"url": built[key], "engine": name,
+                            "impressions": int(impressions),
+                            "clicks": None if clicks is None else int(clicks),
+                            "position": position,
+                            "elsewhere": {n: p for n, p in sorted(positions[key].items())
+                                          if n != name}})
+    return sorted(out, key=lambda r: (-r["impressions"], r["url"], r["engine"]))
 
 
 def _has_impressions(header, path: str = "") -> bool:
@@ -886,10 +1006,15 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
 
     display = {url_key(p.url): p.url for p in pages}
     generated = set(display)
-    # Все панели — отчёты о показах, и других свидетельств индексации нет.
+    # Отчёт о показах решается по каждому источнику отдельно: выгрузка
+    # «Эффективность» рядом со списками Bing и Яндекса не становится списком
+    # индекса Google. Показы доказывают, что страница в индексе, а их
+    # отсутствие не доказывает ничего.
     live_panels = [n for n, u in (by_engine or {}).items() if u]
+    shown = {n for n in live_panels if n in set(impressions or ())}
+    # Все панели — отчёты о показах, и других свидетельств индексации нет.
     impressions_only = bool(live_panels) and not (by_source or {}) and all(
-        n in set(impressions or ()) for n in live_panels)
+        n in shown for n in live_panels)
     publishable = {url_key(p.url) for p in pages if indexable(p)}
     blocked = generated - publishable
 
@@ -968,13 +1093,23 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         for name in sorted(engines_keys):
             hit = engines_keys[name] & known
             kind = sources.kind_of(name)
+            if name in shown:
+                steps.append({"id": "in-source",
+                              "name": tr("  из них с показами в {a0}", a0=name),
+                              "count": len(hit),
+                              "lost": len((known & in_index) - hit),
+                              "why": tr("показов в {a0} за период не было — страница "
+                                        "в индексе без показов в эту выгрузку не "
+                                        "попадает", a0=name),
+                              "engine": name, "kind": kind, "measure": "impressions"})
+                continue
             suffix = ("" if kind == sources.INDEX
                       else f" ({tr(sources.KIND_TITLE[kind])})")
             steps.append({"id": "in-source", "name": tr("  из них в {a0}{a1}", a0=name, a1=suffix),
                           "count": len(hit),
                           "lost": len((known & in_index) - hit),
                           "why": tr("есть в других источниках, но не в {a0}", a0=name),
-                          "engine": name, "kind": kind})
+                          "engine": name, "kind": kind, "measure": "index"})
 
     # Цитирование — последний шаг, а не вклад в индекс. База — то, что точно в
     # индексе, если индекс известен; иначе всё пригодное.
@@ -1022,6 +1157,12 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
                            key=lambda kv: -kv[1])
 
     foreign = []
+    if shown and any(name not in shown for name in panels):
+        for name in sorted(shown):
+            foreign.append(tr(
+                "{a0} — отчёт о показах, а не список индекса: страница без показов в нём "
+                "не значит «нет в индексе», поэтому в сравнение поисковиков он не входит",
+                a0=name))
     # Краулер и сторонний сервис поднимают цифру шага, не поднимая индексацию.
     # Без этой оговорки добавление выгрузки Screaming Frog выглядело бы как
     # улучшение — самый дорогой вид уверенной неправды.
@@ -1048,7 +1189,10 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "foreign": foreign,
         "by_engine": {name: show(keys & generated) for name, keys in engines_keys.items()},
         "engine_keys": {name: sorted(keys) for name, keys in engines_keys.items()},
-        "panel_keys": {name: sorted(keys) for name, keys in panels.items()},
+        # Только списки индекса: по выгрузке показов о «нет в индексе» не судят.
+        "panel_keys": {name: sorted(keys) for name, keys in panels.items()
+                       if name not in shown},
+        "impressions": sorted(shown),
         "kinds": {name: sources.kind_of(name) for name in engines_keys},
         "proves": sources.describe(list(engines_keys)),
         "display": display,
@@ -1182,35 +1326,41 @@ def explain(funnel_result: dict, analysis: dict) -> list:
     deep = _keys({u for u, d in graph["depth"].items() if d > config["max_click_depth"]})
     no_title = _keys({p.url for p in analysis["pages"] if not p.title})
 
+    # `id` — для машин: `cause` переведён и на другом языке другой.
     buckets = [
-        (tr("сироты и недостижимые от главной"), not_indexed & orphans,
+        ("orphans", tr("сироты и недостижимые от главной"), not_indexed & orphans,
          tr("добавить ссылки на них с хабовых страниц раздела")),
-        (tr("почти-дубли других страниц"), not_indexed & dupes,
+        ("near-duplicates", tr("почти-дубли других страниц"), not_indexed & dupes,
          tr("переписать под разные интенты или оставить одну, а с остальных поставить canonical на неё — связывать их ссылками между собой нельзя")),
-        (tr("тонкие страницы"), not_indexed & thin,
-         tr("добавить содержимое или убрать из индекса")),
-        (tr("глубже допустимого клика"), not_indexed & deep,
+        # Не «убрать из индекса»: закрытая noindex страница строки данных —
+        # потерянная страница, а не вылеченная. Совет убран из находки `thin`
+        # в 1.13.0 и оставался только здесь.
+        ("thin", tr("тонкие страницы"), not_indexed & thin,
+         tr("наполнить фактами из строки данных или объединить с близкими "
+            "страницами — закрывать их от индекса не нужно")),
+        ("too-deep", tr("глубже допустимого клика"), not_indexed & deep,
          tr("поднять выше в структуре")),
-        (tr("без title"), not_indexed & no_title,
+        ("no-title", tr("без title"), not_indexed & no_title,
          tr("заполнить title — без него страница почти не имеет шансов")),
     ]
     explained = set()
-    for name, keys, fix in buckets:
+    for code, name, keys, fix in buckets:
         if keys:
             explained |= keys
-            out.append({"cause": name, "count": len(keys), "fix": fix,
+            out.append({"id": code, "cause": name, "count": len(keys), "fix": fix,
                         "urls": sorted(display.get(k, k) for k in keys)[:50]})
 
     rest = not_indexed - explained
     if rest and funnel_result.get("impressions_only"):
-        out.append({"cause": tr("показов за период нет, других причин локально не видно"),
+        out.append({"id": "no-impressions",
+                    "cause": tr("показов за период нет, других причин локально не видно"),
                     "count": len(rest),
                     "fix": tr("для новых страниц и молодого сайта это обычно. Индексацию "
                               "показывает Search Console → Индексирование → Страницы, "
                               "а не эта выгрузка"),
                     "urls": sorted(display.get(k, k) for k in rest)[:50]})
     elif rest:
-        out.append({"cause": tr("причина не установлена локально"),
+        out.append({"id": "unexplained", "cause": tr("причина не установлена локально"),
                     "count": len(rest),
                     "fix": tr("проверить в Search Console статус конкретных URL и время с публикации"),
                     "urls": sorted(display.get(k, k) for k in rest)[:50]})
