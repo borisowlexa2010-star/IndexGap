@@ -552,6 +552,12 @@ def find_browser(given: str = None) -> str:
         path = given if os.path.isfile(given) else shutil.which(given)
         if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
             raise SourceError(tr("--browser {a0}: такого исполняемого файла нет", a0=given))
+        if path.lower().endswith((".bat", ".cmd")):
+            # Пакетный файл запускает cmd, а он заново разбирает аргументы:
+            # `<`, `>`, `&`, `%` в них — перенаправления и подстановки.
+            raise SourceError(tr("--browser {a0}: пакетный файл .bat/.cmd браузером быть не "
+                                 "может — cmd заново разбирает его аргументы. Укажи .exe "
+                                 "браузера", a0=given))
         return os.path.abspath(path)
     for name in BROWSER_NAMES:
         path = shutil.which(name)
@@ -566,7 +572,6 @@ def find_browser(given: str = None) -> str:
                          a0=", ".join(BROWSER_NAMES)))
 
 
-_BATCH_URL = re.compile(r"https?://[A-Za-z0-9.:/_~\-]+", re.ASCII)
 
 
 def _site_hosts(site: str) -> list:
@@ -776,13 +781,12 @@ def _stop(proc) -> None:
 def render(browser: str, url: str, site: str, no_sandbox: bool = False) -> tuple:
     """
     (DOM в байтах, "") или (None, причина). Адрес проверяется до запуска:
-    он пришёл из sitemap или ссылки чужого сервера. Браузер в `.bat`/`.cmd`
-    запускает cmd, а он разбирает `& | ^ %` в аргументах — для него адрес
-    только из букв, цифр и `.:/_~-`.
+    он пришёл из sitemap или ссылки чужого сервера. `.bat`/`.cmd` браузером
+    не бывает: их запускает cmd, а он заново разбирает аргументы.
     """
-    batch = browser.lower().endswith((".bat", ".cmd"))
-    pattern = _BATCH_URL if batch else _URL_ARG
-    if not pattern.fullmatch(url or "") or not same_site(url, site):
+    if browser.lower().endswith((".bat", ".cmd")):
+        return None, tr("пакетный файл .bat/.cmd браузером быть не может")
+    if not _URL_ARG.fullmatch(url or "") or not same_site(url, site):
         return None, tr("адрес не http(s) на сайте {a0} или с пробелом — браузеру не "
                         "передаётся", a0=site)
     profile = tempfile.mkdtemp(prefix="indexgap-render-")
