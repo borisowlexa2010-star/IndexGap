@@ -183,16 +183,16 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
 
     urls = sorted({p.url for p in pages if words.get(p.url)})
     if len(urls) < 2:
-        return {"pairs": [], "notes": notes, "method": tr("нет данных")}
+        return {"pairs": [], "notes": notes, "method": tr("нет данных"), "method_id": "none"}
 
     if len(urls) <= cfg["exact_below"]:
-        method = tr("попарное сравнение")
+        method, method_id = tr("попарное сравнение"), "pairwise"
         shingles = {u: shingle_set(u) for u in urls}
         get = shingles.__getitem__
         candidates = [(urls[i], urls[j])
                       for i in range(len(urls)) for j in range(i + 1, len(urls))]
     else:
-        method = "LSH"
+        method, method_id = "LSH", "lsh"
         perms, bands = cfg["minhash_perms"], cfg["lsh_bands"]
         rows = max(1, perms // bands)
         # Множества шинглов всех страниц разом не держатся: на 50 000 страниц
@@ -250,7 +250,8 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         if j >= cfg["similar"]:
             out.append((by_url[a], by_url[b], round(j, 3)))
     out.sort(key=lambda t: (-t[2], t[0].url, t[1].url))
-    return {"pairs": out, "notes": notes, "method": method}
+    # `method_id` — для машин: `method` переведён и на другом языке другой.
+    return {"pairs": out, "notes": notes, "method": method, "method_id": method_id}
 
 
 def _anchor_words(page) -> set:
@@ -1603,7 +1604,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         "graph": graph,
         "unique_share": boiler["shares"],
         "duplicates": pairs,
-        "duplicate_method": dupes["method"],
+        "duplicate_method": dupes["method_id"],
+        "duplicate_method_label": dupes["method"],
         "issues": sort_issues(issues),
         "notes": notes,
         "config": cfg,

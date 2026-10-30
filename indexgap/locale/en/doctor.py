@@ -110,8 +110,9 @@ MESSAGES = {
     "две выгрузки помечены как «{a0}» — они объединены; если это разные источники, задай метки явно":
         "two exports are labelled “{a0}” — they were merged; if these are different "
         "sources, label them explicitly",
-    "добавить содержимое или убрать из индекса":
-        "add content, or take them out of the index",
+    "наполнить фактами из строки данных или объединить с близкими страницами — закрывать их от индекса не нужно":
+        "fill them with facts from their data row, or merge them with close pages — "
+        "there is no need to close them to indexing",
     "добавить ссылки на них с хабовых страниц раздела":
         "link to them from the section's hub pages",
     "другие поисковики страницу приняли, значит она доступна и валидна. Причина на стороне {a0}: оценка качества или более медленная индексация — техническими правками это обычно не лечится":
@@ -261,4 +262,16 @@ MESSAGES = {
         "no impressions in the period — an indexed page with no impressions does not appear in this export",
     "показов за период нет, других причин локально не видно":
         "no impressions in the period, and no other cause visible locally",
+    "  из них с показами в {a0}":
+        "  of those with impressions in {a0}",
+    "показов в {a0} за период не было — страница в индексе без показов в эту выгрузку не попадает":
+        "no impressions in {a0} in the period — an indexed page with no impressions "
+        "does not appear in this export",
+    "{a0} — отчёт о показах, а не список индекса: страница без показов в нём не значит «нет в индексе», поэтому в сравнение поисковиков он не входит":
+        "{a0} is an impressions report, not an index list: a page without impressions "
+        "in it does not mean “not indexed”, so it is left out of the engine comparison",
+    # ── у первой страницы выдачи ────────────────────────────────────────
+    "{a0}: столбец показов есть, а столбца позиции я не узнал — страницы у первой страницы выдачи по этому файлу не искались. Заголовки файла: {a1}":
+        "{a0}: there is an impressions column but no position column I recognise — "
+        "pages close to page one were not looked for in this file. File headers: {a1}",
 }
