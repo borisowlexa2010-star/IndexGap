@@ -105,6 +105,13 @@ class Baseline(unittest.TestCase):
         self.assertEqual(self.check("--baseline", self.base, "--strict", "--out", self.base), 0)
         self.assertEqual(self.data(self.base)["baseline"]["new"], [])
 
+    def test_out_named_only_by_its_extension(self):
+        for name in (".json", ".html"):
+            html_path, json_path = cli.report_pair(os.path.join("r", name))
+            self.assertEqual((html_path, json_path),
+                             (os.path.join("r", "indexgap-report.html"),
+                              os.path.join("r", "indexgap-report.json")))
+
     def test_a_baseline_saved_with_a_bom_is_read(self):
         with open(self.base, encoding="utf-8") as fh:
             text = fh.read()
