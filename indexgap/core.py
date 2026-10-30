@@ -1746,8 +1746,21 @@ _TOML_TAG = re.compile(r"""^\s*["']?X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""",
 
 
 def _closes(value: str) -> bool:
-    directives = re.split(r"[,\s]+", (value or "").lower())
-    return "noindex" in directives or "none" in directives
+    """
+    Закрывает ли значение X-Robots-Tag страницу для Google. Директива с
+    именем бота (`bingbot: noindex`, `googlebot-news: noindex`) действует
+    только на него.
+    """
+    agent = ""
+    for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.endswith(":") and len(token) > 1:
+            agent = token[:-1]
+            continue
+        if ":" in token:
+            agent, _, token = token.partition(":")
+        if token in ("noindex", "none") and agent in ("", "googlebot"):
+            return True
+    return False
 
 
 def _same_host(a: str, b: str) -> bool:

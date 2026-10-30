@@ -22,7 +22,7 @@ import json
 import os
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 
 from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
                install, portfolio, profiles, publish, repair, report, settings,
@@ -356,7 +356,8 @@ def load_baseline(path: str) -> list:
             "Базовой линии {a0} нет. Её делают обычным прогоном:\n"
             "    indexgap check --out {a0}\n    и коммитят вместе с проектом.", a0=path))
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        # utf-8-sig: базу, пересохранённую в Блокноте, открывает с BOM.
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         data = None
@@ -368,6 +369,24 @@ def load_baseline(path: str) -> list:
     return [i for i in data["issues"] if isinstance(i, dict)]
 
 
+# Находки, у которых на одной странице бывает разный предмет: какой бот
+# закрыт, куда ведёт битая ссылка, с какой страницей дубль. Без предмета
+# «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
+_SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "hub-missing-links", "unfilled-slot",
+                  "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
+                  "duplicate-description"}
+_SUBJECT = re.compile(r"https?://[^\s,;«»\"']+|(?<![\w/])/[^\s,;«»\"'()]*|«[^»]*»")
+
+
+def _subject(code: str, message: str) -> tuple:
+    """Предмет находки без чисел и без языка: адреса, пути, «цитаты», имя бота."""
+    if code not in _SUBJECT_CODES or not message:
+        return ()
+    if code == "ai-crawler-blocked":
+        return (message.split()[0].lower(),)
+    return tuple(sorted({m.group(0).rstrip(".:—") for m in _SUBJECT.finditer(message)}))
+
+
 def compare_baseline(issues: list, old: list) -> dict:
     """
     Что появилось и что исчезло с прошлого прогона.
@@ -376,24 +395,46 @@ def compare_baseline(issues: list, old: list) -> dict:
     бывают числа, и «37 из 40» вместо «36 из 40» новой находкой не делает.
     Адрес сравнивается по ключу — база могла быть снята с другим написанием
     `--site`. Одинаковых находок на странице бывает несколько: считаются штуки.
+
+    У находок с предметом (бот, цель ссылки, страница-близнец) сравнивается
+    и он: новая — та, у которой появился предмет, которого раньше не было.
+    Битых ссылок стало меньше — не новая находка; ссылка ведёт в другое
+    место — новая.
     """
     def key(level, url, code):
         return level, code, url_key(url or "")
 
-    before = Counter(key(i.get("level"), i.get("url"), i.get("code")) for i in old)
+    def subjects(items):
+        out = defaultdict(set)
+        for level, url, code, message in items:
+            if code in _SUBJECT_CODES:
+                out[key(level, url, code)].update(_subject(code, message or ""))
+        return out
+
+    old_items = [(i.get("level"), i.get("url"), i.get("code"), i.get("message"))
+                 for i in old]
+    had, has = subjects(old_items), subjects(issues)
+
+    def changed(item, other):
+        level, url, code, message = item
+        k = key(level, url, code)
+        mine = set(_subject(code, message or ""))
+        return k in other and bool(mine - other[k])
+
+    before = Counter(key(l, u, c) for l, u, c, _ in old_items)
     now = Counter(key(l, u, c) for l, u, c, _ in issues)
     new, seen = [], Counter()
     for level, url, code, message in issues:
         k = key(level, url, code)
         seen[k] += 1
-        if seen[k] > before[k]:
+        if seen[k] > before[k] or changed((level, url, code, message), had):
             new.append({"level": level, "url": url, "code": code, "message": message})
     fixed, gone = [], Counter()
-    for item in old:
-        k = key(item.get("level"), item.get("url"), item.get("code"))
+    for item, raw in zip(old_items, old):
+        k = key(*item[:3])
         gone[k] += 1
-        if gone[k] > now[k]:
-            fixed.append(item)
+        if gone[k] > now[k] or changed(item, has):
+            fixed.append(raw)
     return {"new": new, "fixed": fixed}
 
 
@@ -528,6 +569,10 @@ def cmd_check(args):
     by_engine, by_source, cited, impressions = _collect_indexed(args)
     if args.sitemap:
         sm = _sitemaps(args)
+        if not sm["urls"] and sm["errors"]:
+            # Как у doctor: sitemap просили сверить, а он не читается — это
+            # ошибка входа, а не зелёная проверка с примечанием.
+            raise SourceError(tr("sitemap не прочитан: {a0}", a0=sm["errors"][0]))
         for error in sm["errors"]:
             print(tr("  ! sitemap не прочитан: {a0}", a0=error))
         if sm["urls"]:

@@ -131,7 +131,8 @@ def read_robots(path: str) -> dict:
         if field == "user-agent":
             if not previous_was_agent:
                 current = []
-            current.append(value.lower())
+            # `Googlebot/2.1` — тот же Googlebot: важно имя, а не версия.
+            current.append((value.lower().split("/")[0].split() or [""])[0])
             previous_was_agent = True
             for agent in current:
                 rules.setdefault(agent, {"disallow": [], "allow": []})
@@ -170,8 +171,27 @@ _SEARCH_ENGINES = ("googlebot", "bingbot", "yandex", "yandexbot", "duckduckbot",
                    "baiduspider", "slurp", "applebot")
 
 
+_PCT = re.compile(r"%[0-9a-fA-F]{2}")
+
+
+def _robots_norm(text: str) -> str:
+    """
+    Правило и адрес в одной записи: не-ASCII — в UTF-8 %XX, `%d0` — `%D0`.
+
+    `Disallow: /каталог/` и `Disallow: /%d0%ba…` Google читает так же, как
+    `/%D0%BA…`; без этого robots.txt нелатинского сайта не совпадал ни с одним
+    адресом, и закрытый раздел выглядел открытым.
+    """
+    from urllib.parse import quote
+    text = _PCT.sub(lambda m: m.group(0).upper(), text)
+    if text.isascii():
+        return text
+    return "".join(ch if ch.isascii() else quote(ch, safe="") for ch in text)
+
+
 def _robots_pattern(rule: str):
     """Правило robots.txt по правилам Google: `*` — что угодно, `$` — конец адреса."""
+    rule = _robots_norm(rule)
     anchored = rule.endswith("$")
     body = rule[:-1] if anchored else rule
     regex = "".join(".*" if ch == "*" else re.escape(ch) for ch in body)
@@ -196,6 +216,7 @@ def blocking_rule(robots: dict, path: str, agent: str = "googlebot") -> str:
     `Disallow:` не запрещает ничего.
     """
     group = _robots_group(robots, agent)
+    path = _robots_norm(path)
     best, verdict = -1, True
     for field, allowed in (("disallow", False), ("allow", True)):
         for rule in group.get(field) or ():
