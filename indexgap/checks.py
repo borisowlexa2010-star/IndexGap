@@ -1593,7 +1593,10 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     living = [p for p in pages if p.url not in shells]
     issues += signals.page_signals(living)
     issues += signals.stale_years([p for p in living if p.url not in spared])
-    issues += signals.hub_links(pages, graph, skip=spared)
+    # Двойник с canonical на другую страницу — не ребёнок, которого хаб забыл.
+    from .publish import indexable as _indexable
+    issues += signals.hub_links(pages, graph,
+                                skip=spared | {p.url for p in pages if not _indexable(p)})
     issues += signals.heavy_images(pages)
     issues = _collapse_parked(issues, notes, pages, cfg)
     issues = _closed_sections(issues, notes, pages)
