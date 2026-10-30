@@ -1603,7 +1603,8 @@ def _build_findings(root: str, pages: list, site: str, args, config: str) -> lis
     а нужна одна разница.
     """
     ns = argparse.Namespace(root=root, site=site, home=args.home, config=config,
-                            profile=args.profile, dataset=None, keyword="keyword",
+                            profile=args.profile, dataset=args.dataset or None,
+                            keyword=args.keyword,
                             no_content=False, no_aeo=False, robots=None, sitemap=None)
     import contextlib
     import io
@@ -1630,7 +1631,7 @@ def cmd_diff(args):
         raise SourceError(tr("OLD и NEW — один и тот же каталог {a0}: сравнивать нечего. "
                              "Нужны две сборки — та, что на проде, и новая.", a0=args.old))
     probe = argparse.Namespace(root=args.new, site=args.site, config=args.config,
-                               profile=args.profile, dataset=None)
+                               profile=args.profile, dataset=args.dataset)
     config = apply_project_defaults(probe)
     if not probe.site:
         raise SourceError(tr("Не указан адрес сайта: добавь --site https://… — или запиши "
@@ -1638,6 +1639,14 @@ def cmd_diff(args):
     site = check_site_url(probe.site)
     args.site = site
     profile = args.profile or probe.profile
+    # Один датасет на обе сборки: так выдуманное число в NEW — новая находка.
+    # Читается здесь, вне заглушённого анализа: ошибка в пути и догадка
+    # о колонке с ключом должны быть видны.
+    args.dataset = probe.dataset or ""
+    if args.dataset and not args.no_checks:
+        rows = _read_rows(args)
+        print(tr("Датасет — {a0}: строк {a1}, сверяется с обеими сборками",
+                 a0=args.dataset, a1=len(rows)))
 
     print(tr("Было — {a0}", a0=args.old))
     old_pages = _load(argparse.Namespace(root=args.old, site=site))
@@ -1692,6 +1701,7 @@ def cmd_diff(args):
         "old": {"root": args.old, "pages": result["old_pages"]},
         "new": {"root": args.new, "pages": result["new_pages"]},
         "redirects": redirect_files,
+        "dataset": (args.dataset or None) if findings is not None else None,
         "summary": summary,
         "items": _serialize_issues(items),
         **{k: result[k] for k in ("removed", "closed", "opened", "nosnippet", "shrunk",
@@ -1832,6 +1842,9 @@ def build_parser():
                    help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
     p.add_argument("--no-checks", action="store_true",
                    help=tr("не прогонять проверки check по обеим сборкам — только сравнение страниц"))
+    p.add_argument("--dataset", default="",
+                   help=tr("семантика (CSV или XLSX) для обеих сборок — тогда сравниваются и числа, которых нет в данных"))
+    p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом в датасете"))
     p.add_argument("--strict", action="store_true",
                    help=tr("ненулевой код возврата при критичных находках — для CI"))
     p.set_defaults(func=cmd_diff)
