@@ -177,6 +177,17 @@ class HeaderFiles(Fixture):
         pages = self.site({"_headers": "/glossary/*\n  X-Robots-Tag: googlebot: noindex\n"})
         self.assertTrue(pages[SITE + "/glossary/drain/"].noindex)
 
+    def test_a_sitemap_of_nothing_is_refused(self):
+        import contextlib, io
+        from indexgap import cli
+        self.site({"_headers": "/*\n  X-Robots-Tag: noindex\n"})
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            code = cli.main(["sitemap", self.root, "--site", SITE])
+        self.assertEqual(code, 2)
+        self.assertIn("_headers", err.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(self.root, "sitemap.xml")))
+
     def test_a_removed_header_reopens_the_page(self):
         pages = self.site({"_headers": "/*\n  X-Robots-Tag: noindex\n"
                                        "/glossary/*\n  ! X-Robots-Tag\n"})
