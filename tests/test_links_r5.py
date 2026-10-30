@@ -343,5 +343,48 @@ class VercelSources(Site):
         self.assertTrue(any("/(unclosed" in p for p in problems), problems)
 
 
+class BehindRobots(Site):
+    """Страница, закрытая в robots.txt, не читается: её ссылки поисковик не видит."""
+
+    FILES = {"index.html": html("Home", links("/plumbing/", "/private/")),
+             "plumbing/index.html": html("Plumbing", links("/")),
+             "private/index.html": html("Private", links("/plumbing/denver/")),
+             "plumbing/denver/index.html": html("Denver", links("/plumbing/"))}
+
+    def test_links_from_a_blocked_page_do_not_reach(self):
+        _, result = self.run_checks(self.FILES, blocked={"https://example.com/private/"})
+        found = [i for i in result["issues"] if i[2] == "unreachable"]
+        self.assertEqual([i[1] for i in found], ["https://example.com/plumbing/denver/"])
+        self.assertIn("robots.txt", found[0][3])
+        # Сама закрытая страница — не «недостижимая»: о ней скажет robots-blocks-page.
+        self.assertNotIn("https://example.com/private/", [i[1] for i in found])
+
+    def test_without_robots_nothing_changes(self):
+        _, result = self.run_checks(self.FILES)
+        self.assertEqual([i for i in result["issues"] if i[2] == "unreachable"], [])
+
+    def test_the_cli_reads_robots_of_the_build(self):
+        import contextlib
+        import io
+        import json
+        from indexgap import cli
+        files = dict(self.FILES, **{"robots.txt": "User-agent: *\nDisallow: /private/\n"})
+        root = self.write(files)
+        out = os.path.join(os.path.dirname(root), "report.html")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            cli.main(["check", root, "--site", "https://example.com/", "--out", out])
+        with open(out[:-5] + ".json", encoding="utf-8") as fh:
+            issues = json.load(fh)["issues"]
+        unreachable = [i["url"] for i in issues if i["code"] == "unreachable"]
+        self.assertEqual(unreachable, ["https://example.com/plumbing/denver/"])
+
+    def test_a_site_closed_whole_is_not_a_flood(self):
+        from indexgap import aeo
+        root = self.write(dict(self.FILES, **{"robots.txt": "User-agent: *\nDisallow: /\n"}))
+        pages = core.load_pages(root, "https://example.com")[0]
+        robots = aeo.read_robots(os.path.join(root, "robots.txt"))
+        self.assertEqual(aeo.blocked_urls(pages, robots), set())
+
+
 if __name__ == "__main__":
     unittest.main()

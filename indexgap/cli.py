@@ -500,9 +500,20 @@ def _analyse(args, pages=None):
              a1=project['_profile']))
 
     _sitemap_hreflang(args, pages)
+    robots_path = ""
+    blocked = set()
+    base = urlsplit(args.site or "").path.strip("/")
+    if not args.no_aeo:
+        robots_path = args.robots or _guess_robots(args)
+        if base and robots_path and not args.robots:
+            # Поисковик читает только robots.txt в корне хоста. Файл сборки,
+            # которая живёт под /repo/, не действует — судить по нему нельзя.
+            robots_path = None
+        else:
+            blocked = aeo.blocked_urls(pages, aeo.read_robots(robots_path))
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
-                              language=project.get("language", ""))
+                              language=project.get("language", ""), blocked=blocked)
     notes = list(analysis.get("notes") or [])
 
     content_result = None
@@ -534,11 +545,7 @@ def _analyse(args, pages=None):
 
     aeo_result = None
     if not args.no_aeo:
-        robots_path = args.robots or _guess_robots(args)
-        base = urlsplit(args.site or "").path.strip("/")
-        if base and robots_path and not args.robots:
-            # Поисковик читает только robots.txt в корне хоста. Файл сборки,
-            # которая живёт под /repo/, не действует — судить по нему нельзя.
+        if robots_path is None:
             parts = urlsplit(args.site)
             notes.append(tr(
                 "robots.txt в сборке не действует: сайт живёт под /{a0}/, а поисковики "

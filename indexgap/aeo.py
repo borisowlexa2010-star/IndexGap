@@ -230,6 +230,23 @@ def blocking_rule(robots: dict, path: str, agent: str = "googlebot") -> str:
     return "" if verdict is True else verdict
 
 
+def blocked_urls(pages: list, robots: dict) -> set:
+    """
+    Страницы, которые robots.txt не пускает обходить: их ссылок поисковик не
+    читает. Полный запрет сайта — отдельная находка, а не тысяча закрытых.
+    """
+    from urllib.parse import urlsplit
+    if not robots.get("found") or _blocks_everything(_robots_group(robots)):
+        return set()
+    found = set()
+    for page in pages:
+        parts = urlsplit(page.url)
+        path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        if blocking_rule(robots, path):
+            found.add(page.url)
+    return found
+
+
 def check_blocked_pages(pages: list, robots: dict) -> list:
     """
     Страницы сборки, которые robots.txt не пускает обходить.
