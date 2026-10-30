@@ -1754,8 +1754,8 @@ def _route_regex(pattern: str):
     `/glossary/*` (Netlify) или `/glossary/(.*)`, `/:slug*` (Vercel) → выражение.
 
     Vercel пишет `source` на языке path-to-regexp: `:slug` — сегмент,
-    `:slug*` — хвост, `:id(\d+)` и `((?!blog).*)` — группы с выражением,
-    `{/:page}?` — необязательная часть, `\.` — буквальная точка. Раньше
+    `:slug*` — хвост, `:id(\\d+)` и `((?!blog).*)` — группы с выражением,
+    `{/:page}?` — необязательная часть, `\\.` — буквальная точка. Раньше
     группы становились буквальным текстом и правило не совпадало ни с чем.
     Шаблон, который не разобрать, даёт None: правило пропускается, а не
     закрывает или открывает всё подряд.
@@ -1816,7 +1816,11 @@ def _route_regex(pattern: str):
 
 
 _TOML_FOR = re.compile(r"""^\s*for\s*=\s*["']([^"']+)["']""", re.M)
-_TOML_TAG = re.compile(r"""^\s*["']?X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""", re.I | re.M)
+# Ключ — в начале строки (`[headers.values]`) или во встроенной таблице
+# (`values = { "X-Robots-Tag" = "noindex" }`). Строки-комментарии снимаются
+# до поиска: `# X-Robots-Tag = "noindex"` закрывал весь сайт.
+_TOML_TAG = re.compile(r"""(?:^|[{,])\s*["']?X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""",
+                       re.I | re.M)
 
 
 def _closes(value: str) -> bool:
@@ -1913,6 +1917,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
             text, _ = read_text(toml)
         except SourceError:
             text = ""
+        text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("#"))
         for block in text.split("[[headers]]")[1:]:
             block = block.split("[[", 1)[0]
             where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)

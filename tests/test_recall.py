@@ -200,6 +200,13 @@ class HeaderFiles(Fixture):
                                            '    Cache-Control = "max-age=60"\n'})
         self.assertFalse(any(p.noindex for p in pages.values()))
 
+    def test_an_inline_toml_values_table_still_closes(self):
+        pages = self.site({"netlify.toml": '[[headers]]\n'
+                                           '  values = { "X-Robots-Tag" = "noindex" }\n'
+                                           '  for = "/glossary/*"\n'})
+        self.assertTrue(pages[SITE + "/glossary/drain/"].noindex)
+        self.assertFalse(pages[SITE + "/pros/a/"].noindex)
+
     def test_a_conditional_vercel_rule_is_not_applied_to_every_request(self):
         rule = {"source": "/(.*)", "headers": [{"key": "X-Robots-Tag", "value": "noindex"}]}
         for cond in ({"has": [{"type": "host", "value": "preview.example.com"}]},
