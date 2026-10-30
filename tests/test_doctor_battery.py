@@ -317,3 +317,19 @@ class TestDuplicateMethodIsACode(Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExportCap(Fixture):
+    """Выгрузка из интерфейса Search Console обрезана на 1000 строк."""
+
+    def test_exactly_a_thousand_rows_is_said_out_loud(self):
+        rows = "".join(f"{SITE}/p{i}/\n" for i in range(1000))
+        path = self.write("g.csv", "URL\n" + rows)
+        result = doctor.read_sources([f"google={path}"])
+        self.assertTrue(any("1000" in n for n in result["notes"]), result["notes"])
+
+    def test_a_shorter_list_is_silent(self):
+        rows = "".join(f"{SITE}/p{i}/\n" for i in range(999))
+        path = self.write("g.csv", "URL\n" + rows)
+        result = doctor.read_sources([f"google={path}"])
+        self.assertFalse(any("1000" in n for n in result["notes"]), result["notes"])
