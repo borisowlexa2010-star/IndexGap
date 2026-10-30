@@ -68,4 +68,39 @@ MESSAGES = {
     "файл {a0} check не читает": "check does not read the file {a0}",
     "файл {a0} уже занят адресом {a1}": "the file {a0} is already taken by {a1}",
     "<каталог>": "<directory>",
+    "--browser {a0}: такого исполняемого файла нет": "--browser {a0}: no such executable",
+    "--render нужен браузер семейства Chromium, а его нет: ни {a0} в PATH, ни Google Chrome "
+    "или Chromium на обычном месте. Поставь Google Chrome или Chromium либо укажи путь: "
+    "--browser /путь/к/chrome":
+        "--render needs a Chromium-family browser and there is none: no {a0} on PATH, "
+        "no Google Chrome or Chromium in the usual place. Install Google Chrome or "
+        "Chromium, or give the path: --browser /path/to/chrome",
+    "--browser задаёт браузер для --render — без --render он не нужен":
+        "--browser sets the browser for --render — without --render it is not needed",
+    "адрес не http(s) на сайте {a0} или с пробелом — браузеру не передаётся":
+        "the address is not http(s) on the site {a0} or has a space — not passed to the browser",
+    "браузер не запустился: {a0}": "the browser did not start: {a0}",
+    "браузер не уложился в {a0} с — остановлен": "the browser took over {a0} s — stopped",
+    "браузер завершился с кодом {a0}": "the browser exited with code {a0}",
+    "отрисованный DOM больше {a0} МБ": "the rendered DOM is over {a0} MB",
+    "браузер вернул не HTML": "the browser returned something that is not HTML",
+    "sitemap не прочитан: {a0} — обход только по ссылкам от главной":
+        "the sitemap was not read: {a0} — crawling only by links from the home page",
+    "  найдены только по ссылкам: {a0} — их нет в sitemap":
+        "  found only by links: {a0} — they are missing from the sitemap",
+    "  в sitemap, но на них не ведёт ни одной ссылки: {a0} — кандидаты в сироты":
+        "  in the sitemap, but not a single link leads to them: {a0} — orphan candidates",
+    " (обход неполный — часть ссылок не прочитана)":
+        " (the crawl is incomplete — some links were not read)",
+    "  битые ссылки: {a0} — адрес по ссылке отвечает ошибкой":
+        "  broken links: {a0} — the linked address answers with an error",
+    "  ссылки с параметрами (?…) не обходились: {a0}":
+        "  links with parameters (?…) were not followed: {a0}",
+    "Отрисовано браузером: {a0} из {a1}": "Rendered by the browser: {a0} of {a1}",
+    "  не отрисованы — сохранён исходный HTML: {a0}":
+        "  not rendered — the raw HTML was saved: {a0}",
+    "{a0} страниц(ы) похожи на пустой JS-каркас: текст рисует JavaScript, и check его не "
+    "увидит. Повтори с --render":
+        "{a0} page(s) look like empty JS shells: JavaScript draws the text, and check will "
+        "not see it. Rerun with --render",
 }

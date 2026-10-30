@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
@@ -455,6 +456,12 @@ class TestEnglish(FetchCase):
         # Кириллица из адреса страницы — не текст пакета.
         self.assertEqual(re.findall(r"[А-Яа-яЁё]", out.replace("кириллица", "")), [], out)
 
+    def test_crawl_output_is_english_only(self):
+        import re
+        code, out = self.run_cli("--lang", "en", "--crawl")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(re.findall(r"[А-Яа-яЁё]", out.replace("кириллица", "")), [], out)
+
 
 
 class ConsoleSafety(unittest.TestCase):
@@ -481,6 +488,313 @@ class WindowsCommand(unittest.TestCase):
         self.assertIn('"C:\\Разработка\\live"', line)
         self.assertRegex(line, r'--sitemap "C:\\Разработка\\live.sitemap\.xml"')
         self.assertIn("--site https://example.com/", line)
+
+
+# ── --crawl: обход по ссылкам ────────────────────────────────────────────────
+
+def crawl_site(base):
+    """
+    /, /a/, /orphan/ — в sitemap; /b/, /c/, /d/ — только по ссылкам;
+    /missing/ — битая ссылка; /orphan/ — в sitemap, но на неё не ссылается никто.
+    """
+    page = {"Content-Type": "text/html; charset=utf-8"}
+    sitemap = "".join(f"<url><loc>{base}{p}</loc></url>" for p in ("/", "/a/", "/orphan/"))
+    return {
+        "/robots.txt": (200, {"Content-Type": "text/plain"},
+                        (f"User-agent: *\nDisallow: /private/\n\n"
+                         f"Sitemap: {base}/sitemap.xml\n").encode()),
+        "/sitemap.xml": (200, {"Content-Type": "application/xml"}, (
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            + sitemap + "</urlset>").encode()),
+        "/": (200, page, html("Главная", [
+            "/a/", "b/", "/private/p/", "/search?q=1", "http://example.org/x",
+            "mailto:a@b.c", "/img.png", "#top", "/missing/"])),
+        "/a/": (200, page, html("А", ["/", "/b/", "../c/"])),
+        "/b/": (200, page, html("Б", ["/a", base + "/a/#x"])),
+        "/c/": (200, page, html("В", ["/d/"])),
+        "/d/": (200, page, html("Г")),
+        "/orphan/": (200, page, html("Сирота")),
+        "/private/p/": (200, page, html("Секрет")),
+        "/search?q=1": (200, page, html("Поиск")),
+        "/img.png": (200, {"Content-Type": "image/png"}, b"\x89PNG"),
+    }
+
+
+class TestCrawl(FetchCase):
+    make = staticmethod(crawl_site)
+
+    def urls(self):
+        return [r["url"][len(self.server.base):] for r in self.manifest()["pages"]]
+
+    def test_default_stays_sitemap_only(self):
+        code, out = self.run_cli()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.urls(), ["/", "/a/", "/orphan/"])
+        self.assertNotIn("/b/", self.server.log)
+        self.assertEqual({r["found_by"] for r in self.manifest()["pages"]}, {"sitemap"})
+
+    def test_links_are_followed_breadth_first(self):
+        code, out = self.run_cli("--crawl", "--jobs", "4")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.urls(), ["/", "/a/", "/orphan/", "/b/", "/missing/", "/c/", "/d/"])
+        found = {r["url"][len(self.server.base):]: r["found_by"] for r in self.manifest()["pages"]}
+        self.assertEqual(found, {"/": "sitemap", "/a/": "sitemap", "/orphan/": "sitemap",
+                                 "/b/": "link", "/missing/": "link", "/c/": "link",
+                                 "/d/": "link"})
+        self.assertEqual(self.record("/d/")["linked_from"], self.server.base + "/c/")
+        self.assertEqual(self.record("/missing/")["status"], 404)
+
+    def test_what_is_never_requested(self):
+        self.run_cli("--crawl")
+        for path in ("/private/p/", "/search?q=1", "/img.png"):
+            self.assertNotIn(path, self.server.log)
+        # /a и /a/#x — та же страница, что /a/: второй раз не запрашивается.
+        self.assertEqual(self.server.log.count("/a/"), 1)
+        self.assertNotIn("/a", self.server.log)
+        self.assertIn(self.server.base + "/private/p/", self.manifest()["skipped_robots"])
+
+    def test_summary_names_link_only_pages_and_orphans(self):
+        code, out = self.run_cli("--crawl")
+        data = self.manifest()
+        base = self.server.base
+        self.assertEqual(data["link_only"], [base + "/b/", base + "/c/", base + "/d/"])
+        self.assertEqual(data["orphan_candidates"], [base + "/orphan/"])
+        self.assertIn("только по ссылкам: 3", out)
+        self.assertIn("ни одной ссылки: 1", out)
+        self.assertIn(base + "/orphan/", out)
+        self.assertIn("битые ссылки: 1", out)
+
+    def test_the_result_round_trips_into_check(self):
+        self.run_cli("--crawl")
+        saved = {r["final_url"] for r in self.manifest()["pages"] if r.get("file")}
+        pages, _ = core.load_pages(self.out, self.server.base + "/")
+        self.assertEqual({p.url for p in pages}, saved)
+
+    def test_limit_counts_every_request(self):
+        code, out = self.run_cli("--crawl", "--limit", "4")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.urls(), ["/", "/a/", "/orphan/", "/b/"])
+        self.assertEqual(self.manifest()["over_limit"], 2)
+        # Обход неполный — про сирот сказано, что это оценка.
+        self.assertIn("обход неполный", out)
+
+    def test_output_is_deterministic(self):
+        self.run_cli("--crawl", "--jobs", "8")
+        first = self.urls()
+        self.run_cli("--crawl", "--jobs", "1", out=os.path.join(self.dir, "again"))
+        self.out = os.path.join(self.dir, "again")
+        self.assertEqual(self.urls(), first)
+
+
+def crawl_without_sitemap(base):
+    table = crawl_site(base)
+    table["/robots.txt"] = (200, {"Content-Type": "text/plain"}, b"User-agent: *\nDisallow:\n")
+    del table["/sitemap.xml"]
+    return table
+
+
+class TestCrawlWithoutSitemap(FetchCase):
+    make = staticmethod(crawl_without_sitemap)
+
+    def test_crawl_needs_no_sitemap(self):
+        code, out = self.run_cli("--crawl")
+        self.assertEqual(code, 0, out)
+        found = {r["url"][len(self.server.base):]: r["found_by"]
+                 for r in self.manifest()["pages"]}
+        # На главную ссылается /a/ — она найдена и по ссылке.
+        self.assertEqual(found["/"], "link")
+        self.assertEqual(found["/d/"], "link")
+        self.assertNotIn("/orphan/", found)
+        self.assertIn("/sitemap.xml", out)
+        self.assertNotIn("ни одной ссылки", out)
+        self.assertEqual(self.manifest()["orphan_candidates"], [])
+
+
+# ── --render: страницы, которые рисует JavaScript ────────────────────────────
+
+SHELL = (b'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>App</title>'
+         b'<script type="module" src="/app.js"></script></head>'
+         b'<body><div id="root"></div></body></html>')
+
+
+def shell_site(base):
+    page = {"Content-Type": "text/html; charset=utf-8"}
+    sitemap = "".join(f"<url><loc>{base}{p}</loc></url>" for p in ("/", "/slow/", "/fail/"))
+    return {
+        "/robots.txt": (200, {"Content-Type": "text/plain"},
+                        f"User-agent: *\nDisallow:\nSitemap: {base}/sitemap.xml\n".encode()),
+        "/sitemap.xml": (200, {"Content-Type": "application/xml"}, (
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            + sitemap + "</urlset>").encode()),
+        "/": (200, page, SHELL),
+        "/slow/": (200, page, SHELL),
+        "/fail/": (200, page, SHELL),
+        "/js-only/": (200, page, SHELL),
+    }
+
+
+# Поддельный браузер: печатает DOM, как `--dump-dom`, и пишет свои аргументы.
+FAKE_BROWSER = r"""
+import json, os, sys, time
+url = sys.argv[-1]
+here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(here, "argv.log"), "a") as fh:
+    fh.write(json.dumps(sys.argv[1:]) + "\n")
+# Зависает, только когда тест об этом попросил: ждать таймаут в каждом тесте дорого.
+if "/slow/" in url and os.path.exists(os.path.join(here, "hang")):
+    time.sleep(30)
+if "/fail/" in url:
+    sys.exit(3)
+words = " ".join("отрисовано%d" % i for i in range(160))
+dom = ('<html lang="ru"><head><meta charset="utf-8"><title>Отрисовано</title></head>'
+       '<body><main><h1>Отрисовано</h1><p>' + words + '</p>'
+       '<a href="/js-only/">ещё</a></main></body></html>')
+sys.stdout.buffer.write(dom.encode("utf-8"))
+"""
+
+
+class RenderCase(FetchCase):
+    make = staticmethod(shell_site)
+
+    def setUp(self):
+        super().setUp()
+        tools = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tools, True)
+        script = os.path.join(tools, "browser.py")
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write(f"#!{sys.executable}\n" + FAKE_BROWSER)
+        os.chmod(script, 0o755)
+        self.argv_log = os.path.join(tools, "argv.log")
+        self.hang = os.path.join(tools, "hang")
+        if os.name == "nt":
+            self.browser = os.path.join(tools, "browser.bat")
+            with open(self.browser, "w", encoding="utf-8") as fh:
+                fh.write(f'@"{sys.executable}" "{script}" %*\n')
+        else:
+            self.browser = script
+        timeout = mock.patch.object(fetch, "RENDER_TIMEOUT", 3)
+        timeout.start()
+        self.addCleanup(timeout.stop)
+
+    def calls(self):
+        with open(self.argv_log, encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh]
+
+
+class TestRender(RenderCase):
+    def test_the_rendered_dom_is_what_is_saved(self):
+        code, out = self.run_cli("--render", "--browser", self.browser)
+        self.assertEqual(code, 0, out)
+        home = self.record("/")
+        self.assertTrue(home["rendered"])
+        # Факты ответа — о сыром HTML, а не о том, что нарисовал браузер.
+        self.assertEqual(home["bytes"], len(SHELL))
+        self.assertEqual(home["status"], 200)
+        with open(os.path.join(self.out, "index.html"), encoding="utf-8") as fh:
+            saved = fh.read()
+        self.assertIn("Отрисовано", saved)
+        self.assertNotIn('id="root"', saved)
+        pages, _ = core.load_pages(self.out, self.server.base + "/")
+        self.assertIn("Отрисовано", [p.title for p in pages])
+        self.assertIn("Отрисовано браузером: 2 из 3", out)
+
+    def test_the_browser_gets_an_argument_list_not_a_shell_line(self):
+        self.run_cli("--render", "--browser", self.browser)
+        call = [c for c in self.calls() if c[-1] == self.server.base + "/"][0]
+        for flag in ("--headless=new", "--disable-gpu", "--dump-dom",
+                     "--virtual-time-budget=5000"):
+            self.assertIn(flag, call)
+        self.assertEqual(call[-1], self.server.base + "/")
+
+    def test_a_hanging_or_failing_browser_keeps_the_raw_html(self):
+        open(self.hang, "w").close()
+        started = time.monotonic()
+        code, out = self.run_cli("--render", "--browser", self.browser)
+        # Зависший браузер остановлен по таймауту, а не дождан до конца.
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual(code, 0, out)
+        self.assertIn("не уложился", self.record("/slow/")["render_error"])
+        for path, rel in (("/slow/", "slow/index.html"), ("/fail/", "fail/index.html")):
+            rec = self.record(path)
+            self.assertFalse(rec["rendered"])
+            self.assertTrue(rec["render_error"])
+            with open(os.path.join(self.out, *rel.split("/")), "rb") as fh:
+                self.assertEqual(fh.read(), SHELL)
+        self.assertIn("не отрисованы", out)
+
+    def test_render_and_crawl_find_links_that_only_javascript_draws(self):
+        code, out = self.run_cli("--render", "--crawl", "--browser", self.browser)
+        self.assertEqual(code, 0, out)
+        rec = self.record("/js-only/")
+        self.assertEqual(rec["found_by"], "link")
+        self.assertTrue(rec["rendered"])
+
+    def test_shells_get_a_hint_without_render(self):
+        code, out = self.run_cli()
+        self.assertEqual(code, 0, out)
+        self.assertIn("3 страниц(ы) похожи на пустой JS-каркас", out)
+        self.assertIn("--render", out)
+        self.assertTrue(self.record("/")["js_shell"])
+        self.assertEqual(self.manifest()["js_shells"], 3)
+
+    def test_no_hint_when_rendered(self):
+        code, out = self.run_cli("--render", "--browser", self.browser)
+        self.assertNotIn("похожи на пустой JS-каркас", out)
+
+
+class TestRenderRefusals(RenderCase):
+    def test_without_a_browser_render_is_an_input_error(self):
+        with mock.patch.object(fetch.shutil, "which", return_value=None), \
+                mock.patch.object(fetch, "_known_browser_paths", return_value=[]):
+            code, out = self.run_cli("--render")
+        self.assertEqual(code, 2, out)
+        self.assertIn("--browser", out)
+        self.assertIn("Chromium", out)
+        self.assertEqual(self.server.log, [])
+
+    def test_a_missing_browser_path_is_refused(self):
+        code, out = self.run_cli("--render", "--browser", os.path.join(self.dir, "nope"))
+        self.assertEqual(code, 2, out)
+        self.assertEqual(self.server.log, [])
+
+    def test_browser_without_render_is_refused(self):
+        code, out = self.run_cli("--browser", self.browser)
+        self.assertEqual(code, 2, out)
+        self.assertIn("--render", out)
+
+    def test_found_on_path(self):
+        with mock.patch.object(fetch.shutil, "which",
+                               side_effect=lambda n: "/opt/x/chromium" if n == "chromium" else None):
+            self.assertEqual(fetch.find_browser(None), "/opt/x/chromium")
+
+
+class TestRenderUnits(unittest.TestCase):
+    def test_only_http_urls_on_the_site_reach_the_browser(self):
+        site = "https://example.com/"
+        with mock.patch.object(fetch.subprocess, "Popen",
+                               side_effect=AssertionError("браузер не должен запускаться")):
+            for url in ("file:///etc/passwd", "https://evil.org/", "javascript:alert(1)",
+                        "https://example.com/a b", "https://example.com/\n--x",
+                        "--remote-debugging-port=9222"):
+                with self.subTest(url=url):
+                    dom, error = fetch.render("/bin/chrome", url, site)
+                    self.assertIsNone(dom)
+                    self.assertTrue(error)
+
+    def test_no_sandbox_only_for_root_on_linux(self):
+        with mock.patch.object(fetch.sys, "platform", "linux"), \
+                mock.patch.object(fetch.os, "geteuid", create=True, return_value=0):
+            self.assertIn("--no-sandbox", fetch.browser_args("/bin/chrome", "https://e.com/"))
+        with mock.patch.object(fetch.sys, "platform", "linux"), \
+                mock.patch.object(fetch.os, "geteuid", create=True, return_value=1000):
+            self.assertNotIn("--no-sandbox", fetch.browser_args("/bin/chrome", "https://e.com/"))
+        with mock.patch.object(fetch.sys, "platform", "darwin"), \
+                mock.patch.object(fetch.os, "geteuid", create=True, return_value=0):
+            args = fetch.browser_args("/bin/chrome", "https://e.com/")
+        self.assertNotIn("--no-sandbox", args)
+        self.assertEqual(args[0], "/bin/chrome")
+        self.assertEqual(args[-1], "https://e.com/")
+
 
 if __name__ == "__main__":
     unittest.main()

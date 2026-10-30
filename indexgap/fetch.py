@@ -15,6 +15,11 @@
   * `X-Robots-Tag` — в `_headers` (формат Netlify), его читает `check`;
   * код ответа, редиректы, размер, тип — в `fetch.json`;
   * robots.txt и sitemap-файлы — как они лежат на сайте.
+
+`--crawl` идёт ещё и по ссылкам: от главной и адресов sitemap, в ширину.
+Так видно, каких страниц нет в sitemap и на какие из sitemap не ведёт ни
+одна ссылка. `--render` сохраняет DOM, который нарисовал установленный
+Chromium, а не исходный HTML; без браузера флаг — ошибка ввода.
 """
 
 from __future__ import annotations
@@ -24,6 +29,11 @@ import json
 import os
 import re
 import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -33,7 +43,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, unquote, urldefrag, urljoin, urlsplit
 
-from . import __version__, aeo, core, doctor
+from . import __version__, aeo, checks, core, doctor
 from .core import SourceError
 from .i18n import tr
 
@@ -50,6 +60,21 @@ MAX_ROBOTS_BYTES = 500 * 1024
 # Имя, под которым пакет ищет свою группу в robots.txt; иначе действует `*`.
 AGENT = "indexgap"
 RESERVED = {"robots.txt", "_headers", core.FETCH_MANIFEST}
+
+# Ссылки на такие файлы обход не открывает: это не страницы, а скачивать их
+# ради «не HTML» в fetch.json — мегабайты чужого трафика.
+_ASSET = re.compile(r"\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp|tiff?|mp4|webm|mov|avi|mp3|"
+                    r"wav|ogg|m4a|zip|gz|tgz|rar|7z|tar|dmg|exe|pdf|docx?|xlsx?|pptx?|"
+                    r"woff2?|ttf|otf|eot|css|m?js|json|xml|txt|csv|rss|atom)$", re.I)
+
+# Браузер для --render. Ищется, а не ставится: пакет без зависимостей.
+BROWSER_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+                 "chrome", "msedge")
+RENDER_TIMEOUT = 60
+RENDER_BUDGET_MS = 5000
+# Адрес, который уходит браузеру аргументом: только http(s) и печатный ASCII
+# без пробела — после `_quote` иного и не бывает, а флагом он не станет.
+_URL_ARG = re.compile(r"https?://[!-~]+", re.ASCII)
 
 _SAFE = ":/?&=%#+,;@~-._!$'()*[]"
 
@@ -232,10 +257,13 @@ def _robots_path(url: str) -> str:
 class Crawl:
     """Состояние одного обхода: что куда записано, кто чей файл занял."""
 
-    def __init__(self, site: str, out_dir: str, delay: float):
+    def __init__(self, site: str, out_dir: str, delay: float, follow: bool = False,
+                 browser: str = ""):
         self.site = site
         self.out = out_dir
         self.pacer = _Pacer(delay)
+        self.follow = follow
+        self.browser = browser
         self.robots = {"found": False, "rules": {}, "sitemaps": []}
         self.lock = threading.Lock()
         # Имя файла в нижнем регистре → адрес: macOS и Windows не различают
@@ -358,7 +386,8 @@ class Crawl:
         """Скачивает адрес, идёт по редиректам своего хоста, сохраняет HTML."""
         record = {"url": url, "status": None, "final_url": url, "bytes": 0,
                   "content_type": "", "file": None, "redirects": [],
-                  "x_robots_tag": "", "over_2mb": False}
+                  "x_robots_tag": "", "over_2mb": False, "found_by": "sitemap",
+                  "rendered": False, "js_shell": False}
         current = _quote(url)
         for hop in range(MAX_REDIRECTS + 1):
             got = _get(current, MAX_PAGE_BYTES, self.pacer)
@@ -415,12 +444,30 @@ class Crawl:
             else:
                 record["note"] = tr("файл {a0} уже занят адресом {a1}", a0=rel, a1=taken or rel)
             return record
+        data = _as_declared(body, record["content_type"])
+        if self.browser:
+            # Браузер запрашивает страницу ещё раз — пауза та же, что у запроса.
+            self.pacer.wait()
+            dom, error = render(self.browser, _quote(record["final_url"]), self.site)
+            if dom is None:
+                record["render_error"] = error
+            else:
+                data = dom
+                record["rendered"] = True
+                record["rendered_bytes"] = len(dom)
         try:
-            self._write(rel, _as_declared(body, record["content_type"]))
+            path = self._write(rel, data)
         except OSError as exc:
             record["note"] = str(exc)
             return record
         record["file"] = rel
+        try:
+            page = core.load_page(path, self.out, self.site)
+        except (SourceError, ValueError, RecursionError):
+            return record
+        record["js_shell"] = checks.is_shell(page)
+        if self.follow:
+            record["_links"] = _page_links(page.raw or "", record["final_url"], self.site)
         return record
 
 
@@ -451,6 +498,148 @@ def _as_declared(body: bytes, content_type: str) -> bytes:
     return text.encode("utf-8")
 
 
+def _page_links(raw: str, page_url: str, site: str) -> list:
+    """Ссылки страницы на свой сайт: абсолютные, без #фрагмента, в порядке документа."""
+    ex = core._Extractor()
+    try:
+        ex.feed(raw)
+        ex.close()
+    except (ValueError, AssertionError):
+        pass
+    base = page_url
+    if ex.base:
+        try:
+            base = urljoin(page_url, ex.base)
+        except ValueError:
+            pass
+    out = []
+    for href in ex.hrefs:
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "data:")):
+            continue
+        try:
+            absolute = urldefrag(urljoin(base, href))[0]
+        except ValueError:
+            continue
+        if same_site(absolute, site):
+            out.append(absolute)
+    return out
+
+
+# ── браузер для --render ─────────────────────────────────────────────────────
+
+def _known_browser_paths() -> list:
+    """Где браузер лежит, даже если его нет в PATH."""
+    if sys.platform == "darwin":
+        return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+    if os.name == "nt":
+        found = []
+        for env in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+            root = os.environ.get(env)
+            if root:
+                found += [os.path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
+                          os.path.join(root, "Microsoft", "Edge", "Application", "msedge.exe")]
+        return found
+    return []
+
+
+def find_browser(given: str = None) -> str:
+    """Путь к Chromium-браузеру или SourceError с тем, что поставить."""
+    if given:
+        path = given if os.path.isfile(given) else shutil.which(given)
+        if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
+            raise SourceError(tr("--browser {a0}: такого исполняемого файла нет", a0=given))
+        return os.path.abspath(path)
+    for name in BROWSER_NAMES:
+        path = shutil.which(name)
+        if path:
+            return path
+    for path in _known_browser_paths():
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    raise SourceError(tr("--render нужен браузер семейства Chromium, а его нет: ни {a0} в PATH, "
+                         "ни Google Chrome или Chromium на обычном месте. Поставь Google Chrome "
+                         "или Chromium либо укажи путь: --browser /путь/к/chrome",
+                         a0=", ".join(BROWSER_NAMES)))
+
+
+def browser_args(browser: str, url: str, profile: str = "") -> list:
+    """Список аргументов, не строка: shell между пакетом и браузером нет."""
+    args = [browser, "--headless=new", "--disable-gpu"]
+    # Песочница Chromium не стартует под root — это контейнеры и CI на Linux.
+    if sys.platform.startswith("linux") and hasattr(os, "geteuid") and os.geteuid() == 0:
+        args.append("--no-sandbox")
+    args += ["--no-first-run", "--no-default-browser-check"]
+    if profile:
+        # Свой профиль на каждый вызов: открытый Chrome человека не трогается.
+        args.append("--user-data-dir=" + profile)
+    args += ["--user-agent=" + core.USER_AGENT, "--dump-dom",
+             f"--virtual-time-budget={RENDER_BUDGET_MS}", url]
+    return args
+
+
+def _stop(proc) -> None:
+    """Браузер не уложился: остановить его вместе с дочерними процессами."""
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.communicate(timeout=5)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        pass
+
+
+def render(browser: str, url: str, site: str) -> tuple:
+    """
+    (DOM в байтах, "") или (None, причина). Адрес проверяется до запуска:
+    он пришёл из sitemap или ссылки чужого сервера.
+    """
+    if not _URL_ARG.fullmatch(url or "") or not same_site(url, site):
+        return None, tr("адрес не http(s) на сайте {a0} или с пробелом — браузеру не "
+                        "передаётся", a0=site)
+    profile = tempfile.mkdtemp(prefix="indexgap-render-")
+    extra = {} if os.name == "nt" else {"start_new_session": True}
+    try:
+        try:
+            proc = subprocess.Popen(browser_args(browser, url, profile), shell=False,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, **extra)
+        except OSError as exc:
+            return None, tr("браузер не запустился: {a0}", a0=exc)
+        try:
+            out, _ = proc.communicate(timeout=RENDER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _stop(proc)
+            return None, tr("браузер не уложился в {a0} с — остановлен", a0=RENDER_TIMEOUT)
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+    if proc.returncode != 0:
+        return None, tr("браузер завершился с кодом {a0}", a0=proc.returncode)
+    if len(out) > MAX_PAGE_BYTES:
+        return None, tr("отрисованный DOM больше {a0} МБ", a0=MAX_PAGE_BYTES // (1024 * 1024))
+    head = out[:2048].lstrip().lower()
+    if not head.startswith((b"<html", b"<!doctype")):
+        return None, tr("браузер вернул не HTML")
+    if not head.startswith(b"<!doctype"):
+        # --dump-dom отдаёт documentElement без doctype.
+        out = b"<!doctype html>\n" + out.lstrip()
+    return out, ""
+
+
 # ── обход ─────────────────────────────────────────────────────────────────────
 
 def _empty_dir(path: str) -> None:
@@ -464,7 +653,8 @@ def _empty_dir(path: str) -> None:
 
 
 def run(site: str, out_dir: str, sitemaps=None, limit: int = None, all_pages: bool = False,
-        delay: float = 0.5, jobs: int = 4, progress=None) -> dict:
+        delay: float = 0.5, jobs: int = 4, progress=None, follow: bool = False,
+        render_pages: bool = False, browser: str = None) -> dict:
     """Весь обход. Возвращает сводку; манифест и файлы уже на диске."""
     site = check_site(site)
     if all_pages and limit not in (None, 0):
@@ -480,6 +670,9 @@ def run(site: str, out_dir: str, sitemaps=None, limit: int = None, all_pages: bo
         raise SourceError(tr("--jobs от 1 до {a0}", a0=MAX_JOBS))
     if delay < 0:
         raise SourceError(tr("--delay не может быть отрицательным"))
+    if browser and not render_pages:
+        raise SourceError(tr("--browser задаёт браузер для --render — без --render он не нужен"))
+    found_browser = find_browser(browser) if render_pages else ""
     given = list(sitemaps or ())
     for source in given:
         if not source.startswith(("http://", "https://")):
@@ -490,12 +683,114 @@ def run(site: str, out_dir: str, sitemaps=None, limit: int = None, all_pages: bo
                                  "не ходит", a0=source, a1=site))
     created = not os.path.exists(out_dir)
     _empty_dir(out_dir)
-    crawl = Crawl(site, out_dir, delay)
+    crawl = Crawl(site, out_dir, delay, follow=follow, browser=found_browser)
     try:
         return _crawl(crawl, given, limit, jobs, progress)
     except SourceError:
         crawl.undo(created)
         raise
+
+
+def _fetch_all(crawl: Crawl, urls: list, jobs: int, progress, total: int) -> list:
+    """Адреса параллельно; записи — в том порядке, в каком адреса пришли."""
+    def one(url):
+        record = crawl.visit(url)
+        with crawl.lock:
+            crawl.done += 1
+            done = crawl.done
+        if progress and done % 50 == 0 and done < total:
+            progress(done, total)
+        return record
+
+    pool = ThreadPoolExecutor(max_workers=jobs)
+    try:
+        futures = [pool.submit(one, url) for url in urls]
+        records = [future.result() for future in futures]
+    except KeyboardInterrupt:
+        # Без отмены Ctrl-C ждал бы, пока скачается вся очередь.
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
+    return records
+
+
+def _follow(crawl: Crawl, candidates: list, limit: int, jobs: int, progress,
+            skipped: list) -> dict:
+    """
+    Обход в ширину: главная и sitemap, потом их ссылки, потом ссылки ссылок.
+    Очередь разбирается слоями, и каждый слой — в порядке постановки, поэтому
+    порядок записей не зависит от того, какой поток ответил первым.
+    """
+    site = crawl.site
+    sitemap_keys = {core.url_key(u) for u in candidates}
+    queued, pending = set(), []
+    blocked = {core.url_key(u) for u in skipped}
+    with_query = set()
+
+    def enqueue(url, how, parent):
+        key = core.url_key(url)
+        if key not in queued:
+            queued.add(key)
+            pending.append((url, how, parent))
+
+    if crawl.blocked(site):
+        if core.url_key(site) not in blocked:
+            skipped.append(site)
+    else:
+        enqueue(site, "start", None)
+    for url in candidates:
+        enqueue(url, "sitemap", None)
+
+    records, linked = [], set()
+    while pending and (limit == 0 or len(records) < limit):
+        room = len(pending) if limit == 0 else limit - len(records)
+        batch, pending = pending[:room], pending[room:]
+        got = _fetch_all(crawl, [u for u, _, _ in batch], jobs, progress,
+                         len(records) + len(batch) + len(pending))
+        for (url, how, parent), record in zip(batch, got):
+            record["found_by"] = how
+            if parent:
+                record["linked_from"] = parent
+            records.append(record)
+            own = {core.url_key(url), core.url_key(record["final_url"])}
+            queued.update(own)
+            for link in record.pop("_links", ()):
+                key = core.url_key(link)
+                if key in own:
+                    continue
+                linked.add(key)
+                if key in queued or key in blocked or key in with_query:
+                    continue
+                parts = urlsplit(link)
+                # Параметры дают бесконечные страницы фильтров и календарей;
+                # адрес с ними обходится, только если он есть в sitemap.
+                if parts.query:
+                    with_query.add(key)
+                elif _ASSET.search(parts.path):
+                    queued.add(key)
+                elif crawl.blocked(link):
+                    blocked.add(key)
+                    skipped.append(link)
+                else:
+                    enqueue(link, "link", record["final_url"])
+
+    # Ссылка на адрес с редиректом — это ссылка и на то, куда он ведёт.
+    for record in records:
+        if core.url_key(record["url"]) in linked:
+            linked.add(core.url_key(record["final_url"]))
+    for record in records:
+        if (core.url_key(record["url"]) in sitemap_keys
+                or core.url_key(record["final_url"]) in sitemap_keys):
+            record["found_by"] = "sitemap"
+        elif record["found_by"] == "start" and core.url_key(record["url"]) in linked:
+            record["found_by"] = "link"
+    home = core.url_key(site)
+    link_only = [r["url"] for r in records if r["file"] and r["found_by"] != "sitemap"]
+    orphans = [u for u in candidates
+               if core.url_key(u) not in linked and core.url_key(u) != home]
+    return {"records": records, "over_limit": len(pending),
+            "link_only": link_only if candidates else [],
+            "orphan_candidates": orphans, "skipped_query": len(with_query)}
 
 
 def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
@@ -512,9 +807,13 @@ def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
         given = own or [urljoin(site, "/sitemap.xml")]
     found = doctor.read_sitemaps(given, fetcher=crawl.fetch_sitemap)
     if not found["urls"]:
-        raise SourceError(tr("sitemap не прочитан: {a0}",
-                             a0=(found["errors"] or [", ".join(given)])[0]))
-    notes += [tr("sitemap прочитан не целиком: {a0}", a0=e) for e in found["errors"]]
+        reason = (found["errors"] or [", ".join(given)])[0]
+        if not crawl.follow:
+            raise SourceError(tr("sitemap не прочитан: {a0}", a0=reason))
+        notes.append(tr("sitemap не прочитан: {a0} — обход только по ссылкам от главной",
+                        a0=reason))
+    else:
+        notes += [tr("sitemap прочитан не целиком: {a0}", a0=e) for e in found["errors"]]
 
     candidates, other_host, skipped = [], [], []
     seen = set()
@@ -528,27 +827,14 @@ def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
             skipped.append(url)
         else:
             candidates.append(url)
-    chosen = candidates if limit == 0 else candidates[:limit]
-    over_limit = len(candidates) - len(chosen)
-
-    def one(url):
-        record = crawl.visit(url)
-        with crawl.lock:
-            crawl.done += 1
-            done = crawl.done
-        if progress and done % 50 == 0 and done < len(chosen):
-            progress(done, len(chosen))
-        return record
-
-    pool = ThreadPoolExecutor(max_workers=jobs)
-    try:
-        futures = [pool.submit(one, url) for url in chosen]
-        records = [future.result() for future in futures]
-    except KeyboardInterrupt:
-        # Без отмены Ctrl-C ждал бы, пока скачается вся очередь.
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    pool.shutdown()
+    links = {"link_only": [], "orphan_candidates": [], "skipped_query": 0}
+    if crawl.follow:
+        links = _follow(crawl, candidates, limit, jobs, progress, skipped)
+        records, over_limit = links.pop("records"), links.pop("over_limit")
+    else:
+        chosen = candidates if limit == 0 else candidates[:limit]
+        over_limit = len(candidates) - len(chosen)
+        records = _fetch_all(crawl, chosen, jobs, progress, len(chosen))
 
     headers = [(urlsplit(r["final_url"]).path or "/", r["x_robots_tag"])
                for r in records if r["file"] and r["x_robots_tag"]]
@@ -562,6 +848,9 @@ def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
         "site": site,
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "limit": limit,
+        "crawl": crawl.follow,
+        # Только имя: полный путь к браузеру — это путь на машине человека.
+        "render": {"browser": os.path.basename(crawl.browser)} if crawl.browser else None,
         "robots": robots_info,
         "sitemaps": [{"url": url, "file": rel} for url, rel in crawl.sitemap_files.items()],
         "root_sitemaps": root_sitemaps,
@@ -569,6 +858,8 @@ def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
         "other_host": other_host,
         "skipped_robots": skipped,
         "over_limit": over_limit,
+        "js_shells": sum(1 for r in records if r["js_shell"]),
+        **links,
         "notes": notes,
         "pages": records,
     }
@@ -620,6 +911,32 @@ def next_command(out_dir: str, manifest: dict) -> str:
     return " ".join(words)
 
 
+def _print_links(manifest: dict, records: list) -> None:
+    """Что дал обход по ссылкам сверх sitemap."""
+    link_only = manifest.get("link_only") or []
+    if link_only:
+        print(tr("  найдены только по ссылкам: {a0} — их нет в sitemap", a0=len(link_only)))
+        for url in link_only[:5]:
+            print(f"      {_safe(url)}")
+    orphans = manifest.get("orphan_candidates") or []
+    if orphans:
+        line = tr("  в sitemap, но на них не ведёт ни одной ссылки: {a0} — кандидаты в сироты",
+                  a0=len(orphans))
+        if manifest.get("over_limit"):
+            line += tr(" (обход неполный — часть ссылок не прочитана)")
+        print(line)
+        for url in orphans[:5]:
+            print(f"      {_safe(url)}")
+    broken = [r for r in records if r.get("found_by") == "link"
+              and r["status"] and r["status"] >= 400]
+    if broken:
+        print(tr("  битые ссылки: {a0} — адрес по ссылке отвечает ошибкой", a0=len(broken)))
+        for r in broken[:5]:
+            print(f"      {_safe(r['url'])} ({r['status']}) ← {_safe(r.get('linked_from', ''))}")
+    if manifest.get("skipped_query"):
+        print(tr("  ссылки с параметрами (?…) не обходились: {a0}", a0=manifest["skipped_query"]))
+
+
 def print_summary(out_dir: str, manifest: dict) -> int:
     """Сводка обхода. Код возврата: 1, если проверять нечего."""
     records = manifest["pages"]
@@ -662,6 +979,19 @@ def print_summary(out_dir: str, manifest: dict) -> int:
         print(tr("  ответ 200, но не сохранены: {a0}", a0=len(unsaved)))
         for r in unsaved[:5]:
             print(f"      {_safe(r['final_url'])} — {_safe(r['note'])}")
+    if manifest.get("crawl"):
+        _print_links(manifest, records)
+    if manifest.get("render"):
+        rendered = [r for r in saved if r.get("rendered")]
+        failed = [r for r in saved if r.get("render_error")]
+        print(tr("Отрисовано браузером: {a0} из {a1}", a0=len(rendered), a1=len(saved)))
+        if failed:
+            print(tr("  не отрисованы — сохранён исходный HTML: {a0}", a0=len(failed)))
+            for r in failed[:5]:
+                print(f"      {_safe(r['final_url'])} — {_safe(r['render_error'])}")
+    elif manifest.get("js_shells"):
+        print(tr("{a0} страниц(ы) похожи на пустой JS-каркас: текст рисует JavaScript, "
+                 "и check его не увидит. Повтори с --render", a0=manifest["js_shells"]))
     print(tr("Записано: {a0}", a0=os.path.join(out_dir, core.FETCH_MANIFEST)))
     if not saved:
         print(tr("Ни одной страницы не сохранено — проверять нечего."))
