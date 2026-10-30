@@ -368,6 +368,37 @@ def install_skills(target_root: str) -> list:
     return written
 
 
+def stale_skills(project_root: str) -> list:
+    """
+    Скиллы indexgap в проекте, которые не совпадают ни с одним языком
+    установленной версии: init положил их раньше, а пакет с тех пор обновился.
+    """
+    source = skills_source()
+    stale = []
+    base = os.path.join(project_root, SKILL_DIR)
+    if not os.path.isdir(base):
+        return stale
+    for name in sorted(os.listdir(source)):
+        mine = os.path.join(base, name, "SKILL.md")
+        if not name.startswith("indexgap-") or not os.path.isfile(mine):
+            continue
+        try:
+            with open(mine, "rb") as fh:
+                have = fh.read()
+        except OSError:
+            continue
+        current = []
+        for candidate in sorted(os.listdir(os.path.join(source, name))):
+            if candidate.startswith("SKILL") and candidate.endswith(".md"):
+                with open(os.path.join(source, name, candidate), "rb") as fh:
+                    current.append(fh.read())
+        # Git на Windows меняет концы строк — сравниваем без них.
+        norm = lambda b: b.replace(b"\r\n", b"\n")
+        if norm(have) not in {norm(c) for c in current}:
+            stale.append(name)
+    return stale
+
+
 def write_config(root: str, detected: dict, force: bool = False) -> tuple:
     """
     Пишет `indexgap.json`. Существующий не трогает без `--force`:

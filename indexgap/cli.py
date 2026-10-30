@@ -479,6 +479,22 @@ def _sitemap_hreflang(args, pages) -> None:
                  "его нет", a0=given))
 
 
+def _warn_stale_skills(config_path: str) -> None:
+    """
+    `pipx upgrade` обновляет пакет, но не скиллы, которые init положил в
+    проект: агент там читает инструкции старой версии.
+    """
+    root = os.path.dirname(os.path.abspath(config_path)) if config_path else os.getcwd()
+    try:
+        stale = install.stale_skills(root)
+    except OSError:
+        return
+    if stale:
+        print(tr("  ! скиллы в .claude/skills/ от другой версии indexgap: {a0}. "
+                 "Обнови их командой `indexgap init` в корне проекта — indexgap.json "
+                 "она не трогает", a0=", ".join(stale)))
+
+
 def _analyse(args, pages=None):
     """
     Общая часть `check`, `brief` и `diff`: загрузить страницы, применить
@@ -489,8 +505,9 @@ def _analyse(args, pages=None):
     бы задание чинить то, чего в отчёте нет. `diff` приносит страницы уже
     загруженными: обе сборки он читает сам, для сравнения страниц.
     """
-    apply_project_defaults(args)
+    config_path = apply_project_defaults(args)
     if pages is None:
+        _warn_stale_skills(config_path)
         pages = _load(args)
     rows = _read_rows(args)
     project = settings.resolve(args.root, pages, rows, args.keyword, args.config)
