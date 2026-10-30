@@ -471,4 +471,21 @@ MESSAGES = {
         "path to indexgap.json; looked up next to the new build by default",
     "не прогонять проверки check по обеим сборкам — только сравнение страниц":
         "do not run the check findings on both builds — compare pages only",
+    "  скачано {a0} из {a1}…": "  fetched {a0} of {a1}…",
+    "URL sitemap; по умолчанию — из robots.txt, иначе /sitemap.xml":
+        "sitemap URL; by default from robots.txt, otherwise /sitemap.xml",
+    "адрес сайта целиком, со схемой": "the full site address, with the scheme",
+    "куда сложить страницы; каталог должен быть новым или пустым":
+        "where to put the pages; the directory must be new or empty",
+    "пауза между запросами одного потока, в секундах":
+        "pause between requests of one worker, in seconds",
+    "скачать все страницы из sitemap, без потолка":
+        "fetch every page in the sitemap, with no cap",
+    "скачать живой сайт по sitemap в каталог для check — когда сборки нет. Ходит в сеть":
+        "download a live site from its sitemap into a directory for check — when "
+        "there is no build. Uses the network",
+    "сколько запросов идёт одновременно, от 1 до {a0}":
+        "how many requests run at once, 1 to {a0}",
+    "сколько страниц скачать, по умолчанию {a0}; 0 — все, только вместе с --all":
+        "how many pages to fetch, {a0} by default; 0 means all, only together with --all",
 }

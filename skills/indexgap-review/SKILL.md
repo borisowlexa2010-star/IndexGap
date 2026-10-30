@@ -50,6 +50,15 @@ The report is written to `indexgap-check.html` and `indexgap-check.json`.
 `--out report.json` writes the data to `report.json` and the HTML beside it, to
 `report.html`. `doctor` writes to its own files and never overwrites this one.
 
+No build, only a URL — a client's site under audit, a CMS you cannot build
+locally: run `indexgap fetch https://example.com --out-dir ./live` first, then
+the `check` command that `fetch` prints at the end. It downloads the pages in
+the sitemap (500 at most by default, obeying robots.txt and never leaving the
+host) and keeps the status codes, redirects and `X-Robots-Tag` headers. Fixes
+from such a report belong to the site owner, in the source; never edit the
+downloaded files. When a build exists, check the build: `fetch` cannot see text
+that JavaScript renders.
+
 ## What to look at first
 
 Start with `unsupported-number` and `unfilled-slot`, wherever they stand in the

@@ -9,6 +9,7 @@
     indexgap sitemap ./content --site https://example.com --out-dir ./public
     indexgap notify  ./content --site https://example.com --key <свой-ключ>
     indexgap doctor  ./content --site https://example.com --sitemap ./public/sitemap.xml
+    indexgap fetch   https://example.com --out-dir ./live   ← когда сборки нет
 
 Ничего не отправляется наружу без явного флага --send.
 
@@ -26,7 +27,7 @@ import sys
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
-from . import (aeo, checks, cite, content, doctor, engines, freshness, generate,
+from . import (aeo, checks, cite, content, doctor, engines, fetch, freshness, generate,
                install, portfolio, profiles, publish, repair, report, settings,
                sources)
 from . import diff as diffs
@@ -1087,6 +1088,17 @@ def cmd_doctor(args):
     return 0
 
 
+def cmd_fetch(args):
+    """Живой сайт → каталог для `check`, когда сборки нет."""
+    def progress(done, total):
+        print(tr("  скачано {a0} из {a1}…", a0=done, a1=total), flush=True)
+
+    manifest = fetch.run(args.site, args.out_dir, sitemaps=args.sitemap, limit=args.limit,
+                         all_pages=args.all, delay=args.delay, jobs=args.jobs,
+                         progress=progress)
+    return fetch.print_summary(args.out_dir, manifest)
+
+
 def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:
     """
     Какие именно страницы расходятся с sitemap.
@@ -1899,6 +1911,26 @@ def build_parser():
     p.add_argument("--out", default="indexgap-doctor.html",
                    help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("fetch",
+                       help=tr("скачать живой сайт по sitemap в каталог для check — "
+                               "когда сборки нет. Ходит в сеть"))
+    p.add_argument("site", help=tr("адрес сайта целиком, со схемой"))
+    p.add_argument("--out-dir", required=True,
+                   help=tr("куда сложить страницы; каталог должен быть новым или пустым"))
+    p.add_argument("--sitemap", action="append",
+                   help=tr("URL sitemap; по умолчанию — из robots.txt, иначе /sitemap.xml"))
+    p.add_argument("--limit", type=int, default=None,
+                   help=tr("сколько страниц скачать, по умолчанию {a0}; 0 — все, "
+                           "только вместе с --all", a0=fetch.DEFAULT_LIMIT))
+    p.add_argument("--all", action="store_true",
+                   help=tr("скачать все страницы из sitemap, без потолка"))
+    p.add_argument("--delay", type=float, default=0.5,
+                   help=tr("пауза между запросами одного потока, в секундах"))
+    p.add_argument("--jobs", type=int, default=4,
+                   help=tr("сколько запросов идёт одновременно, от 1 до {a0}",
+                           a0=fetch.MAX_JOBS))
+    p.set_defaults(func=cmd_fetch)
     ap._subparsers_map = dict(sub.choices)
     return ap
 

@@ -141,13 +141,17 @@ def _child_sitemap(source: str, loc: str) -> tuple:
     return "", tr("{a0}: дочерний файл не найден рядом с индексом", a0=loc)
 
 
-def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
+def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
+                 fetcher=None) -> dict:
     """
     Читает sitemap с диска или по URL, разворачивает sitemap-index.
 
     Возвращает {"urls": [...], "error": "..."} — раньше при любой ошибке
     возвращался пустой список, и опечатка в пути выглядела как «сайт
     не попал в sitemap целиком».
+
+    `fetcher(source) -> bytes` заменяет чтение: `fetch` так сохраняет каждый
+    файл индекса и не идёт за редиректом на чужой хост. Беда — SourceError.
     """
     from .core import parse_xml
     if _depth > 3:
@@ -165,7 +169,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
             a0=MAX_SITEMAPS)}
     _seen.add(key)
     try:
-        root = parse_xml(_fetch_sitemap(source))
+        root = parse_xml((fetcher or _fetch_sitemap)(source))
     except SourceError as exc:
         text = str(exc)
         return {"urls": [], "error": text if source in text else f"{source}: {text}"}
@@ -181,7 +185,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
                 continue
             child, problem = _child_sitemap(source, loc.strip())
             if child:
-                result = read_sitemap(child, _depth + 1, _seen)
+                result = read_sitemap(child, _depth + 1, _seen, fetcher)
                 urls.extend(result["urls"])
                 alternates.update(result.get("alternates") or {})
                 problem = result["error"]
@@ -221,7 +225,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None) -> dict:
 URL_COLUMN_HINTS = sources.URL_COLUMN_HINTS
 
 
-def read_sitemaps(sources) -> dict:
+def read_sitemaps(sources, fetcher=None) -> dict:
     """
     Несколько sitemap-файлов сразу: объединённый список адресов и ошибки по каждому.
 
@@ -233,7 +237,7 @@ def read_sitemaps(sources) -> dict:
         sources = [sources]
     urls, seen, errors, alternates = [], set(), [], {}
     for source in sources or ():
-        result = read_sitemap(source)
+        result = read_sitemap(source, fetcher=fetcher)
         if result.get("error"):
             errors.append(f"{source}: {result['error']}")
         for url in result.get("urls") or ():
