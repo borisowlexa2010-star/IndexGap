@@ -9,6 +9,8 @@
 дважды именно потому, что теста на него не было.
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -20,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import language  # noqa: F401  — закрепляет русский язык вывода
 
-from indexgap import aeo, checks, content, core, doctor, engines, generate, publish, report
+from indexgap import aeo, checks, cli, content, core, doctor, engines, generate, publish, report
 from indexgap.core import SourceError
 
 SITE = "https://example.com"
@@ -560,6 +562,33 @@ class TestGenerate(Fixture):
                  {"keyword": "москва квартир аренда"}]
         audit = generate.audit_dataset(rows, ["keyword"], "keyword")
         self.assertTrue(audit["near_synonyms"])
+
+    def test_every_rejection_has_a_stable_code(self):
+        """`reason` переводится, по нему CI не разберёт; `code` — один на всех языках."""
+        rows = [{"keyword": "", "city": "Сочи"},
+                {"keyword": "отели сочи", "city": "Сочи"},
+                {"keyword": "отели сочи", "city": "Сочи"},
+                {"keyword": "сочи отели", "city": "Сочи"},
+                {"keyword": "чай купить", "city": "Москва"},
+                {"keyword": "чай-купить", "city": "Москва"},
+                {"keyword": "!!!", "city": "Москва"},
+                {"keyword": "кофе купить", "city": ""}]
+        audit = generate.audit_dataset(rows, ["keyword", "city"], "keyword",
+                                       {"min_fields_filled": 1.0})
+        codes = {r["keyword"]: r["code"] for r in audit["rejected"]}
+        self.assertEqual(codes, {"": "empty-keyword", "отели сочи": "exact-duplicate",
+                                 "сочи отели": "same-intent", "чай-купить": "slug-collision",
+                                 "!!!": "no-letters-or-digits", "кофе купить": "too-few-fields"})
+        self.assertTrue(all(r["reason"] for r in audit["rejected"]))
+
+    def test_plan_json_carries_the_code(self):
+        self.write("k.csv", "keyword\nчай\nчай\n")
+        out = os.path.join(self.dir, "plan.json")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["plan", os.path.join(self.dir, "k.csv"), "--json", out]), 0)
+        rejected = json.load(open(out, encoding="utf-8"))["rejected"]
+        self.assertEqual([(r["code"], r["reason"]) for r in rejected],
+                         [("exact-duplicate", "точный дубль ключа")])
 
 
 # ── publish ───────────────────────────────────────────────────────────────────
