@@ -128,9 +128,39 @@ polite. `/a/b/` is saved as `a/b/index.html`, `/a/b` as `a/b.html`, and
 headers land in `_headers`, which `check` already reads; robots.txt and the
 sitemap files are saved next to the pages. Pages over 2 MB (where Googlebot
 stops reading) are flagged; 4xx/5xx and non-HTML responses are recorded but not
-saved. The summary prints the exact `check` command to run next. What it
-cannot see: anything rendered by JavaScript, URLs with query strings, and pages
-that are not in the sitemap.
+saved. The summary prints the exact `check` command to run next.
+
+```bash
+indexgap fetch https://example.com --out-dir ./live --crawl    # follow links too
+indexgap fetch https://example.com --out-dir ./live --render   # save what Chrome renders
+```
+
+`--crawl` also follows links, breadth first: the home page and the sitemap
+URLs come first, then the links they contain, then the links of those, under
+the same `--limit`, `--delay`, `--jobs` and robots.txt rules. Only links to the
+same host are followed (`www.` counts as the same host), never links with a
+query string (unless the URL is in the sitemap) and never links to images,
+PDFs, scripts and other files. `fetch.json` records `found_by` (`sitemap` or
+`link`, plus `linked_from` for a link) for every URL, and the summary lists the
+pages found only by links (they are missing from the sitemap), the sitemap URLs
+no fetched page links to (orphan candidates; an estimate when `--limit` cut the
+crawl short) and the links that answer 4xx/5xx. With `--crawl` a missing
+sitemap is not an error: the crawl starts from the home page alone.
+
+Without `--render`, pages whose HTML is an empty JavaScript shell are counted
+and the summary says so. `--render` runs an installed Chromium-family browser
+(`google-chrome`, `chromium`, `chromium-browser`, `chrome` or `msedge` on PATH,
+or Chrome/Chromium in `/Applications` on macOS; `--browser PATH` to pick one)
+as `--headless=new --dump-dom --virtual-time-budget=5000` on each saved page
+and saves the rendered DOM instead of the raw HTML; status, size and headers
+in `fetch.json` stay those of the raw response, and the page gets
+`rendered: true`. Each page gets a fresh throwaway profile and 60 seconds; a
+browser that hangs is killed and the raw HTML is kept. Without a browser
+`--render` stops before the first request (exit 2) and says what to install.
+The browser loads what the page loads — scripts, fonts, APIs — including from
+other hosts, and it does not consult robots.txt for them. What `fetch` still
+cannot see: URLs with query strings that are not in the sitemap, and, without
+`--crawl`, pages that are not in the sitemap.
 
 `sitemap` and `notify` keep their state in `.indexgap-manifest.json`, next to
 `indexgap.json`: when each page last changed and what has been submitted.
