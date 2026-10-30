@@ -69,6 +69,42 @@ jobs:
           site: https://demo.example
           baseline: ${{ runner.temp }}/baseline.json
           artifact: indexgap-report-baseline
+      # С old-root тот же шаг сравнивает сборки: база гасит находки check,
+      # но страницу, которой в новой сборке нет, гасить нечем.
+      - name: Previous builds of the demo site, one with a page the new one lost
+        shell: bash
+        run: |
+          cp -R examples/demo-site "$RUNNER_TEMP/old-more"
+          mkdir -p "$RUNNER_TEMP/old-more/rent/bonn"
+          cp examples/demo-site/rent/berlin/index.html "$RUNNER_TEMP/old-more/rent/bonn/index.html"
+          cp -R examples/demo-site "$RUNNER_TEMP/old-same"
+      - name: A page lost since the previous build fails it, even with the baseline
+        id: diff
+        continue-on-error: true
+        uses: ./
+        with:
+          root: examples/demo-site
+          site: https://demo.example
+          baseline: ${{ runner.temp }}/baseline.json
+          old-root: ${{ runner.temp }}/old-more
+          artifact: indexgap-report-diff
+      - name: That run must have failed on the diff and kept its data
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.diff.outcome }}
+          DIFF_DATA: ${{ steps.diff.outputs.diff-data }}
+        run: |
+          test "$OUTCOME" = "failure"
+          grep -q '"page-removed"' "$DIFF_DATA"
+          grep -q '/rent/bonn/' "$DIFF_DATA"
+      - name: Against an identical previous build nothing breaks, and it passes
+        uses: ./
+        with:
+          root: examples/demo-site
+          site: https://demo.example
+          baseline: ${{ runner.temp }}/baseline.json
+          old-root: ${{ runner.temp }}/old-same
+          artifact: indexgap-report-same
 
   # Сайт документации и обёртка плагина собираются из пакета, а лежат в
   # репозитории готовыми. Забыть пересобрать — значит опубликовать страницы,
