@@ -538,6 +538,7 @@ def link_graph(pages: list, home_url: str = None) -> dict:
     by_hreflang = defaultdict(set)
     unresolved = set()
     unresolved_from = defaultdict(set)
+    unresolved_dirs = set()
     for p in pages:
         targets = set()
         for link in p.links:
@@ -550,6 +551,8 @@ def link_graph(pages: list, home_url: str = None) -> dict:
             elif not target:
                 unresolved.add(key)
                 unresolved_from[p.url].add(key)
+                if urlsplit(link).path.endswith("/"):
+                    unresolved_dirs.add(key)
         # Заглушка-редирект ведёт туда, куда перебрасывает, — хотя ссылки <a>
         # в ней нет. Алиасы Hugo так и устроены, и всё за ними считалось
         # недостижимым.
@@ -618,6 +621,8 @@ def link_graph(pages: list, home_url: str = None) -> dict:
         "depth": depth,
         "unresolved": sorted(unresolved),
         "unresolved_from": {u: sorted(k) for u, k in unresolved_from.items()},
+        # Ссылка со слешем в конце — на каталог: `/node.js/` — страница, а не файл.
+        "unresolved_dirs": sorted(unresolved_dirs),
         "home_redirected_from": redirected_from,
         # Сама заглушка — не страница: на неё не должны вести ссылки, и из неё
         # никуда не нужно доходить.
@@ -657,7 +662,11 @@ def build_routes(root: str) -> tuple:
         dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP]
         rel = os.path.relpath(current, root)
         base = [] if rel == "." else rel.replace(os.sep, "/").split("/")
-        names = [base] + [base + [os.path.splitext(f)[0]] for f in files]
+        # Каталог — маршрут, только если в нём есть страница или файл маршрута
+        # (`index.html`, `page.js`): `/downloads/` с одним PDF внутри на живом
+        # хостинге — 404. Сам файл — тоже адрес: `/download/setup.exe`.
+        names = ([[]] if not base else []) + [base + [os.path.splitext(f)[0]] for f in files]
+        literal.update("/" + "/".join(base + [f]) for f in files)
         seen += len(files) + 1
         for segs in names:
             if segs and segs[-1] in _ROUTE_LEAF:
@@ -685,7 +694,25 @@ def _route_matches(pattern: tuple, segs: list) -> bool:
     return len(segs) == len(pattern)
 
 
-def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
+# Расширения файлов, а не страниц. Точка в слаге — не расширение: `/v1.2/`,
+# `/gost-12.4.011/`, `/asp.net` — страницы, и о пропаже таких молчали.
+ASSET_EXTS = frozenset("""
+    html htm xhtml xml json jsonld txt pdf png jpg jpeg gif svg webp avif bmp tif tiff ico
+    heic css js mjs cjs map woff woff2 ttf otf eot zip gz tgz tar bz2 xz 7z rar rss atom
+    csv tsv md yml yaml toml ics vcf epub doc docx xls xlsx ppt pptx odt mp3 mp4 m4a ogg
+    wav webm mov avi wasm webmanifest
+""".split())
+
+
+def _is_file_link(key: str, dirs: set) -> bool:
+    last = key.split("?", 1)[0].rsplit("/", 1)[-1]
+    if "." not in last or key in dirs:
+        return False
+    return last.rsplit(".", 1)[-1].lower() in ASSET_EXTS
+
+
+def broken_links(pages: list, graph: dict, base_path: str = "",
+                 case_twins: dict = None) -> dict:
     """
     Ссылки на страницы, которых в сборке нет: страница → пути.
 
@@ -693,9 +720,18 @@ def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
     хотя бы одна страница лежит в том же каталоге или каталог сам страница.
     Проверяли только /blog — ссылка в /pricing ведёт в другую часть сайта,
     а не в пустоту. Ассеты, ленты и sitemap — не страницы: у них остаётся
-    расширение после того, как `url_key` снял `.html`.
+    известное расширение после того, как `url_key` снял `.html`.
+
+    Ссылка, которая совпала со страницей только без учёта регистра
+    (`/blog/Tag/` при каталоге `tag/`), — не пропажа, а опечатка: GitHub
+    Pages, S3 и nginx на Linux отдают на неё 404. Такие ссылки уходят в
+    `case_twins` (страница → [(ссылка, адрес страницы)]), а не в битые.
     """
     keys = {p.key for p in pages}
+    folded = {}
+    for p in pages:
+        folded.setdefault(p.key.lower(), p.url)
+    dirs = set(graph.get("unresolved_dirs") or ())
     sections = keys | {_parent(k) for k in keys}
     paths = [os.path.dirname(os.path.abspath(p.path)) for p in pages if p.path]
     try:
@@ -720,7 +756,12 @@ def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
         bad = []
         for key in targets:
             path = key.split("?", 1)[0]
-            if "." in path.rsplit("/", 1)[-1]:
+            twin = folded.get(path.lower())
+            if twin:
+                if case_twins is not None:
+                    case_twins.setdefault(source, []).append((path, twin))
+                continue
+            if _is_file_link(key, dirs):
                 continue
             if base:
                 # Сайт под префиксом: всё вне него — другая часть домена
@@ -736,6 +777,43 @@ def broken_links(pages: list, graph: dict, base_path: str = "") -> dict:
         if bad:
             found[source] = sorted(set(bad))
     return found
+
+
+def _local(path: str) -> str:
+    return "/" + path.split("/", 3)[-1] if path.count("/") >= 3 else "/"
+
+
+def wrong_form_issues(pages: list, case_twins: dict) -> list:
+    """
+    Ссылки, которые ведут на страницу сборки, но в форме, которую хостинг не
+    отдаёт: другой регистр букв (`case_twins` из `broken_links`) или чужая
+    форма адреса — `/about.html` при `about/index.html`, `/faq/` при
+    `faq.html` (её отмечает разбор, `_wrong_forms` страницы).
+    """
+    by_key = {p.key: p.url for p in pages}
+    issues = []
+    for page in pages:
+        written = []
+        for path, twin in sorted(set(case_twins.get(page.url, ()))):
+            written.append(tr("{a0} вместо {a1}", a0=_local(path), a1=urlsplit(twin).path))
+        if written:
+            more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
+            issues.append(("warning", page.url, "wrong-link-form", tr(
+                "ссылки расходятся со страницей регистром букв: {a0}{a1}. GitHub Pages, "
+                "S3 и nginx на Linux различают регистр и отдают на них 404",
+                a0=", ".join(written[:3]), a1=more)))
+        written = sorted({tr("{a0} вместо {a1}", a0=path, a1=urlsplit(by_key[key]).path)
+                          for key, path in page.__dict__.get("_wrong_forms", ())
+                          if key in by_key})
+        if written:
+            more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
+            issues.append(("warning", page.url, "wrong-link-form", tr(
+                "ссылки в форме, которой нет в сборке: {a0}{a1}. Сервер сводит формы "
+                "адреса только по своим правилам: GitHub Pages и S3 отдают "
+                "`about/index.html` по /about/, но не по /about.html, а `faq.html` — "
+                "по /faq.html, но не по /faq/; на такие ссылки они отвечают 404",
+                a0=", ".join(written[:3]), a1=more)))
+    return issues
 
 
 def _other_host(pages: list) -> str:
@@ -872,6 +950,7 @@ SHELL_DEPENDENT = {
     "thin", "low-uniqueness", "template-skeleton", "same-opening",
     "near-duplicate", "similar", "no-headings", "no-h1", "many-h1",
     "orphan", "unreachable", "deep", "description-length", "broken-link",
+    "wrong-link-form",
 }
 
 
@@ -1011,7 +1090,7 @@ CODE_WEIGHT = {
     "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "broken-link": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "broken-link": 17, "wrong-link-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -1596,7 +1675,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         # При сдвинутом корне битой выглядит каждая ссылка: причина одна,
         # и о ней уже сказано.
         base_path = urlsplit(home_url).path if home_url else ""
-        for url, paths in sorted(broken_links(pages, graph, base_path).items()):
+        twins = {}
+        for url, paths in sorted(broken_links(pages, graph, base_path, twins).items()):
             shown = ", ".join("/" + p.split("/", 3)[-1] if p.count("/") >= 3 else "/"
                               for p in paths[:3])
             more = tr(" и ещё {a0}", a0=len(paths) - 3) if len(paths) > 3 else ""
@@ -1604,6 +1684,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                 "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом "
                 "сайте это 404, если сервер их не перенаправляет",
                 a0=len(paths), a1=shown, a2=more)))
+        issues += wrong_form_issues(pages, twins)
     if graph.get("home_redirected_from"):
         notes.append(tr(
             "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "

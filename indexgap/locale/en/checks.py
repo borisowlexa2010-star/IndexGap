@@ -63,6 +63,15 @@ MESSAGES = {
     "нет meta description": "no meta description",
     "нет title": "no title",
     "нет данных": "no data",
+    "{a0} вместо {a1}": "{a0} instead of {a1}",
+    "ссылки расходятся со страницей регистром букв: {a0}{a1}. GitHub Pages, S3 и nginx на Linux различают регистр и отдают на них 404":
+        "links differ from the page in letter case: {a0}{a1}. GitHub Pages, S3 "
+        "and nginx on Linux are case-sensitive and answer them with a 404",
+    "ссылки в форме, которой нет в сборке: {a0}{a1}. Сервер сводит формы адреса только по своим правилам: GitHub Pages и S3 отдают `about/index.html` по /about/, но не по /about.html, а `faq.html` — по /faq.html, но не по /faq/; на такие ссылки они отвечают 404":
+        "links in a form the build does not have: {a0}{a1}. A server maps URL "
+        "forms only by its own rules: GitHub Pages and S3 serve `about/index.html` "
+        "at /about/ but not at /about.html, and `faq.html` at /faq.html but not at "
+        "/faq/; such links get a 404",
     "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404, если сервер их не перенаправляет":
         "links to pages that are not in the build: {a0} — {a1}{a2}. On the live "
         "site they are 404s unless the server redirects them",
