@@ -577,18 +577,23 @@ def _crawl(crawl: Crawl, given: list, limit: int, jobs: int, progress) -> dict:
     return manifest
 
 
-# Знаки, которые cmd и PowerShell раскрывают даже в двойных кавычках.
-_NT_UNSAFE = re.compile(r'["%!$`]')
-_NT_PLAIN = re.compile(r"^[\w\-.:\\/~@+=,]+$")
+# Для cmd и PowerShell — белый список, а не чёрный: PowerShell считает
+# кавычками и «умные» “ ” ‘ ’, а `$` в регулярке совпадает перед `\n`.
+_NT_PLAIN = re.compile(r"[A-Za-z0-9_\-.:\\/~@+=,]+", re.ASCII)
+_NT_QUOTED = re.compile(r"[A-Za-z0-9_\-.:\\/~@+=, ]+", re.ASCII)
 
 
-def _nt_arg(arg: str) -> str:
-    """Аргумент для cmd и PowerShell: как есть, в двойных кавычках или никак."""
-    if _NT_PLAIN.match(arg):
+def _nt_arg(arg: str, trusted: bool = False) -> str:
+    """
+    Аргумент для cmd и PowerShell: как есть, в двойных кавычках или никак.
+    Каталог задал сам человек (`trusted`) — он может быть и кириллическим;
+    имя sitemap пришло с сервера и проходит только по белому списку.
+    """
+    if _NT_PLAIN.fullmatch(arg):
         return arg
-    if _NT_UNSAFE.search(arg):
-        return ""
-    return f'"{arg}"'
+    if _NT_QUOTED.fullmatch(arg) or (trusted and not re.search(r'["\r\n]', arg)):
+        return f'"{arg}"'
+    return ""
 
 
 def next_command(out_dir: str, manifest: dict) -> str:
@@ -599,17 +604,19 @@ def next_command(out_dir: str, manifest: dict) -> str:
     поэтому аргумент со знаками, которые раскрываются и в двойных кавычках,
     в команду не попадает вовсе — check найдёт sitemap и без него.
     """
-    pairs = [("--site", manifest["site"])]
-    for rel in manifest.get("root_sitemaps") or ():
-        pairs.append(("--sitemap", os.path.join(out_dir, *rel.split("/"))))
     if os.name != "nt":
-        parts = ["indexgap", "check", out_dir] + [x for pair in pairs for x in pair]
+        parts = ["indexgap", "check", out_dir, "--site", manifest["site"]]
+        for rel in manifest.get("root_sitemaps") or ():
+            parts += ["--sitemap", os.path.join(out_dir, *rel.split("/"))]
         return " ".join(shlex.quote(p) for p in parts)
-    words = ["indexgap", "check", _nt_arg(out_dir) or tr("<каталог>")]
-    for flag, value in pairs:
-        quoted = _nt_arg(value)
-        if quoted:
-            words += [flag, quoted]
+    words = ["indexgap", "check", _nt_arg(out_dir, trusted=True) or tr("<каталог>"),
+             "--site", _nt_arg(manifest["site"], trusted=True)]
+    for rel in manifest.get("root_sitemaps") or ():
+        # Проверяется именно часть с сервера; каталог задал сам человек.
+        if _NT_QUOTED.fullmatch(rel):
+            quoted = _nt_arg(os.path.join(out_dir, *rel.split("/")), trusted=True)
+            if quoted:
+                words += ["--sitemap", quoted]
     return " ".join(words)
 
 
