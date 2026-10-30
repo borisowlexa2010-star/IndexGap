@@ -333,6 +333,11 @@ def report_pair(out: str) -> tuple:
     отказывался перезаписывать «чужой» файл.
     """
     stem, ext = os.path.splitext(out)
+    if os.path.basename(out).lower() in (".json", ".html"):
+        # `--out .json`: splitext видит скрытый файл без расширения, и данные
+        # уходили в `.json.json`.
+        stem, ext = os.path.join(os.path.dirname(out), "indexgap-report"), os.path.basename(out)
+        out = stem + ext.lower()
     if ext.lower() == ".json":
         return stem + ".html", out
     return out, stem + ".json"
