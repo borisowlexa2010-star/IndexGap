@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.18.1 — 2026-10-31
+
+* **Project skills that went stale are named.** `indexgap init` copies the
+  skills into the project's `.claude/skills/`; `pipx upgrade` updates only the
+  package. Two real projects still carried 1.14's skills, so their agent read
+  instructions without `diff`, `fetch` or the new checks. `check` and `brief`
+  now say which skills come from another version and that `indexgap init`
+  refreshes them without touching `indexgap.json`.
+
 ## 1.18.0 — 2026-10-30
 
 Everything 1.17.0 listed as "not yet", closed.

@@ -239,7 +239,7 @@ keywords.csv` (и `--keyword`, если колонка называется ин
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.18.0
+- uses: borisowlexa2010-star/IndexGap@v1.18.1
   with:
     root: out
     site: https://example.com
@@ -263,7 +263,7 @@ keywords.csv` (и `--keyword`, если колонка называется ин
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.18.0
+- uses: borisowlexa2010-star/IndexGap@v1.18.1
   with:
     root: out
     site: https://example.com
