@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.18.0
+- uses: borisowlexa2010-star/IndexGap@v1.18.1
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.18.0
+- uses: borisowlexa2010-star/IndexGap@v1.18.1
   with:
     root: out
     site: https://example.com
