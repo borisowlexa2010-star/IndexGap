@@ -214,9 +214,6 @@ MESSAGES = {
         "robots.txt names no Sitemap — the line `Sitemap: https://…/sitemap.xml` "
         "costs nothing",
     "в блоке JSON-LD нет @type": "the JSON-LD block has no @type",
-    "в исходном HTML {a0} слов при {a1} скриптах — краулеры ИИ-поиска не исполняют JavaScript и увидят пустую страницу":
-        "{a0} words in the source HTML against {a1} scripts — AI-search crawlers do "
-        "not execute JavaScript and will see an empty page",
     "в тексте нет ни списков, ни таблиц — структурные элементы повышают шанс попасть в ответ":
         "the text has neither lists nor tables — structural elements raise the "
         "chance of being used in an answer",

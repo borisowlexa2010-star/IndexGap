@@ -731,6 +731,21 @@ class TestAeo(Fixture):
         pages, _ = self.load()
         self.assertTrue(aeo.check_shell(pages[0]))
 
+    def test_js_shell_has_one_wording(self):
+        # Две формулировки одной находки делали сайт документации зависимым
+        # от порядка, в котором файловая система отдаёт исходники.
+        import importlib.util, pathlib
+        spec = importlib.util.spec_from_file_location(
+            "build_docs", pathlib.Path(__file__).parent.parent / "tools" / "build_docs.py")
+        docs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(docs)
+        self.write("a.html",
+                   "<html><body><div id=root></div>"
+                   "<script src=1.js></script><script src=2.js></script>"
+                   "<script src=3.js></script></body></html>")
+        pages, _ = self.load()
+        self.assertEqual(docs.collect()["js-shell"]["message"], aeo.check_shell(pages[0])[0][3])
+
     def test_preamble_first_paragraph_is_flagged(self):
         page = FakePage("https://example.com/a/", "текст")
         page.paragraphs = ["В этой статье мы рассмотрим, как получить визу "
