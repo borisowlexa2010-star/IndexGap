@@ -415,7 +415,9 @@ def check_shell(page, cfg: dict = None) -> list:
     cfg = {**CONFIG, **(cfg or {})}
     if is_shell(page, cfg):
         return [("critical", page.url, "js-shell",
-                 tr("в исходном HTML {a0} слов при {a1} скриптах — краулеры ИИ-поиска не исполняют JavaScript и увидят пустую страницу", a0=page.word_count, a1=(page.blocks or {}).get('script', 0)))]
+                 # тот же текст, что у checks.run_all: находка одна, и сайт
+                 # документации не должен зависеть от порядка файлов
+                 tr("в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют"))]
     return []
 
 
