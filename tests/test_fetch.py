@@ -688,6 +688,12 @@ class RenderCase(FetchCase):
         timeout = mock.patch.object(fetch, "RENDER_TIMEOUT", 3)
         timeout.start()
         self.addCleanup(timeout.stop)
+        # Под root на Linux пакет нарочно требует --browser-no-sandbox; эти
+        # тесты — не про это (см. test_root_on_linux_must_opt_out_of_the_sandbox),
+        # и в контейнере, где всё идёт от root, они падали бы.
+        sandbox = mock.patch.object(fetch, "needs_no_sandbox", return_value=False)
+        sandbox.start()
+        self.addCleanup(sandbox.stop)
 
     def calls(self):
         with open(self.argv_log, encoding="utf-8") as fh:

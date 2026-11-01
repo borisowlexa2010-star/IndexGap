@@ -686,7 +686,7 @@ LEVEL_OVERRIDES = {
 def collect() -> dict:
     """Реестр проверок из пакета: уровень и текст находки — из исходников."""
     src = "".join(p.read_text(encoding="utf-8")
-                  for p in (ROOT / "indexgap").glob("*.py"))
+                  for p in sorted((ROOT / "indexgap").glob("*.py")))
     # находка — это кортеж (уровень, что, код, tr(текст)); собирается он
     # и через issues.append, и через return [...], поэтому привязки к append нет
     # Текст находки — это все подряд идущие литералы внутри tr(...): длинное
