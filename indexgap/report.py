@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import html
 import os
-from collections import Counter, OrderedDict, defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 
 from .checks import CODE_WEIGHT, LEVEL_ORDER

@@ -214,9 +214,19 @@ def ask(name: str, prompt: str, cfg: dict = None, env: dict = None) -> dict:
     return {"urls": _urls_anywhere(data), "text": _text_anywhere(data)}
 
 
+def _bare(host: str) -> str:
+    """
+    Хост без порта и без ведущего `www.`. Не `lstrip("www.")`: тот срезает
+    любые `w` и точки, и `wise.com` становился `ise.com` — чужой сайт
+    засчитывался своим, а `wikipedia.org` выходил в отчёт как `ikipedia.org`.
+    """
+    host = host.lower().split("@")[-1].split(":")[0].rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
 def _host(url: str) -> str:
-    match = re.match(r"https?://([^/?#]+)", url or "")
-    return (match.group(1).lower().lstrip("www.") if match else "").split(":")[0]
+    match = re.match(r"https?://([^/?#]+)", url or "", re.I)
+    return _bare(match.group(1)) if match else ""
 
 
 def measure(prompts: list, domain: str, brand: str = "", providers: list = None,
@@ -228,7 +238,9 @@ def measure(prompts: list, domain: str, brand: str = "", providers: list = None,
     Доля, а не «да/нет»: ответ недетерминирован, и один прогон не отличает
     «нас цитируют» от «повезло».
     """
-    domain = (domain or "").lower().lstrip("www.").split("/")[0]
+    # --domain принимает и адрес целиком: `https://example.com/` — тоже домен
+    domain = re.sub(r"^[a-z][a-z0-9+.-]*://", "", (domain or "").strip(), flags=re.I)
+    domain = _bare(domain.split("/")[0])
     if not domain:
         raise SourceError(tr("не указан домен: --domain example.com"))
     providers = providers or available(env)

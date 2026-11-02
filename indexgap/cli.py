@@ -610,7 +610,7 @@ def cmd_check(args):
     # База читается до работы: тот же файл может быть и базой, и результатом.
     baseline = load_baseline(args.baseline) if args.baseline else None
     got = _analyse(args)
-    pages, project, analysis = got["pages"], got["project"], got["analysis"]
+    pages, analysis = got["pages"], got["analysis"]
     notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
 
     funnel_result = causes = cross = None
@@ -1487,7 +1487,7 @@ def cmd_cite(args):
     elif args.prompt:
         prompts = list(args.prompt)
     elif getattr(args, "dataset", ""):
-        rows = _dataset_rows(args)
+        rows = _read_rows(args)
         prompts = cite.prompts_from_keywords(rows, args.keyword, args.limit)
         if prompts:
             print(tr("Вопросы взяты из семантики: {a0} шт.", a0=len(prompts)))

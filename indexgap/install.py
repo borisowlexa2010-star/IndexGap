@@ -27,7 +27,6 @@ import os
 import re
 import secrets
 import shutil
-from collections import Counter
 
 from .core import SourceError, DEFAULT_EXTS, OWN_DIRS, SKIP_DIRS, read_text
 from .i18n import tr
@@ -250,8 +249,6 @@ def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:
     Вывод показывается человеку обязательно: угадывать молча — тот же грех,
     что и молчаливая автонастройка порогов.
     """
-    from . import core
-
     path = os.path.join(root, content_dir) if content_dir else root
     if not os.path.isdir(path):
         return "catalog", tr("каталог страниц не найден, взят профиль по умолчанию")

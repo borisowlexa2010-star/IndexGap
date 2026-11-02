@@ -30,17 +30,14 @@ XLSX, JSON или просто списком адресов. Что кажды�
 
 from __future__ import annotations
 
-import csv
-import io
 import os
 import re
 from collections import Counter
 import urllib.error
 import urllib.request
-from xml.etree import ElementTree
 
 from . import sources
-from .core import read_text, url_key, SourceError
+from .core import url_key, SourceError
 from .i18n import tr
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"

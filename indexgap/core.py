@@ -34,7 +34,7 @@ from array import array
 from collections import Counter, defaultdict
 from html import unescape as html_unescape
 from html.parser import HTMLParser
-from urllib.parse import (urljoin, urlparse, urldefrag, urlsplit, urlunsplit,
+from urllib.parse import (urljoin, urldefrag, urlsplit, urlunsplit,
                           quote, unquote)
 
 from .i18n import tr
@@ -2157,8 +2157,8 @@ def host_redirect_rules(root: str) -> tuple:
             data = {}
         if isinstance(data, dict):
             rewrites_forms = bool(data.get("cleanUrls")) or isinstance(data.get("trailingSlash"), bool)
-            for field in ("redirects", "rewrites"):
-                for entry in data.get(field) or ():
+            for section in ("redirects", "rewrites"):
+                for entry in data.get(section) or ():
                     if isinstance(entry, dict) and isinstance(entry.get("source"), str):
                         add(entry["source"])
         break
