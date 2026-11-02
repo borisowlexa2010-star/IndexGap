@@ -16,7 +16,45 @@ permissions:
   contents: read
 
 jobs:
+  # Ручной запуск с ветки ставит тег по версии из пакета и запускает этот же
+  # workflow уже на теге. Так релиз не зависит от того, может ли пушить теги
+  # тот, кто его делает: облачная сессия может пушить только ветку.
+  # Тег, поставленный GITHUB_TOKEN, событие push не порождает — поэтому
+  # второй запуск явный, через workflow_dispatch, который этому токену разрешён.
+  tag:
+    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag the package version and publish from the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pkg=$(python3 -c "import re,pathlib; \
+            print(re.search(r'__version__ = \"([^\"]+)\"', \
+            pathlib.Path('indexgap/__init__.py').read_text()).group(1))")
+          tag="v$pkg"
+          grep -q "^## $pkg " CHANGELOG.md || { echo "::error::no CHANGELOG section for $pkg"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            [ "$(git rev-list -n1 "$tag")" = "$(git rev-parse HEAD)" ] || {
+              echo "::error::$tag already points at another commit"; exit 1; }
+            echo "$tag already on this commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "indexgap $pkg"
+            git push origin "$tag"
+          fi
+          gh workflow run publish.yml --ref "$tag"
+          echo "::notice::$tag tagged; publishing runs from the tag"
+
   build:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
