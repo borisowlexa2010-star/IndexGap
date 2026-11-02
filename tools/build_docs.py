@@ -503,7 +503,10 @@ COMMANDS = [
   "values, so the disagreement can be an informed one."),
  ("doctor", "The crawl-to-index funnel",
   "Follows the pages from what was generated, through the sitemap, to what each "
-  "search engine has actually indexed — and reports where they were lost. Given "
+  "search engine has actually indexed — and reports where they were lost, "
+  "section by section: the URL section that loses noticeably more than the rest "
+  "of the site is highlighted, because the cause there is usually one template, "
+  "one set of links or one sitemap. Given "
   "a Bing Webmaster Tools AI Performance export, it adds the step after the "
   "index: which pages Microsoft Copilot actually cites, which of them you have "
   "closed from search, and which you left out of the sitemap."),

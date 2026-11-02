@@ -72,6 +72,11 @@ sitemap, на которые не ведёт ни одна ссылка. Есл�
 (`/plumbing/*/`), и одна правка шаблона снимает её со всех его страниц. Таблица
 та же — в отчёте, данные — `templates` в JSON.
 
+Если дан sitemap или выгрузка индекса, посмотри «Разрывы по разделам» (`doctor`,
+или `segments` в JSON): раздел с пометкой «← разрыв здесь» теряет заметно больше
+остального сайта — ищи там одну общую причину (шаблон раздела, ссылки с хабов,
+его sitemap), прежде чем чинить страницы по одной.
+
 | Код | Что значит | Что делать |
 |---|---|---|
 | `unsupported-number` | число с единицей проекта, которого нет в данных | почти всегда выдумка — убрать или подтвердить источником |
@@ -176,7 +181,7 @@ indexgap check --out indexgap-baseline.json                # один раз; ф
 indexgap check --baseline indexgap-baseline.json --strict  # падает только на новых critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.18.2` с `root`, `site`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.19.0` с `root`, `site`,
 необязательными `baseline` и `args`.
 
 ## Перед деплоем

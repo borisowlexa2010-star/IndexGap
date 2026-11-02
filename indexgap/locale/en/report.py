@@ -339,4 +339,10 @@ MESSAGES = {
     "lang страницы говорит одно, а текст написан другим письмом: поисковик и экранный диктор поймут язык неверно.":
         "The page's lang says one thing and the text is written in another script: search "
         "engines and screen readers will get the language wrong.",
+    '<h2>Разрывы по разделам</h2>':
+        '<h2>Gaps by section</h2>',
+    '<div class="scroll"><table><thead><tr><th>раздел</th><th class="n">страниц</th><th class="n">нет в sitemap</th><th class="n">нет в индексе</th><th class="n">дошло</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>section</th><th class="n">pages</th><th class="n">not in sitemap</th><th class="n">not indexed</th><th class="n">reached</th></tr></thead><tbody>',
+    '<p class="note">По сайту до конца воронки дошло {a0:.0%}. Выделены разделы, которые теряют заметно больше остального сайта: причина там обычно одна на весь раздел — шаблон, перелинковка или sitemap раздела.</p>':
+        '<p class="note">Across the site, {a0:.0%} reached the end of the funnel. Highlighted are the sections that lose noticeably more than the rest of the site: the cause there is usually one for the whole section — its template, internal links or sitemap.</p>',
 }

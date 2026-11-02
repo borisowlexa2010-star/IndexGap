@@ -72,6 +72,12 @@ one: risk 0–100 is the average severity of the worst finding over the pages of
 a URL template (`/plumbing/*/`), and one template fix clears it from all of
 them. The same table is in the report; the data is `templates` in the JSON.
 
+If a sitemap or an index export was given, look at "Gaps by section" (`doctor`,
+or `segments` in the JSON): a section marked "← the gap is here" loses
+noticeably more than the rest of the site, so look for one shared cause there —
+the section's template, its hub links, its sitemap — before fixing pages one
+by one.
+
 | Code | What it means | What to do |
 |---|---|---|
 | `unsupported-number` | a number with a project unit that is not in the data | almost always invented — remove it or back it with a source |
@@ -176,7 +182,7 @@ indexgap check --out indexgap-baseline.json                # once; commit the fi
 indexgap check --baseline indexgap-baseline.json --strict  # fails only on new critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.18.2` with `root`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.19.0` with `root`,
 `site`, and optional `baseline` and `args`.
 
 ## Before a deploy
