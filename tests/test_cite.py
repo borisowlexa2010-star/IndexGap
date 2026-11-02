@@ -83,6 +83,25 @@ class TestNothingLeavesWithoutSend(unittest.TestCase):
              "--lang", "ru"], env={"XAI_API_KEY": "x"})
         self.assertEqual(code, 2)
 
+    def test_questions_from_the_keyword_set(self):
+        """
+        `cite --dataset` звал несуществующую `_dataset_rows` и падал
+        трассировкой NameError — путь «вопросы из семантики» не работал вовсе.
+        """
+        import tempfile
+        folder = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, folder, True)
+        path = os.path.join(folder, "keys.csv")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("keyword,volume\nвиза в сингапур,900\nвиза в таиланд,500\n")
+        with mock.patch("urllib.request.urlopen") as opened:
+            code, out = self.run_cli(
+                ["cite", "--domain", "example.com", "--dataset", path, "--lang", "ru"],
+                env={"PERPLEXITY_API_KEY": "x"})
+        self.assertEqual(code, 0, out)
+        opened.assert_not_called()
+        self.assertIn("виза в сингапур", out)
+
 
 class TestMeasurement(unittest.TestCase):
     def setUp(self):
@@ -174,6 +193,39 @@ class TestMeasurement(unittest.TestCase):
     def test_a_domain_is_required(self):
         with self.assertRaises(SourceError):
             cite.measure(["q"], "", providers=["perplexity"], env=self.env)
+
+    def test_a_domain_starting_with_w_keeps_its_letters(self):
+        """
+        `lstrip("www.")` срезал любые `w` и точки: `wise.com` превращался
+        в `ise.com`, и ссылка на чужой `ise.com` засчитывалась своей.
+        """
+        with mock.patch.object(cite, "ask", return_value={
+                "urls": ["https://ise.com/", "https://www.wikipedia.org/wiki/x"],
+                "text": ""}):
+            got = cite.measure(["q"], "wise.com", providers=["perplexity"],
+                               runs=1, env=self.env, pause=0)
+        row = got["results"][0]
+        self.assertEqual(got["domain"], "wise.com")
+        self.assertEqual(row["cited"], 0)
+        self.assertEqual(dict(row["top_competitors"]),
+                         {"ise.com": 1, "wikipedia.org": 1})
+
+    def test_the_domain_may_be_given_as_a_url(self):
+        for given in ("https://www.example.com/", "HTTPS://Example.com/a?b=1",
+                      "www.example.com", "example.com:443", "example.com."):
+            with mock.patch.object(cite, "ask", return_value={
+                    "urls": ["https://example.com/a"], "text": ""}):
+                got = cite.measure(["q"], given, providers=["perplexity"],
+                                   runs=1, env=self.env, pause=0)
+            self.assertEqual(got["domain"], "example.com", given)
+            self.assertEqual(got["results"][0]["cited"], 1, given)
+
+    def test_hosts_are_compared_without_case_port_or_www(self):
+        for url in ("https://WWW.Example.COM/", "https://example.com:8443/x",
+                    "http://user@www.example.com/"):
+            self.assertEqual(cite._host(url), "example.com", url)
+        self.assertEqual(cite._host("https://web.dev/"), "web.dev")
+        self.assertEqual(cite._host("ftp://example.com/"), "")
 
 
 class TestHonesty(unittest.TestCase):
