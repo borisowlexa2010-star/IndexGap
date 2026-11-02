@@ -1377,3 +1377,143 @@ def explain(funnel_result: dict, analysis: dict) -> list:
                     "fix": tr("проверить в Search Console статус конкретных URL и время с публикации"),
                     "urls": sorted(display.get(k, k) for k in rest)[:50]})
     return out
+
+
+# ── разрывы по разделам ───────────────────────────────────────────────────────
+
+# Раздел меньше этого не подсвечивается: на трёх страницах любая доля — шум.
+SEGMENT_MIN = 5
+# Сколько страниц раздел должен потерять, чтобы его назвали.
+SEGMENT_MIN_LOST = 3
+
+
+def _segment_parts(url: str) -> list:
+    """
+    Путь страницы по сегментам, без файла в конце: `/rent/moscow.html` и
+    `/rent/moscow/` лежат в разделе `/rent/`, а не каждая в своём.
+    """
+    from urllib.parse import unquote, urlsplit
+    path = unquote(urlsplit(url).path if "://" in (url or "") else (url or ""))
+    parts = [p for p in path.split("/") if p]
+    if parts and not path.endswith("/"):
+        parts = parts[:-1]                      # последний — файл или сама страница
+    return parts
+
+
+def _prefix(parts: list) -> str:
+    return "/" + "".join(p + "/" for p in parts)
+
+
+def segments(funnel_result: dict, pages: list = None) -> dict:
+    """
+    Где именно разрыв: те же потери воронки, разложенные по разделам сайта.
+
+    «40 страниц не в индексе» не говорит, что чинить. «35 из них — /rent/,
+    где в индексе 12% при 80% по сайту» говорит: беда в шаблоне или в
+    перелинковке одного раздела, а не в сайте. Поэтому раздел подсвечивается,
+    только когда он теряет заметно больше среднего — иначе это просто
+    размер раздела, а не его проблема.
+
+    Уровень разбивки выбирается сам: если почти всё лежит в одном разделе
+    (`/blog/…` на блоге), смотреть надо на уровень ниже — иначе таблица из
+    одной строки повторяет общую цифру.
+    """
+    from .publish import indexable
+
+    funnel_result = funnel_result or {}
+    pages = pages or []
+    publishable = {url_key(p.url): p.url for p in pages if indexable(p)}
+    if len(publishable) < SEGMENT_MIN:
+        return {"base": "", "rows": [], "highlighted": []}
+
+    no_sitemap = _keys(funnel_result.get("missing_from_sitemap") or [])
+    not_indexed = _keys(funnel_result.get("not_indexed") or [])
+    has_sitemap = bool(funnel_result.get("has_sitemap"))
+    has_index = bool(funnel_result.get("has_index"))
+    if not (has_sitemap or has_index):
+        return {"base": "", "rows": [], "highlighted": []}
+
+    parts = {key: _segment_parts(url) for key, url in publishable.items()}
+
+    # Спускаемся, пока один подраздел держит почти весь сайт.
+    base = []
+    while True:
+        under = [p for p in parts.values() if p[:len(base)] == base]
+        children = Counter(p[len(base)] for p in under if len(p) > len(base))
+        if not children:
+            break
+        child, n = children.most_common(1)[0]
+        if n < 0.8 * len(under) or len(children) > 1 and n == len(under):
+            break
+        if n < 0.8 * len(publishable):
+            break
+        base = base + [child]
+
+    def stats(keys: set) -> dict:
+        in_map = keys - no_sitemap
+        known = in_map if has_sitemap else keys
+        lost_index = known & not_indexed
+        return {
+            "pages": len(keys),
+            "missing_from_sitemap": len(keys & no_sitemap) if has_sitemap else None,
+            "not_indexed": len(lost_index) if has_index else None,
+            # Доля дошедших до конца воронки: из пригодных — в sitemap и в индексе.
+            "reached": len(known - lost_index) if has_index else len(in_map),
+        }
+
+    site = stats(set(publishable))
+    site_lost = site["pages"] - site["reached"]
+
+    groups = {}
+    for key, p in parts.items():
+        if p[:len(base)] != base:
+            continue
+        rest = p[len(base):]
+        for depth in (1, 2):
+            if len(rest) >= depth:
+                groups.setdefault(_prefix(base + rest[:depth]), set()).add(key)
+        if not rest:
+            groups.setdefault(_prefix(base), set()).add(key)
+
+    rows = []
+    for prefix, keys in groups.items():
+        row = {"segment": prefix, **stats(keys)}
+        row["lost"] = row["pages"] - row["reached"]
+        row["coverage"] = row["reached"] / row["pages"]
+        row["depth"] = prefix.count("/") - 1 - len(base)
+        # Подсветка: раздел заметно хуже ОСТАЛЬНОГО сайта и теряет не единицы.
+        # Не «хуже среднего»: один плохой раздел сам тянет среднее вниз, и на
+        # сайте из двух разделов тот, где потеряно 75%, не выделялся при 39%
+        # по сайту — хотя во втором потеряна одна страница из двадцати.
+        rate = row["lost"] / row["pages"]
+        others = site["pages"] - row["pages"]
+        rest = (site_lost - row["lost"]) / others if others else 1.0
+        row["rest_lost_share"] = rest if others else None
+        row["highlight"] = (row["pages"] >= SEGMENT_MIN
+                            and row["lost"] >= SEGMENT_MIN_LOST
+                            and others >= SEGMENT_MIN
+                            and rate >= max(1.5 * rest, rest + 0.2))
+        rows.append(row)
+
+    # Подраздел подсвеченного раздела не повторяет его — только если сам
+    # сосредотачивает потери (тогда виноват именно он, а не весь раздел).
+    chosen = []
+    for row in sorted(rows, key=lambda r: (r["depth"], -r["lost"], r["segment"])):
+        if not row["highlight"]:
+            continue
+        parent = next((c for c in chosen if row["segment"].startswith(c["segment"])), None)
+        if parent and row["lost"] < 0.8 * parent["lost"]:
+            continue
+        if parent:
+            chosen.remove(parent)
+        chosen.append(row)
+
+    top = sorted((r for r in rows if r["depth"] <= 1),
+                 key=lambda r: (-r["lost"], r["segment"]))
+    return {
+        "base": _prefix(base),
+        "site": {**site, "lost": site_lost,
+                 "coverage": site["reached"] / site["pages"]},
+        "rows": top,
+        "highlighted": sorted(chosen, key=lambda r: (-r["lost"], r["segment"])),
+    }

@@ -1,7 +1,19 @@
 # Changelog
 
-## 1.18.2 — 2026-11-02
+## 1.19.0 — 2026-11-02
 
+* **Gaps by section.** `doctor`, and `check` when given a sitemap or an index
+  export, split the funnel's losses by URL section and highlight the section
+  that loses noticeably more than the rest of the site:
+  `/rent/  lost 16 of 20  ← the gap is here`. "40 pages are not indexed" did
+  not say what to fix; a section that loses most of them usually has one
+  cause — its template, its hub links, its sitemap. A section is compared with
+  the rest of the site, not with the average, which one bad section drags
+  down. Sections under five pages are not highlighted, closed pages are not
+  counted as lost, and a site that keeps everything under one folder
+  (`/blog/…`) is split one level down. A subsection that holds the loss
+  (`/rent/moscow/`) is named instead of its parent. The table is in the
+  terminal, in the HTML report and in the JSON under `segments`.
 * **`cite --dataset` works.** Taking the questions from the keyword set called
   a function that did not exist and ended in a `NameError` traceback. CI now
   runs pyflakes over the package, which catches a name like that without

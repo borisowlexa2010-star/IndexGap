@@ -613,7 +613,7 @@ def cmd_check(args):
     pages, analysis = got["pages"], got["analysis"]
     notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
 
-    funnel_result = causes = cross = None
+    funnel_result = causes = cross = segments = None
     sitemap_urls = None
     by_engine, by_source, cited, impressions = _collect_indexed(args)
     if args.sitemap:
@@ -635,6 +635,7 @@ def cmd_check(args):
                                       cited=cited, impressions=impressions)
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
+        segments = doctor.segments(funnel_result, pages)
 
     notes += got["template_notes"]
 
@@ -642,7 +643,7 @@ def cmd_check(args):
                              out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
                              cross=cross, notes=notes,
                              title=tr("Проверка перед публикацией"),
-                             templates=got["templates"])
+                             templates=got["templates"], segments=segments)
     json_path = report_pair(args.out)[1]
     diff = compare_baseline(analysis["issues"], baseline) if baseline is not None else None
     _write_json(json_path, {
@@ -661,6 +662,7 @@ def cmd_check(args):
         "funnel": funnel_result,
         "causes": causes,
         "cross_engine": cross,
+        "segments": segments,
         "repeated_skeletons": (content_result or {}).get("repeated_skeletons"),
         "unmatched": (content_result or {}).get("unmatched"),
         "rows_without_page": (content_result or {}).get("rows_without_page"),
@@ -1052,6 +1054,7 @@ def cmd_doctor(args):
                                   cited=cited, impressions=impressions)
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
+    segments = doctor.segments(funnel_result, pages)
 
     print()
     for step in funnel_result["steps"]:
@@ -1059,6 +1062,7 @@ def cmd_doctor(args):
         print(f"  {step['name']:<28} {step['count']:>6}{lost}")
 
     _print_sitemap_detail(funnel_result)
+    _print_segments(segments)
 
     if cross:
         print(tr("\nСравнение поисковиков:"))
@@ -1108,10 +1112,11 @@ def cmd_doctor(args):
     path = report.build(analysis, funnel_result, causes,
                         out_path=check_out_path(report_pair(args.out)[0]),
                         site=args.site, cross=cross, notes=notes,
-                        title=tr("Разбор потерь"))
+                        title=tr("Разбор потерь"), segments=segments)
     json_path = report_pair(args.out)[1]
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
+                            "segments": segments,
                             "foreign": foreign, "live": live, "near_page_one": near,
                             "notes": notes})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
@@ -1129,6 +1134,30 @@ def cmd_fetch(args):
                          progress=progress, follow=args.crawl, render_pages=args.render,
                          browser=args.browser, no_sandbox=args.browser_no_sandbox)
     return fetch.print_summary(args.out_dir, manifest)
+
+
+def _print_segments(result: dict, limit: int = 8) -> None:
+    """Где разрыв по разделам: подсвеченные — первыми и с пометкой."""
+    rows = (result or {}).get("rows") or []
+    highlighted = (result or {}).get("highlighted") or []
+    if not rows or not any(r["lost"] for r in rows):
+        return
+    site = result["site"]
+    print(tr("\nРазрывы по разделам (дошло до конца воронки по сайту: {a0:.0%}):",
+             a0=site["coverage"]))
+    marked = {h["segment"] for h in highlighted}
+    shown = highlighted + [r for r in rows if r["segment"] not in marked]
+    for row in shown[:limit]:
+        flag = tr("  ← разрыв здесь") if row["segment"] in marked else ""
+        print(tr("  {a3:<24} потеряно {a0:>4} из {a1:<5} дошло {a2:>4.0%}{a4}",
+                 a0=row["lost"], a1=row["pages"], a2=row["coverage"],
+                 a3=row["segment"], a4=flag))
+    if len(shown) > limit:
+        print(tr("  … ещё разделов: {a0} — все в JSON", a0=len(shown) - limit))
+    if highlighted:
+        print(tr("         Подсвеченный раздел теряет заметно больше остального сайта: "
+                 "причина обычно общая для раздела — шаблон, перелинковка или "
+                 "sitemap этого раздела, а не каждая страница по отдельности."))
 
 
 def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:

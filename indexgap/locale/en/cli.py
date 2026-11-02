@@ -508,4 +508,14 @@ MESSAGES = {
     "  ! скиллы в .claude/skills/ от другой версии indexgap: {a0}. Обнови их командой `indexgap init` в корне проекта — indexgap.json она не трогает":
         "  ! skills in .claude/skills/ come from another indexgap version: {a0}. Run "
         "`indexgap init` in the project root to update them — it leaves indexgap.json alone",
+    '\nРазрывы по разделам (дошло до конца воронки по сайту: {a0:.0%}):':
+        '\nGaps by section (reached the end of the funnel across the site: {a0:.0%}):',
+    '  ← разрыв здесь':
+        '  ← the gap is here',
+    '  {a3:<24} потеряно {a0:>4} из {a1:<5} дошло {a2:>4.0%}{a4}':
+        '  {a3:<24} lost {a0:>4} of {a1:<5} reached {a2:>4.0%}{a4}',
+    '  … ещё разделов: {a0} — все в JSON':
+        '  … {a0} more section(s) — all of them in the JSON',
+    '         Подсвеченный раздел теряет заметно больше остального сайта: причина обычно общая для раздела — шаблон, перелинковка или sitemap этого раздела, а не каждая страница по отдельности.':
+        '         A highlighted section loses noticeably more than the rest of the site: the cause is usually shared by the whole section — its template, its internal links or its sitemap — not each page on its own.',
 }
