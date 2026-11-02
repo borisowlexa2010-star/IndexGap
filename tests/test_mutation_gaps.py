@@ -1439,8 +1439,11 @@ class TestParserFields(unittest.TestCase):
                          ("ru", "/root/", "Т", "noindex,nosnippet"))
         self.assertEqual(ex.alternates, [("de", "/de/")])
         self.assertEqual((ex.hrefs, ex.anchors, ex.headings), (["/ok"], ["хорошая"], [(1, "Заголовок")]))
-        self.assertEqual(ex.blocks, {"li": 2, "table": 0, "img": 3, "img_no_alt": 2,
-                                     "script": 1, "p": 3})
+        # `<img src=x>` — alt нет; `alt="  "` — пустой, то есть декоративная
+        # картинка по WCAG, а не отсутствующий alt.
+        self.assertEqual(ex.blocks, {"li": 2, "table": 0, "img": 3, "img_no_alt": 1,
+                                     "img_empty_alt": 1, "script": 1, "p": 3})
+        self.assertEqual(ex.alts, [("ок", "z")])
         self.assertEqual(ex.jsonld, ['{"@type":"X"}'])
         self.assertEqual(ex.meta, {"author": "Иван", "datemodified": "2026-01-02"})
         self.assertEqual(ex.main_text, "Заголовок Раздва три четыре. a b 2 янв n без ссылки "

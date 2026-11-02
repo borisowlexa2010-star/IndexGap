@@ -318,6 +318,7 @@ class Page:
     alternates: list = None                        # hreflang: (код, href); None — не собирались
     outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
     slots: list = None                             # следы незаполненного шаблона: (вид, образец)
+    alts: list = field(default_factory=list)       # непустые alt картинок: (текст, src)
 
     @property
     def key(self) -> str:
@@ -716,7 +717,8 @@ class _Extractor(HTMLParser):
         self.anchors = []
         self.jsonld = []
         self.alternates = []       # (код hreflang как написан, href)
-        self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0,
+        self.alts = []
+        self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0, "img_empty_alt": 0,
                        "script": 0, "p": 0}
         self.meta = {}             # author, datePublished и прочее из <meta>
         self._chunks = []          # (текст, приклеивать ли к предыдущему)
@@ -928,8 +930,14 @@ class _Extractor(HTMLParser):
                 self.blocks["p"] += 1
             elif tag == "img":
                 self.blocks["img"] += 1
-                if not a.get("alt", "").strip():
+                # Пустой alt="" — по WCAG пометка декоративной картинки, а не
+                # её отсутствие. Раньше они считались одним и тем же.
+                if "alt" not in a:
                     self.blocks["img_no_alt"] += 1
+                elif not a["alt"].strip():
+                    self.blocks["img_empty_alt"] += 1
+                else:
+                    self.alts.append((a["alt"].strip(), a.get("src") or ""))
         if tag == "p":
             self._flush_paragraph()
 
@@ -1746,11 +1754,16 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             encoding=encoding,
             notes=notes,
             paragraphs=_md_paragraphs(body),
+            alts=[(m.group(1).strip(), m.group(2)) for m in
+                  re.finditer(r"!\[([^\[\]\n]{0,1000})\]\(([^)\s]*)", body) if m.group(1).strip()],
             slots=find_slots(text, markdown=True),
             blocks={"li": _md_list_items(_strip_fences(body)),
                     "table": len(re.findall(r"^[ \t>]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
                     "img": len(re.findall(r"!\[[^\[\]\n]{0,1000}\]\(", body)),
-                    "img_no_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
+                    "img_no_alt": 0,
+                    # В Markdown alt есть всегда: `![](x.png)` — пустой, а не
+                    # отсутствующий.
+                    "img_empty_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
                     "script": 0, "p": 0},
         )
     else:
@@ -1780,6 +1793,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             alternates=ex.alternates,
             paragraphs=ex.paragraphs,
             blocks=ex.blocks,
+            alts=ex.alts,
         )
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что

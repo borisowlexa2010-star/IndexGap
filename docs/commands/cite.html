@@ -92,13 +92,14 @@ font-size:.85rem;color:var(--ink3)}
 <h1>indexgap cite</h1>
 <div class="meta"><span class="tag acc">command</span></div>
 <p class="lede">Measure whether AI search cites you.</p>
-<p>Asks Perplexity, the OpenAI Responses API, Gemini and Grok a set of real user questions and counts how often your domain comes back among the sources. The only command that needs API keys, and it sends nothing without an explicit flag.</p>
+<p>Asks Perplexity, the OpenAI Responses API, Gemini and Grok a set of real user questions and counts how often your domain comes back among the sources. The only command that needs API keys, and it sends nothing without an explicit flag. --baseline compares with a previous measurement and calls a change notable only when an exact Fisher test separates it from noise.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap cite [-h] [--domain DOMAIN] [--site SITE] [--brand BRAND]
                      [--prompts PROMPTS] [--prompt PROMPT] [--dataset DATASET]
                      [--keyword KEYWORD] [--limit LIMIT]
                      [--provider {gemini,openai,perplexity,xai}] [--runs RUNS]
-                     [--send] [--out OUT] [--lang {en,ru}]
+                     [--send] [--out OUT] [--baseline old-cite.json]
+                     [--against new-cite.json] [--lang {en,ru}]
 
 options:
   -h, --help            show this help message and exit
@@ -117,6 +118,12 @@ options:
                         one is not enough
   --send                actually ask; without it this is a dry run
   --out OUT
+  --baseline old-cite.json
+                        a previous measurement: show what changed and which of
+                        it is not noise
+  --against new-cite.json
+                        compare --baseline with an existing measurement,
+                        sending nothing
   --lang {en,ru}        output language: en or ru. By default from
                         INDEXGAP_LANG or the system locale, otherwise English</code></pre>
 <h2>The rest of the pipeline</h2>
@@ -125,8 +132,8 @@ options:
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-11-02">2026-11-02</time>,
-  for indexgap 1.19.0.</p>
-  <p>indexgap 1.19.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.20.0.</p>
+  <p>indexgap 1.20.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

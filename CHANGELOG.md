@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.20.0 — 2026-11-02
+
+* **AI crawlers from the server logs.** `doctor --logs access.log` (combined
+  format or CDN JSON lines, `.gz` too, repeatable) shows which bots fetched
+  which pages, split by purpose: training (GPTBot, ClaudeBot, CCBot), AI
+  search (OAI-SearchBot, Claude-SearchBot, PerplexityBot) and fetches on a
+  person's request (ChatGPT-User, Claude-User, Perplexity-User). A new funnel
+  step, "opened by AI search", counts only the last two; sections AI search
+  skips are highlighted like any gap by section; an AI bot that gets 401/403
+  on most requests is named as a CDN or WAF block rather than robots.txt;
+  errors are grouped by bot and status. No keys, no network. The User-Agent
+  caveat is stated in the report.
+* **Citations in the funnel.** `doctor --cite result.json` adds an
+  `indexgap cite` measurement to the funnel next to Copilot's: cited pages,
+  cited pages missing from the sitemap or closed from the index, and a "cited"
+  column in gaps by section. `cite` now records in how many runs each URL was
+  cited (`url_hits`); older measurements still read.
+* **Measurements compared.** `cite --baseline old.json` compares a fresh
+  measurement with a previous one, `--against new.json` compares two files
+  without sending anything. A shift is "notable" only when an exact Fisher
+  test separates it from noise (p ≤ 0.1), per question and per provider;
+  competitors that appeared and dropped out are listed.
+* **Agent skill `indexgap-cite`** (Russian and English) walks the agent from
+  the logs to a dry run, the person's consent to spend, the measurement, the
+  comparison and the funnel, and says what not to promise. `init` installs it
+  and mentions it in AGENTS.md.
+* **Numbers in every notation.** The invented-number check now reads Indian
+  grouping (`12,34,567`), the Swiss apostrophe (`1'234.50`), the Arabic `٫` `٬`
+  `٪` and the full-width `％`, scale words and signs (`万`, `億`, `만`, `억`,
+  `тыс`, `млн`, `млрд`, million, billion, lakh, crore, Mio, Mrd…) and currency
+  after the number (`9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `5万元`). `₹12,34,567`
+  was read as 12.34; an invented `٩٥٪`, `9.900 €` or `5万元` was only "check
+  by eye". The finding shows the number as written (`5万元`, not `50000 万元`).
+  A number with a scale word in the data counts both as written and scaled.
+* **Image alts in every language.** `img-alt-filler`: an alt that is a
+  placeholder or a file name ("image", "фото", "صورة", "画像1", `IMG_2034.jpg`).
+  `img-alt-language`: alts in another script than the page's `lang` — an
+  untranslated template. An empty `alt=""` is decoration as WCAG intends, not a
+  missing alt; it is reported only when every image on the page is marked so.
+* **A test battery across languages:** 31 number cases and 21 alt cases in
+  Arabic, Persian, Hebrew, Hindi, Thai, Chinese, Japanese, Korean, Greek,
+  Russian and Western European notations, each through a real `check` run.
+
 ## 1.19.0 — 2026-11-02
 
 * **Gaps by section.** `doctor`, and `check` when given a sitemap or an index

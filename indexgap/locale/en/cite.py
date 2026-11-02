@@ -97,4 +97,10 @@ MESSAGES = {
         "runs per question: the answer is not deterministic, one is not enough",
     "действительно спросить; без него — пробный прогон":
         "actually ask; without it this is a dry run",
+    '{a0}: не JSON замера cite ({a1})':
+        '{a0}: not a cite measurement JSON ({a1})',
+    '{a0}: это не результат `indexgap cite --send` — нет поля results':
+        '{a0}: this is not the output of `indexgap cite --send` — there is no results field',
+    'Файл замера {a0} не найден.':
+        'Measurement file {a0} not found.',
 }

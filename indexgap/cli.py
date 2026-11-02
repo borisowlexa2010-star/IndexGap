@@ -27,7 +27,7 @@ import sys
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
-from . import (aeo, checks, cite, content, doctor, engines, fetch, freshness, generate,
+from . import (aeo, checks, cite, content, crawlers, doctor, engines, fetch, freshness, generate,
                install, portfolio, profiles, publish, repair, report, settings,
                sources)
 from . import diff as diffs
@@ -598,7 +598,9 @@ def _given_files_exist(args) -> None:
     а сверки с sitemap не было вовсе.
     """
     for flag, value in (("--sitemap", getattr(args, "sitemap", None)),
-                        ("--robots", getattr(args, "robots", None))):
+                        ("--robots", getattr(args, "robots", None)),
+                        ("--logs", getattr(args, "logs", None)),
+                        ("--cite", getattr(args, "cite", None))):
         for item in ([value] if isinstance(value, str) else value or []):
             if item and "://" not in item and not os.path.exists(item):
                 raise SourceError(tr("{a0} {a1}: такого файла нет.", a0=flag, a1=item))
@@ -1045,9 +1047,19 @@ def cmd_doctor(args):
         sitemap_urls = sm["urls"]
         _warn_undeclared(_guess_robots(args), args.sitemap, args.root, args.site)
     by_engine, by_source, cited, impressions = _collect_indexed(args)
-    if sitemap_urls is None and not by_engine and not by_source and not cited:
+    cited = dict(cited or {})
+    for path in getattr(args, "cite", None) or ():
+        measured = cite.read_result(path)
+        for name, counts in measured["cited"].items():
+            merged = cited.setdefault(name, {})
+            for url, n in counts.items():
+                merged[url] = merged.get(url, 0) + n
+            print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} прогонов с цитатой",
+                     a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
+    logs = crawlers.read_logs(getattr(args, "logs", None) or [], site=args.site or "")
+    if sitemap_urls is None and not by_engine and not by_source and not cited and not logs:
         raise SourceError(
-            tr("Нужен хотя бы --sitemap или --indexed, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv"))
+            tr("Нужен хотя бы --sitemap, --indexed или --logs, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv\n    --logs /var/log/nginx/access.log"))
 
     funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                   by_engine=by_engine, by_source=by_source,
@@ -1055,6 +1067,15 @@ def cmd_doctor(args):
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
     segments = doctor.segments(funnel_result, pages)
+    crawl = crawlers.coverage(pages, logs) if logs else {}
+    if crawl:
+        funnel_result["steps"].append({
+            "id": "ai-fetched", "name": tr("Открыто ИИ-поиском (по логам)"),
+            "count": crawl["ai_fetched_count"],
+            "lost": crawl["publishable"] - crawl["ai_fetched_count"],
+            "why": tr("ни бот ИИ-поиска, ни визит по запросу человека страницу не открывали"),
+            "base": "indexable"})
+    ai_seg = doctor.ai_segments(pages, crawl) if crawl else None
 
     print()
     for step in funnel_result["steps"]:
@@ -1063,6 +1084,7 @@ def cmd_doctor(args):
 
     _print_sitemap_detail(funnel_result)
     _print_segments(segments)
+    _print_crawlers(crawl, ai_seg)
 
     if cross:
         print(tr("\nСравнение поисковиков:"))
@@ -1112,11 +1134,13 @@ def cmd_doctor(args):
     path = report.build(analysis, funnel_result, causes,
                         out_path=check_out_path(report_pair(args.out)[0]),
                         site=args.site, cross=cross, notes=notes,
-                        title=tr("Разбор потерь"), segments=segments)
+                        title=tr("Разбор потерь"), segments=segments,
+                        crawl=crawl, ai_segments=ai_seg)
     json_path = report_pair(args.out)[1]
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
                             "segments": segments,
+                            "ai_crawlers": crawl or None, "ai_segments": ai_seg,
                             "foreign": foreign, "live": live, "near_page_one": near,
                             "notes": notes})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
@@ -1149,6 +1173,8 @@ def _print_segments(result: dict, limit: int = 8) -> None:
     shown = highlighted + [r for r in rows if r["segment"] not in marked]
     for row in shown[:limit]:
         flag = tr("  ← разрыв здесь") if row["segment"] in marked else ""
+        if row.get("cited"):
+            flag = tr("  процитировано {a0}", a0=row["cited"]) + flag
         print(tr("  {a3:<24} потеряно {a0:>4} из {a1:<5} дошло {a2:>4.0%}{a4}",
                  a0=row["lost"], a1=row["pages"], a2=row["coverage"],
                  a3=row["segment"], a4=flag))
@@ -1158,6 +1184,49 @@ def _print_segments(result: dict, limit: int = 8) -> None:
         print(tr("         Подсвеченный раздел теряет заметно больше остального сайта: "
                  "причина обычно общая для раздела — шаблон, перелинковка или "
                  "sitemap этого раздела, а не каждая страница по отдельности."))
+
+
+def _print_crawlers(crawl: dict, ai_seg: dict = None, limit: int = 12) -> None:
+    """Кто из ботов приходил, сколько страниц сайта открыл и где получил ошибку."""
+    if not crawl:
+        return
+    print(tr("\nБоты по логам ({a0} строк):", a0=crawl["lines"]))
+    for row in crawl["bots"][:limit]:
+        print(tr("  {a0:<20} {a1:<24} запросов {a2:>6}  страниц {a3:>5} из {a4}{a5}",
+                 a0=row["name"], a1=tr(crawlers.PURPOSE_TITLE[row["purpose"]]),
+                 a2=row["hits"], a3=row["pages"], a4=row["of"],
+                 a5=tr("  ошибок на {a0} стр.", a0=row["errors"]) if row["errors"] else ""))
+    errors = crawl.get("errors") or []
+    ai_errors = [e for e in errors if e["purpose"] in crawlers.AI_PURPOSES]
+    if ai_errors:
+        print(tr("\nБоты ИИ-поиска получили ошибку на страницах, которые есть в сборке ({a0}):",
+                 a0=len(ai_errors)))
+        # Одна причина на много страниц — одна строка: 403 на всех двадцати
+        # не нужно перечислять двадцать раз.
+        grouped = {}
+        for e in ai_errors:
+            for status in e["statuses"]:
+                grouped.setdefault((e["bot"], status), []).append(e["url"])
+        for (bot, status), urls in sorted(grouped.items(), key=lambda kv: -len(kv[1])):
+            print(tr("  {a0:<18} {a1}  на {a2} стр., например {a3}",
+                     a0=bot, a1=status, a2=len(urls), a3=urls[0]))
+    missing = crawl.get("ai_not_fetched") or []
+    if missing:
+        print(tr("\nИИ-поиск не открывал {a0} из {a1} страниц, пригодных к индексации.",
+                 a0=len(missing), a1=crawl["publishable"]))
+    if ai_seg and ai_seg.get("rows") and any(r["lost"] for r in ai_seg["rows"]):
+        marked = {h["segment"] for h in ai_seg.get("highlighted") or []}
+        shown = list(ai_seg.get("highlighted") or []) + [
+            r for r in ai_seg["rows"] if r["segment"] not in marked]
+        print(tr("  По разделам (открыто ИИ-поиском по сайту: {a0:.0%}):",
+                 a0=ai_seg["site"]["coverage"]))
+        for row in shown[:8]:
+            flag = tr("  ← разрыв здесь") if row["segment"] in marked else ""
+            print(tr("  {a3:<24} не открыто {a0:>4} из {a1:<5} открыто {a2:>4.0%}{a4}",
+                     a0=row["lost"], a1=row["pages"], a2=row["coverage"],
+                     a3=row["segment"], a4=flag))
+    for note in crawl.get("notes") or ():
+        print(f"  ! {note}")
 
 
 def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:
@@ -1503,6 +1572,12 @@ def cmd_cite(args):
     спросит и сколько это будет стоить вызовов.
     """
     project = apply_project_defaults(args)
+    baseline = cite.load_result(args.baseline) if getattr(args, "baseline", "") else None
+    if getattr(args, "against", ""):
+        if baseline is None:
+            raise SourceError(tr("--against сравнивает с прошлым замером: добавь --baseline old.json"))
+        _print_cite_compare(cite.compare(cite.load_result(args.against), baseline))
+        return 0
     domain = args.domain or ""
     if not domain and getattr(args, "site", ""):
         domain = re.sub(r"^https?://", "", args.site).split("/")[0]
@@ -1600,10 +1675,44 @@ def cmd_cite(args):
     for line in result["errors"][:5]:
         print(f"  ! {line}")
 
+    if baseline is not None:
+        result["baseline"] = dict(path=args.baseline, **cite.compare(result, baseline))
+        _print_cite_compare(result["baseline"])
     path = os.path.splitext(args.out)[0] + ".json"
     _write_json(path, result)
     print(tr("\nДанные: {a0}", a0=path))
     return 0
+
+
+def _print_cite_compare(diff: dict, limit: int = 10) -> None:
+    """Сравнение с прошлым замером: заметное — отдельно от шума."""
+    print(tr("\nС прошлого замера:"))
+    if diff.get("domain_changed"):
+        print(tr("  ! домен в замерах разный — сравнение почти ничего не значит"))
+    if not diff["providers"]:
+        print(tr("  общих пар «вопрос × провайдер» нет — сравнивать нечего"))
+    for row in diff["providers"]:
+        (a, n1), (b, n2) = row["before"], row["after"]
+        mark = (tr("заметно (p={a0:.2f})", a0=row["p"]) if row["notable"]
+                else tr("в пределах шума"))
+        title = cite.PROVIDERS.get(row["provider"], {}).get("title", row["provider"])
+        print(tr("  {a0:<18} {a1}/{a2} → {a3}/{a4}  ({a5:+.0%})  {a6}",
+                 a0=title, a1=a, a2=n1, a3=b, a4=n2, a5=row["delta"], a6=mark))
+        if row["competitors_new"]:
+            print(tr("      новые среди источников: {a0}", a0=", ".join(row["competitors_new"][:5])))
+        if row["competitors_gone"]:
+            print(tr("      пропали из источников: {a0}", a0=", ".join(row["competitors_gone"][:5])))
+    notable = [r for r in diff["rows"] if r["notable"]]
+    if notable:
+        print(tr("  Вопросы с заметным сдвигом:"))
+        for r in sorted(notable, key=lambda r: -abs(r["delta"]))[:limit]:
+            print(f"    {r['delta']:+.0%}  [{r['provider']}] {r['prompt'][:60]}")
+    elif diff["rows"]:
+        print(tr("  Ни по одному вопросу сдвиг не выходит за шум: прогонов на вопрос мало. "
+                 "Больше --runs — меньше шума."))
+    if diff["only_now"] or diff["only_before"]:
+        print(tr("  Не сравнивались — есть только в одном замере: новых {a0}, убранных {a1}",
+                 a0=len(diff["only_now"]), a1=len(diff["only_before"])))
 
 
 def _project_config(path):
@@ -1968,6 +2077,10 @@ def build_parser():
     p.add_argument("--send", action="store_true",
                    help=tr("действительно спросить; без него — пробный прогон"))
     p.add_argument("--out", default="indexgap-cite.json")
+    p.add_argument("--baseline", default="", metavar="old-cite.json",
+                   help=tr("прошлый замер: показать, что изменилось, и что из этого не шум"))
+    p.add_argument("--against", default="", metavar="new-cite.json",
+                   help=tr("сравнить --baseline с готовым замером, ничего не отправляя"))
     p.set_defaults(func=cmd_cite)
 
     p = sub.add_parser("profiles", help=tr("какие бывают типы контента и чем отличаются"))
@@ -1982,6 +2095,10 @@ def build_parser():
     p.add_argument("--indexed", action="append", metavar=tr("[движок=]файл.csv"),
                    help=tr("выгрузка индексации или цитирований Copilot из Bing AI Performance; несколько раз для разных источников"))
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
+    p.add_argument("--logs", action="append", metavar=tr("access.log"),
+                   help=tr("access-лог сервера (combined или JSON-строки, можно .gz): какие страницы забирали боты ИИ-поиска; несколько раз для нескольких файлов"))
+    p.add_argument("--cite", action="append", metavar="indexgap-cite.json",
+                   help=tr("результат `indexgap cite --send`: процитированные страницы идут в воронку и в разбивку по разделам"))
     p.add_argument("--out", default="indexgap-doctor.html",
                    help=tr("куда положить HTML-отчёт; данные для машин ложатся рядом, с расширением .json. Имя с .json — это имя данных, отчёт тогда рядом, .html"))
     p.set_defaults(func=cmd_doctor)

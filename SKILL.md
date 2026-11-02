@@ -45,6 +45,7 @@ cd <корень проекта> && indexgap init
 | перед деплоем | `indexgap-review` → `indexgap diff` | новая сборка против той, что на проде |
 | публикация и разбор | `indexgap-publish` | sitemap, IndexNow, «почему нет трафика» |
 | несколько сайтов | `indexgap-portfolio` | у человека портфель, а не один проект |
+| ИИ-поиск и цитирование | `indexgap-cite` | ИИ-боты в логах, цитирование в ChatGPT/Perplexity, «нас не упоминают в ответах» |
 
 Скиллы ставятся в проект командой `indexgap init` и лежат в
 `.claude/skills/indexgap-*/`. Claude Code читает их сам; для Codex `init`

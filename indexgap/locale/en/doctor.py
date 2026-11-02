@@ -276,4 +276,38 @@ MESSAGES = {
         "not the size of the index. Whatever did not fit will count as \"not "
         "indexed\" in the funnel; the API or the BigQuery bulk export gives the "
         "full list",
+    'ChatGPT API (замер indexgap cite)':
+        'ChatGPT API (indexgap cite measurement)',
+    'Gemini API (замер indexgap cite)':
+        'Gemini API (indexgap cite measurement)',
+    'Grok (замер indexgap cite)':
+        'Grok (indexgap cite measurement)',
+    'Perplexity (замер indexgap cite)':
+        'Perplexity (indexgap cite measurement)',
+    '{a0} — каталог; нужен файл лога (можно .gz).':
+        '{a0} is a directory; a log file is needed (.gz is fine).',
+    '{a0}: {a1} из {a2} запросов получили 401/403. Похоже, его отсекает защита CDN или WAF, а не robots.txt (Cloudflare блокирует ИИ-ботов по умолчанию) — страницы для этого ИИ-поиска закрыты, хотя robots.txt их разрешает':
+        '{a0}: {a1} of {a2} requests got 401/403. It looks like CDN or WAF protection is cutting it off, not robots.txt (Cloudflare blocks AI bots by default) — the pages are closed to this AI search even though robots.txt allows them',
+    'Бот определён по User-Agent, а его может подделать кто угодно. Проверка по обратному DNS здесь не делается — цифры по редким ботам читай с этой поправкой':
+        'Bots are identified by User-Agent, which anyone can fake. No reverse-DNS check is made here — read the numbers for rare bots with that caveat',
+    'В логах ({a0} строк) нет ни одного известного бота. Либо это не access-лог (нужен формат combined nginx/Apache или JSON-строки), либо User-Agent в нём не пишется.':
+        'The logs ({a0} lines) contain no known bot. Either this is not an access log (the combined nginx/Apache format or JSON lines is needed), or it does not record the User-Agent.',
+    'ИИ по запросу человека':
+        "AI on a person's request",
+    'ИИ-поиск':
+        'AI search',
+    'Лог {a0} не найден.':
+        'Log {a0} not found.',
+    'в логах нет ни одного бота ИИ-поиска (OAI-SearchBot, Claude-SearchBot, PerplexityBot) и ни одного визита по запросу человека. Для ИИ-ответов сайт пока невидим — проверь robots.txt и защиту CDN':
+        "the logs show no AI search bot (OAI-SearchBot, Claude-SearchBot, PerplexityBot) and no visit on a person's request. The site is invisible to AI answers for now — check robots.txt and the CDN protection",
+    'обучение моделей':
+        'model training',
+    'поисковик':
+        'search engine',
+    'все {a0} изображени(й) с пустым alt="" — так помечают украшения; если среди них есть фото по теме страницы, им нужен alt':
+        'all {a0} image(s) have an empty alt="" — that marks decoration; if any of them is a photo about the page\'s subject, it needs an alt',
+    'страница на lang=«{a0}», а alt изображений написан другим письмом ({a1}): похоже, шаблон alt не переведён':
+        'the page is lang="{a0}", but its image alts are in another script ({a1}): the alt template looks untranslated',
+    'у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка или имя файла, а не описание':
+        '{a0} of {a1} image alts say nothing: {a2} — a placeholder or a file name, not a description',
 }

@@ -398,6 +398,80 @@ def check_extractable(page, cfg: dict = None) -> list:
     if blocks.get("img") and blocks.get("img_no_alt"):
         issues.append(("info", page.url, "img-no-alt",
                        tr("{a0} изображени(й) без alt", a0=blocks['img_no_alt'])))
+    elif (blocks.get("img_empty_alt", 0) >= 3 and blocks["img_empty_alt"] == blocks.get("img")):
+        # alt="" верен для украшений. Когда так помечены все картинки страницы,
+        # это почти всегда шаблон, а не решение: товарное фото не декор.
+        issues.append(("info", page.url, "img-no-alt", tr(
+            "все {a0} изображени(й) с пустым alt=\"\" — так помечают украшения; "
+            "если среди них есть фото по теме страницы, им нужен alt",
+            a0=blocks["img_empty_alt"])))
+    issues += check_alt_text(page)
+    return issues
+
+
+# Alt, который ничего не говорит: заглушка шаблона на любом языке. Сверяется
+# всё значение целиком, а не вхождение: «фото квартиры в Москве» — хороший alt.
+ALT_FILLERS = {
+    "image", "img", "picture", "photo", "pic", "photograph", "icon", "logo", "banner",
+    "thumbnail", "placeholder", "untitled", "alt", "alt text", "image description",
+    "изображение", "картинка", "фото", "фотография", "иконка", "логотип", "баннер",
+    "рисунок", "зображення", "картинка", "світлина",
+    "bild", "foto", "abbildung", "imagen", "imagem", "immagine", "obrázek", "zdjęcie",
+    "obraz", "kép", "resim", "görsel", "afbeelding", "billede", "bilde", "kuva",
+    "صورة", "الصورة", "صوره", "تصویر", "عکس", "תמונה", "छवि", "तस्वीर", "फोटो",
+    "รูปภาพ", "รูป", "ภาพ", "hình ảnh", "ảnh", "gambar", "foto produk",
+    "图片", "图像", "照片", "圖片", "画像", "写真", "イメージ", "이미지", "사진",
+    "εικόνα", "φωτογραφία",
+}
+# Имя файла вместо описания: `IMG_2034`, `DSC00123`, `PXL_20240101_1234`,
+# `photo-1.webp`, хеш загрузчика. Не «iPhone 15 Pro 256GB»: число в alt —
+# не признак файла.
+_ALT_FILE = re.compile(
+    r"^(?:img|image|dsc|dscn|dscf|dcim|pxl|photo|screenshot|wp|gopr|mvimg)[\s_\-]*\d{2,}[\w\-]*$|"
+    r"^[^\s]+\.(?:jpe?g|png|gif|webp|avif|svg|bmp|tiff?|heic)$|"
+    r"^[a-f0-9][a-f0-9\-_]{15,}$", re.I)
+
+
+def _alt_is_filler(alt: str) -> bool:
+    text = re.sub(r"[\s\u3000]+", " ", alt.strip().strip(".:-—_").lower())
+    if not text:
+        return False
+    if text in ALT_FILLERS:
+        return True
+    # «image 3», «фото 12», «画像1» — заглушка с номером.
+    bare = re.sub(r"[\s#№\-_]*\d+$", "", text)
+    if bare != text and bare in ALT_FILLERS:
+        return True
+    return bool(_ALT_FILE.match(text))
+
+
+def check_alt_text(page) -> list:
+    """
+    Alt, который есть, но не работает: заглушка или имя файла — и alt не тем
+    письмом, каким написана страница (английский alt на русской или арабской
+    версии — шаблон, который забыли перевести).
+    """
+    from .signals import declared_scripts, text_script, SCRIPTS
+
+    alts = [a for a, _ in (getattr(page, "alts", None) or [])]
+    if not alts:
+        return []
+    issues = []
+    fillers = [a for a in alts if _alt_is_filler(a)]
+    if fillers:
+        shown = ", ".join(f"«{a[:30]}»" for a in sorted(set(fillers))[:4])
+        issues.append(("info", page.url, "img-alt-filler", tr(
+            "у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка "
+            "или имя файла, а не описание", a0=len(fillers), a1=len(alts), a2=shown)))
+    expected = declared_scripts(page.lang)
+    meaningful = [a for a in alts if a not in fillers]
+    if expected and meaningful:
+        script, share, letters = text_script(" ".join(meaningful), expected)
+        if letters >= 20 and share >= 0.8 and script not in expected:
+            issues.append(("info", page.url, "img-alt-language", tr(
+                "страница на lang=«{a0}», а alt изображений написан другим письмом "
+                "({a1}): похоже, шаблон alt не переведён", a0=page.lang.strip(),
+                a1=tr(SCRIPTS[script][0]))))
     return issues
 
 

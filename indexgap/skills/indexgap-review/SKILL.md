@@ -181,7 +181,7 @@ indexgap check --out indexgap-baseline.json                # один раз; ф
 indexgap check --baseline indexgap-baseline.json --strict  # падает только на новых critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.19.0` с `root`, `site`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.20.0` с `root`, `site`,
 необязательными `baseline` и `args`.
 
 ## Перед деплоем
