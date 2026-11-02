@@ -175,6 +175,8 @@ CODE_HELP = {
     "long-paragraph": N_("Очень длинные абзацы плохо извлекаются."),
     "no-structure": N_("Нет ни списков, ни таблиц."),
     "img-no-alt": N_("Изображения без alt."),
+    "img-alt-filler": N_("alt есть, но это заглушка или имя файла: ни поиску, ни диктору он ничего не говорит."),
+    "img-alt-language": N_("alt написан не тем письмом, что страница: шаблон alt не переведён."),
     "jsonld-broken": N_("Блок JSON-LD не парсится — для поисковика его нет."),
     "jsonld-faq-invisible": N_("В разметке FAQ есть вопросы, которых нет на странице. Это риск ручных санкций."),
     "jsonld-no-type": N_("В блоке JSON-LD нет @type."),
@@ -201,18 +203,51 @@ def _segments_html(result: dict, limit: int = 30) -> str:
     ordered = list(result.get("highlighted") or []) + [r for r in rows if r["segment"] not in marked]
     # Выражение без обратной косой: в f-строке до Python 3.12 её нельзя.
     hl = ' class="hl"'
+    cited = any("cited" in r for r in rows)
     body = "".join(
         f'<tr{hl if r["segment"] in marked else ""}>'
         f'<td class="mono">{_esc(r["segment"])}</td><td class="n">{r["pages"]}</td>'
         f'<td class="n">{"—" if r.get("missing_from_sitemap") is None else r["missing_from_sitemap"]}</td>'
         f'<td class="n">{"—" if r.get("not_indexed") is None else r["not_indexed"]}</td>'
-        f'<td class="n">{r["coverage"]:.0%}</td></tr>'
+        f'<td class="n">{r["coverage"]:.0%}</td>'
+        + (f'<td class="n">{r.get("cited", 0)}</td>' if cited else "") + '</tr>'
         for r in ordered[:limit])
     return (tr("<h2>Разрывы по разделам</h2>")
-            + tr("<div class=\"scroll\"><table><thead><tr><th>раздел</th><th class=\"n\">страниц</th><th class=\"n\">нет в sitemap</th><th class=\"n\">нет в индексе</th><th class=\"n\">дошло</th></tr></thead><tbody>")
+            + tr("<div class=\"scroll\"><table><thead><tr><th>раздел</th><th class=\"n\">страниц</th><th class=\"n\">нет в sitemap</th><th class=\"n\">нет в индексе</th><th class=\"n\">дошло</th>")
+            + (tr("<th class=\"n\">процитировано</th>") if cited else "") + "</tr></thead><tbody>"
             + body + "</tbody></table></div>"
             + tr("<p class=\"note\">По сайту до конца воронки дошло {a0:.0%}. Выделены разделы, которые теряют заметно больше остального сайта: причина там обычно одна на весь раздел — шаблон, перелинковка или sitemap раздела.</p>",
                  a0=result["site"]["coverage"]))
+
+
+def _crawlers_html(crawl: dict, ai_seg: dict = None) -> str:
+    """Боты по логам и разделы, которые ИИ-поиск обходит стороной."""
+    if not crawl or not crawl.get("bots"):
+        return ""
+    from . import crawlers
+    bots = "".join(
+        f'<tr><td>{_esc(b["name"])}</td><td>{_esc(tr(crawlers.PURPOSE_TITLE[b["purpose"]]))}</td>'
+        f'<td class="n">{b["hits"]}</td><td class="n">{b["pages"]}</td>'
+        f'<td class="n">{b["errors"] or ""}</td></tr>'
+        for b in crawl["bots"][:20])
+    out = (tr("<h2>Боты по логам сервера</h2>")
+           + tr("<div class=\"scroll\"><table><thead><tr><th>бот</th><th>зачем приходит</th><th class=\"n\">запросов</th><th class=\"n\">страниц сайта</th><th class=\"n\">страниц с ошибкой</th></tr></thead><tbody>")
+           + bots + "</tbody></table></div>")
+    rows = (ai_seg or {}).get("rows") or []
+    if rows and any(r.get("lost") for r in rows):
+        marked = {h["segment"] for h in ai_seg.get("highlighted") or []}
+        ordered = list(ai_seg.get("highlighted") or []) + [r for r in rows if r["segment"] not in marked]
+        hl = ' class="hl"'
+        body = "".join(
+            f'<tr{hl if r["segment"] in marked else ""}><td class="mono">{_esc(r["segment"])}</td>'
+            f'<td class="n">{r["pages"]}</td><td class="n">{r["lost"]}</td>'
+            f'<td class="n">{r.get("ai_user", 0)}</td><td class="n">{r["coverage"]:.0%}</td></tr>'
+            for r in ordered[:30])
+        out += (tr("<h3>Что ИИ-поиск не открывал, по разделам</h3>")
+                + tr("<div class=\"scroll\"><table><thead><tr><th>раздел</th><th class=\"n\">страниц</th><th class=\"n\">не открыто</th><th class=\"n\">по запросу человека</th><th class=\"n\">открыто</th></tr></thead><tbody>")
+                + body + "</tbody></table></div>")
+    notes = "".join(f'<p class="note">{_esc(n)}</p>' for n in crawl.get("notes") or ())
+    return out + tr("<p class=\"note\">Обучающие боты (GPTBot, ClaudeBot, CCBot) на цитирование сегодня не влияют, поэтому в «открыто ИИ-поиском» не считаются. «По запросу человека» — ассистент открыл страницу, отвечая на чей-то вопрос.</p>") + notes
 
 
 def _funnel_html(f: dict) -> str:
@@ -308,7 +343,8 @@ def _templates_html(templates: list) -> str:
 def build(analysis: dict, funnel_result: dict = None, causes: list = None,
           out_path: str = "indexgap-report.html", site: str = "",
           cross: list = None, notes: list = None, title: str = tr("Отчёт конвейера"),
-          templates: list = None, segments: dict = None) -> str:
+          templates: list = None, segments: dict = None,
+          crawl: dict = None, ai_segments: dict = None) -> str:
     pages = analysis.get("pages") or []
     issues = analysis.get("issues") or []
     graph = analysis.get("graph") or {}
@@ -351,7 +387,8 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
     if funnel_result and funnel_result.get("steps"):
         funnel_block = (tr("<h2>Воронка конвейера</h2>") + _funnel_html(funnel_result) +
                         tr("<p class=\"note\">Каждый переход теряет страницы. Потери на разных переходах лечатся по-разному, поэтому важно видеть, где именно они происходят. Учти: экспорт «Страницы» из Search Console — это отчёт о показах, и страница в индексе без показов в него не попадает.</p>")
-                        + _segments_html(segments))
+                        + _segments_html(segments)
+                        + _crawlers_html(crawl, ai_segments))
 
     doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=len(graph.get('orphans') or []), a12=len(dupes), a13=_first_things(issues, graph, dupes) + _templates_html(templates), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
 

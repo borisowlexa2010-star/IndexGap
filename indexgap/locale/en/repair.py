@@ -309,4 +309,8 @@ MESSAGES = {
     "Поставь в шаблоне <html lang> по языку текста. На многоязычном сайте бери его из данных страницы, а не из общего шаблона.":
         "Set <html lang> in the template to the language of the text. On a multilingual "
         "site take it from the page's data, not from the shared template.",
+    'Замени заглушку в alt описанием того, что на картинке, — из данных строки, а не именем файла.':
+        "Replace the placeholder alt with a description of what the image shows — from the row's data, not the file name.",
+    'Переведи шаблон alt на язык страницы или собирай alt из данных строки на её языке.':
+        "Translate the alt template into the page's language, or build the alt from the row's data in that language.",
 }

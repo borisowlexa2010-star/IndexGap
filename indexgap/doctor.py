@@ -1152,7 +1152,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
             # Без «потеряно»: отсутствие цитирований — не потеря, данные выборка.
             steps.append({
                 "id": "cited",
-                "name": tr("Цитируется: {a0}", a0=name),
+                "name": tr("Цитируется: {a0}", a0=sources.title_of(name)),
                 "count": len(hit), "lost": None,
                 "engine": name, "kind": sources.CITATION})
         # ИИ цитирует страницу, которую сайт закрыл от индекса: страница
@@ -1411,20 +1411,14 @@ def segments(funnel_result: dict, pages: list = None) -> dict:
     «40 страниц не в индексе» не говорит, что чинить. «35 из них — /rent/,
     где в индексе 12% при 80% по сайту» говорит: беда в шаблоне или в
     перелинковке одного раздела, а не в сайте. Поэтому раздел подсвечивается,
-    только когда он теряет заметно больше среднего — иначе это просто
+    только когда он теряет заметно больше остального сайта — иначе это просто
     размер раздела, а не его проблема.
-
-    Уровень разбивки выбирается сам: если почти всё лежит в одном разделе
-    (`/blog/…` на блоге), смотреть надо на уровень ниже — иначе таблица из
-    одной строки повторяет общую цифру.
     """
     from .publish import indexable
 
     funnel_result = funnel_result or {}
     pages = pages or []
     publishable = {url_key(p.url): p.url for p in pages if indexable(p)}
-    if len(publishable) < SEGMENT_MIN:
-        return {"base": "", "rows": [], "highlighted": []}
 
     no_sitemap = _keys(funnel_result.get("missing_from_sitemap") or [])
     not_indexed = _keys(funnel_result.get("not_indexed") or [])
@@ -1432,7 +1426,62 @@ def segments(funnel_result: dict, pages: list = None) -> dict:
     has_index = bool(funnel_result.get("has_index"))
     if not (has_sitemap or has_index):
         return {"base": "", "rows": [], "highlighted": []}
+    # Процитированные ИИ страницы — отдельная колонка: подсветки по ним нет,
+    # цитирования — выборка, и «не процитирован» не значит «потерян».
+    cited = _keys(u for u, _ in funnel_result.get("cited_top") or ())
 
+    def stats(keys: set) -> dict:
+        in_map = keys - no_sitemap
+        known = in_map if has_sitemap else keys
+        lost_index = known & not_indexed
+        out = {
+            "pages": len(keys),
+            "missing_from_sitemap": len(keys & no_sitemap) if has_sitemap else None,
+            "not_indexed": len(lost_index) if has_index else None,
+            # Доля дошедших до конца воронки: из пригодных — в sitemap и в индексе.
+            "reached": len(known - lost_index) if has_index else len(in_map),
+        }
+        if cited:
+            out["cited"] = len(keys & cited)
+        return out
+
+    return section_gaps(publishable, stats)
+
+
+def ai_segments(pages: list, crawl: dict) -> dict:
+    """
+    Разрывы ИИ-поиска по разделам: какие разделы боты ИИ-поиска и визиты по
+    запросу человека обходят стороной. Обучающие боты не считаются — на то,
+    процитируют ли страницу сегодня, они не влияют.
+    """
+    from .publish import indexable
+    from . import crawlers
+
+    if not crawl:
+        return {"base": "", "rows": [], "highlighted": []}
+    publishable = {url_key(p.url): p.url for p in (pages or []) if indexable(p)}
+    fetched = crawl.get("fetched") or {}
+    seen = _keys(fetched.get(crawlers.AI_SEARCH, []) + fetched.get(crawlers.AI_USER, []))
+    user = _keys(fetched.get(crawlers.AI_USER, []))
+
+    def stats(keys: set) -> dict:
+        return {"pages": len(keys), "reached": len(keys & seen),
+                "ai_user": len(keys & user)}
+
+    return section_gaps(publishable, stats)
+
+
+def section_gaps(publishable: dict, stats) -> dict:
+    """
+    Общее ядро разбивки по разделам: `stats(keys)` считает для набора страниц
+    `pages` и `reached` (дошедшие), остальное — колонки как есть.
+
+    Уровень разбивки выбирается сам: если почти всё лежит в одном разделе
+    (`/blog/…` на блоге), смотреть надо на уровень ниже — иначе таблица из
+    одной строки повторяет общую цифру.
+    """
+    if len(publishable) < SEGMENT_MIN:
+        return {"base": "", "rows": [], "highlighted": []}
     parts = {key: _segment_parts(url) for key, url in publishable.items()}
 
     # Спускаемся, пока один подраздел держит почти весь сайт.
@@ -1448,18 +1497,6 @@ def segments(funnel_result: dict, pages: list = None) -> dict:
         if n < 0.8 * len(publishable):
             break
         base = base + [child]
-
-    def stats(keys: set) -> dict:
-        in_map = keys - no_sitemap
-        known = in_map if has_sitemap else keys
-        lost_index = known & not_indexed
-        return {
-            "pages": len(keys),
-            "missing_from_sitemap": len(keys & no_sitemap) if has_sitemap else None,
-            "not_indexed": len(lost_index) if has_index else None,
-            # Доля дошедших до конца воронки: из пригодных — в sitemap и в индексе.
-            "reached": len(known - lost_index) if has_index else len(in_map),
-        }
 
     site = stats(set(publishable))
     site_lost = site["pages"] - site["reached"]

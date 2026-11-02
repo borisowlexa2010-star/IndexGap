@@ -468,7 +468,7 @@ def update_agents_md(root: str, detected: dict, create: bool = False) -> str:
     if not os.path.isfile(path) and not create:
         return ""
     block = (
-        tr("{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`).\n{a6}", a0=AGENTS_START, a1=detected['profile'], a2=detected['content'], a3=detected['content'], a4=detected['site'] or tr('<адрес сайта>'), a5=' --dataset ' + detected['dataset'] if detected.get('dataset') else '', a6=AGENTS_END)
+        tr("{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`), ИИ-поиск и цитирование (`indexgap-cite`).\n{a6}", a0=AGENTS_START, a1=detected['profile'], a2=detected['content'], a3=detected['content'], a4=detected['site'] or tr('<адрес сайта>'), a5=' --dataset ' + detected['dataset'] if detected.get('dataset') else '', a6=AGENTS_END)
     )
     existing = ""
     if os.path.isfile(path):

@@ -196,10 +196,6 @@ MESSAGES = {
         "    the daily command is just `indexgap check`.",
     "Новых: {a0}   Изменённых: {a1}   Без изменений: {a2}   Пропало: {a3}":
         "New: {a0}   Changed: {a1}   Unchanged: {a2}   Gone: {a3}",
-    "Нужен хотя бы --sitemap или --indexed, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv":
-        "At least one of --sitemap or --indexed is needed, otherwise there is "
-        "nothing to compare against.\n    --sitemap ./public/sitemap.xml\n"
-        "    --indexed google=gsc.csv --indexed bing=bing.csv",
     "Отбраковано:      {a0}": "Rejected:         {a0}",
     "Отправлено, очередь очищена.": "Submitted, the queue is clear.",
     "Отправлять нечего.": "Nothing to submit.",
@@ -518,4 +514,64 @@ MESSAGES = {
         '  … {a0} more section(s) — all of them in the JSON',
     '         Подсвеченный раздел теряет заметно больше остального сайта: причина обычно общая для раздела — шаблон, перелинковка или sitemap этого раздела, а не каждая страница по отдельности.':
         '         A highlighted section loses noticeably more than the rest of the site: the cause is usually shared by the whole section — its template, its internal links or its sitemap — not each page on its own.',
+    '\nБоты ИИ-поиска получили ошибку на страницах, которые есть в сборке ({a0}):':
+        '\nAI search bots got an error on pages that exist in the build ({a0}):',
+    '\nБоты по логам ({a0} строк):':
+        '\nBots in the logs ({a0} lines):',
+    '\nИИ-поиск не открывал {a0} из {a1} страниц, пригодных к индексации.':
+        '\nAI search never opened {a0} of {a1} indexable pages.',
+    '\nС прошлого замера:':
+        '\nSince the previous measurement:',
+    '      новые среди источников: {a0}':
+        '      new among the sources: {a0}',
+    '      пропали из источников: {a0}':
+        '      gone from the sources: {a0}',
+    '  ! домен в замерах разный — сравнение почти ничего не значит':
+        '  ! the two measurements are for different domains — the comparison means little',
+    '  {a0:<18} {a1}  на {a2} стр., например {a3}':
+        '  {a0:<18} {a1}  on {a2} page(s), e.g. {a3}',
+    '  {a0:<18} {a1}/{a2} → {a3}/{a4}  ({a5:+.0%})  {a6}':
+        '  {a0:<18} {a1}/{a2} → {a3}/{a4}  ({a5:+.0%})  {a6}',
+    '  {a0:<20} {a1:<24} запросов {a2:>6}  страниц {a3:>5} из {a4}{a5}':
+        '  {a0:<20} {a1:<24} requests {a2:>6}  pages {a3:>5} of {a4}{a5}',
+    '  {a3:<24} не открыто {a0:>4} из {a1:<5} открыто {a2:>4.0%}{a4}':
+        '  {a3:<24} not opened {a0:>4} of {a1:<5} opened {a2:>4.0%}{a4}',
+    '  Вопросы с заметным сдвигом:':
+        '  Questions with a notable shift:',
+    '  Не сравнивались — есть только в одном замере: новых {a0}, убранных {a1}':
+        '  Not compared — present in one measurement only: {a0} new, {a1} removed',
+    '  Ни по одному вопросу сдвиг не выходит за шум: прогонов на вопрос мало. Больше --runs — меньше шума.':
+        '  No question shifted beyond noise: there are few runs per question. More --runs, less noise.',
+    '  По разделам (открыто ИИ-поиском по сайту: {a0:.0%}):':
+        '  By section (opened by AI search across the site: {a0:.0%}):',
+    '  общих пар «вопрос × провайдер» нет — сравнивать нечего':
+        '  no question × provider pair is in both — nothing to compare',
+    '  ошибок на {a0} стр.':
+        '  errors on {a0} page(s)',
+    '  процитировано {a0}':
+        '  cited {a0}',
+    '--against сравнивает с прошлым замером: добавь --baseline old.json':
+        '--against compares with a previous measurement: add --baseline old.json',
+    'access-лог сервера (combined или JSON-строки, можно .gz): какие страницы забирали боты ИИ-поиска; несколько раз для нескольких файлов':
+        "the server's access log (combined or JSON lines, .gz is fine): which pages AI search bots fetched; repeat for several files",
+    'access.log':
+        'access.log',
+    'Нужен хотя бы --sitemap, --indexed или --logs, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv\n    --logs /var/log/nginx/access.log':
+        'At least --sitemap, --indexed or --logs is needed, otherwise there is nothing to compare with.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv\n    --logs /var/log/nginx/access.log',
+    'Открыто ИИ-поиском (по логам)':
+        'Opened by AI search (logs)',
+    'Цитирование — {a0}: {a1} страниц(ы), {a2} прогонов с цитатой':
+        'Citations — {a0}: {a1} page(s), {a2} run(s) with a citation',
+    'в пределах шума':
+        'within noise',
+    'заметно (p={a0:.2f})':
+        'notable (p={a0:.2f})',
+    'ни бот ИИ-поиска, ни визит по запросу человека страницу не открывали':
+        "neither an AI search bot nor a person's request opened the page",
+    'прошлый замер: показать, что изменилось, и что из этого не шум':
+        'a previous measurement: show what changed and which of it is not noise',
+    'результат `indexgap cite --send`: процитированные страницы идут в воронку и в разбивку по разделам':
+        'the output of `indexgap cite --send`: cited pages join the funnel and the gaps by section',
+    'сравнить --baseline с готовым замером, ничего не отправляя':
+        'compare --baseline with an existing measurement, sending nothing',
 }

@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.19.0
+- uses: borisowlexa2010-star/IndexGap@v1.20.0
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.19.0
+- uses: borisowlexa2010-star/IndexGap@v1.20.0
   with:
     root: out
     site: https://example.com
@@ -510,6 +510,22 @@ and cancels the cluster, a missing `x-default`, and language codes where a
 country code was meant — `uk` is Ukrainian, not the United Kingdom. On a
 monolingual site none of this runs.
 
+**Numbers in every notation.** The invented-number check reads the numbers
+pages actually carry: Arabic-Indic, Persian, Devanagari, Thai and full-width
+digits; `1.234,50`, `1 234,50` with a narrow no-break space, Swiss `1'234.50`,
+Indian `12,34,567`; the Arabic `٫` and `٬` separators and `٪`; scale words and
+signs — `3万円` is 30,000, `2億` is 200,000,000, `12,5 млн`, `₹12 lakh`,
+`$2.5 million` — and a currency written after the number (`9.900 €`, `9,900 ₪`,
+`٩٩٠٠ دولار`, `5万元`). The finding shows the number as the page writes it.
+Until 1.20 `₹12,34,567` was read as 12.34, and an invented `٩٥٪` or `9.900 €`
+went to "check by eye" instead of a critical finding.
+
+**Image alts in every language.** `img-alt-filler` flags alts that say nothing:
+"image", "фото", "صورة", "画像1", "이미지", `IMG_2034.jpg`. `img-alt-language`
+flags a Russian, Arabic, Japanese or Greek page whose alts are in Latin script —
+a template nobody translated. An empty `alt=""` is treated as WCAG intends,
+decoration, and is flagged only when every image on the page is marked that way.
+
 And `en-us` versus `en-gb` is **not** a duplicate. Those pages are legitimately
 near-identical; "keep one and set a canonical" would delete the regional
 version. Pairs inside one hreflang cluster are excluded from the duplicate
@@ -580,6 +596,28 @@ yes/no, because these answers are not deterministic. And it never says "ChatGPT
 cites you" — what it measured is the API, which OpenAI's own docs describe as
 behaving differently from the product. It is the only command that needs API
 keys, it is off by default, and it sends nothing without `--send`.
+
+**AI crawlers from your server logs, no keys.** `doctor --logs access.log`
+(combined format or CDN JSON lines, `.gz` read as is, repeatable) shows which
+bots actually fetched which pages, split by why they came: **training**
+(GPTBot, ClaudeBot, CCBot), **AI search** (OAI-SearchBot, Claude-SearchBot,
+PerplexityBot) and **on a person's request** (ChatGPT-User, Claude-User,
+Perplexity-User) — the closest the logs get to "an assistant used this page in
+an answer". Only the last two count toward "opened by AI search", because
+training crawls do not decide today's citations. A section AI search skips is
+highlighted like any other gap by section, and an AI bot getting 401/403 on
+most requests is named for what it usually is: a CDN or WAF rule (Cloudflare
+blocks AI bots by default), not robots.txt. Bots are identified by User-Agent,
+which can be faked, and the report says so.
+
+**Measurements compared, noise named.** `cite --baseline old.json --against
+new.json` compares two measurements without sending anything (`--send
+--baseline old.json` compares a fresh one). A change in share is called notable
+only when an exact Fisher test separates it from noise — with three runs per
+question, 1/3 → 2/3 is noise, and the report says "within noise" instead of
+"growth". It lists competitors that came into and dropped out of the sources.
+`doctor --cite result.json` puts the measured citations into the funnel and the
+gaps by section, next to Copilot's.
 
 Where an engine publishes what it actually cited, the thermometer is not needed.
 Bing Webmaster Tools does, for Copilot, and `indexgap doctor` reads that export
@@ -661,9 +699,9 @@ killed a 47,000-page run. Across eleven of them critical findings went from
 
 ## For agents
 
-`SKILL.en.md` at the root is the overview (`SKILL.md` is the same in Russian). `indexgap/skills/` holds four
+`SKILL.en.md` at the root is the overview (`SKILL.md` is the same in Russian). `indexgap/skills/` holds five
 stage-specific skills — `indexgap-plan`, `indexgap-review`, `indexgap-publish`,
-`indexgap-portfolio` — which `indexgap init` copies into your project's
+`indexgap-portfolio`, `indexgap-cite` — which `indexgap init` copies into your project's
 `.claude/skills/`. A narrow skill fires more accurately than a broad one:
 the agent sees only the commands and finding codes for the stage it's in.
 
