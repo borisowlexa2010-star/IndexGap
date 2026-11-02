@@ -30,6 +30,7 @@ CSS = """
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
 font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 .wrap{max-width:1000px;margin:0 auto;padding:44px 24px 90px}
+tr.hl td{background:color-mix(in srgb,var(--bad) 12%,transparent);font-weight:600}
 h1{font-size:27px;margin:0 0 6px;letter-spacing:-.02em}
 h2{font-size:19px;margin:44px 0 14px;letter-spacing:-.01em}
 .sub{color:var(--fg2);margin:0 0 30px;font-size:14px}
@@ -191,6 +192,29 @@ def _esc(s) -> str:
     return html.escape(str(s))
 
 
+def _segments_html(result: dict, limit: int = 30) -> str:
+    """Разрывы по разделам: подсвеченные строки — где чинить в первую очередь."""
+    rows = (result or {}).get("rows") or []
+    if not rows or not any(r.get("lost") for r in rows):
+        return ""
+    marked = {h["segment"] for h in (result.get("highlighted") or [])}
+    ordered = list(result.get("highlighted") or []) + [r for r in rows if r["segment"] not in marked]
+    # Выражение без обратной косой: в f-строке до Python 3.12 её нельзя.
+    hl = ' class="hl"'
+    body = "".join(
+        f'<tr{hl if r["segment"] in marked else ""}>'
+        f'<td class="mono">{_esc(r["segment"])}</td><td class="n">{r["pages"]}</td>'
+        f'<td class="n">{"—" if r.get("missing_from_sitemap") is None else r["missing_from_sitemap"]}</td>'
+        f'<td class="n">{"—" if r.get("not_indexed") is None else r["not_indexed"]}</td>'
+        f'<td class="n">{r["coverage"]:.0%}</td></tr>'
+        for r in ordered[:limit])
+    return (tr("<h2>Разрывы по разделам</h2>")
+            + tr("<div class=\"scroll\"><table><thead><tr><th>раздел</th><th class=\"n\">страниц</th><th class=\"n\">нет в sitemap</th><th class=\"n\">нет в индексе</th><th class=\"n\">дошло</th></tr></thead><tbody>")
+            + body + "</tbody></table></div>"
+            + tr("<p class=\"note\">По сайту до конца воронки дошло {a0:.0%}. Выделены разделы, которые теряют заметно больше остального сайта: причина там обычно одна на весь раздел — шаблон, перелинковка или sitemap раздела.</p>",
+                 a0=result["site"]["coverage"]))
+
+
 def _funnel_html(f: dict) -> str:
     steps = [s for s in (f.get("steps") or []) if isinstance(s, dict)]
     if not steps:
@@ -284,7 +308,7 @@ def _templates_html(templates: list) -> str:
 def build(analysis: dict, funnel_result: dict = None, causes: list = None,
           out_path: str = "indexgap-report.html", site: str = "",
           cross: list = None, notes: list = None, title: str = tr("Отчёт конвейера"),
-          templates: list = None) -> str:
+          templates: list = None, segments: dict = None) -> str:
     pages = analysis.get("pages") or []
     issues = analysis.get("issues") or []
     graph = analysis.get("graph") or {}
@@ -326,7 +350,8 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
     funnel_block = ""
     if funnel_result and funnel_result.get("steps"):
         funnel_block = (tr("<h2>Воронка конвейера</h2>") + _funnel_html(funnel_result) +
-                        tr("<p class=\"note\">Каждый переход теряет страницы. Потери на разных переходах лечатся по-разному, поэтому важно видеть, где именно они происходят. Учти: экспорт «Страницы» из Search Console — это отчёт о показах, и страница в индексе без показов в него не попадает.</p>"))
+                        tr("<p class=\"note\">Каждый переход теряет страницы. Потери на разных переходах лечатся по-разному, поэтому важно видеть, где именно они происходят. Учти: экспорт «Страницы» из Search Console — это отчёт о показах, и страница в индексе без показов в него не попадает.</p>")
+                        + _segments_html(segments))
 
     doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=len(graph.get('orphans') or []), a12=len(dupes), a13=_first_things(issues, graph, dupes) + _templates_html(templates), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
 

@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.18.2
+- uses: borisowlexa2010-star/IndexGap@v1.19.0
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.18.2
+- uses: borisowlexa2010-star/IndexGap@v1.19.0
   with:
     root: out
     site: https://example.com
@@ -464,6 +464,16 @@ is an *impressions* report, not an index report. A page that is indexed but has
 no impressions won't appear in it. When that export is the only panel, the step
 is called "with impressions in search" rather than "in the index", and pages
 without impressions are not reported as unindexed.
+
+**The gap has an address: gaps by section.** "40 pages are not indexed" does
+not say what to fix. `doctor` (and `check` given a sitemap or an export) splits
+every loss by URL section and highlights the section that loses noticeably more
+than *the rest of the site* — `/rent/  lost 16 of 20  ← the gap is here` — because
+then the cause is usually one for the whole section: its template, its internal
+links or its sitemap. It compares a section with the rest of the site, not with
+the average, which one bad section drags down; sections under five pages are
+not highlighted; a site that keeps everything under `/blog/` is split one level
+down. The table is in the HTML report and in the JSON under `segments`.
 
 **`doctor --live` separates what is done from what is left.** An export shows
 the past: on one live site four of five "missing" pages already answered 301,
