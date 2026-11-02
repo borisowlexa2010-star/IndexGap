@@ -17,7 +17,7 @@ import re
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
-from .core import ALWAYS_SKIP, _CODE_TAG, tokenize, url_key
+from .core import ALWAYS_SKIP, _CODE_TAG, tokenize
 from .i18n import N_, tr
 
 # Googlebot читает первые 2 МБ поддерживаемого файла и отдаёт в индекс то, что
@@ -172,7 +172,6 @@ def _title_h1_apart(title: str, h1: str) -> bool:
 # ── постраничные сигналы ─────────────────────────────────────────────────────
 
 def page_signals(pages: list, today: datetime.date = None) -> list:
-    current = (today or datetime.date.today()).year
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
         h1s = [t for level, t in (page.headings or []) if level == 1]

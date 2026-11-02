@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.18.2 — 2026-11-02
+
+* **`cite --dataset` works.** Taking the questions from the keyword set called
+  a function that did not exist and ended in a `NameError` traceback. CI now
+  runs pyflakes over the package, which catches a name like that without
+  running the code.
+* **`cite` compares domains correctly.** Removing `www.` used
+  `lstrip("www.")`, which strips any leading `w` and dot: for `wise.com`,
+  links to someone else's `ise.com` counted as yours, and competitors came out
+  as `ikipedia.org` or `eb.dev`. Port, letter case and a trailing dot no
+  longer split one host in two, and `--domain https://example.com/` now means
+  `example.com`, not `https:`.
+* **The docs site builds the same on every machine.** The `js-shell` finding
+  had a second, stale wording in unused code, and `tools/build_docs.py`
+  picked whichever file the file system listed first. The `fetch --render`
+  tests also pass when run as root.
+
 ## 1.18.1 — 2026-10-31
 
 * **Project skills that went stale are named.** `indexgap init` copies the
