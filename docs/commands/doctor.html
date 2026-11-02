@@ -92,12 +92,13 @@ font-size:.85rem;color:var(--ink3)}
 <h1>indexgap doctor</h1>
 <div class="meta"><span class="tag acc">command</span></div>
 <p class="lede">The crawl-to-index funnel.</p>
-<p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost, section by section: the URL section that loses noticeably more than the rest of the site is highlighted, because the cause there is usually one template, one set of links or one sitemap. Given a Bing Webmaster Tools AI Performance export, it adds the step after the index: which pages Microsoft Copilot actually cites, which of them you have closed from search, and which you left out of the sitemap.</p>
+<p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost, section by section: the URL section that loses noticeably more than the rest of the site is highlighted, because the cause there is usually one template, one set of links or one sitemap. Given a Bing Webmaster Tools AI Performance export, it adds the step after the index: which pages Microsoft Copilot actually cites, which of them you have closed from search, and which you left out of the sitemap. --logs reads the server's access log and shows which pages AI search bots and assistants acting on a person's request actually fetched — separately from training crawlers — and which sections they skip; --cite adds a cite measurement.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap doctor [-h] [--site SITE] [--home HOME] [--config CONFIG]
                        [--profile PROFILE] [--sitemap SITEMAP] [--live]
-                       [--indexed [engine=]file.csv] [--gsc GSC] [--out OUT]
-                       [--lang {en,ru}]
+                       [--indexed [engine=]file.csv] [--gsc GSC]
+                       [--logs access.log] [--cite indexgap-cite.json]
+                       [--out OUT] [--lang {en,ru}]
                        [root]
 
 positional arguments:
@@ -123,6 +124,12 @@ options:
                         Performance; repeat it for different sources
   --gsc GSC             the same as --indexed google=... (kept for
                         compatibility)
+  --logs access.log     the server's access log (combined or JSON lines, .gz
+                        is fine): which pages AI search bots fetched; repeat
+                        for several files
+  --cite indexgap-cite.json
+                        the output of `indexgap cite --send`: cited pages join
+                        the funnel and the gaps by section
   --out OUT             where to write the HTML report; the machine-readable
                         data goes next to it with a .json extension. A name
                         ending in .json names the data, and the report goes
@@ -135,8 +142,8 @@ options:
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-11-02">2026-11-02</time>,
-  for indexgap 1.19.0.</p>
-  <p>indexgap 1.19.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.20.0.</p>
+  <p>indexgap 1.20.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

@@ -49,6 +49,7 @@ one with `indexgap init --key`.
 | before a deploy | `indexgap-review` → `indexgap diff` | the new build against the one in production |
 | publishing and diagnosis | `indexgap-publish` | sitemap, IndexNow, "why is there no traffic" |
 | several sites | `indexgap-portfolio` | the person has a portfolio, not one project |
+| AI search and citations | `indexgap-cite` | AI bots in the logs, citations in ChatGPT/Perplexity, "AI answers never mention us" |
 
 `indexgap init` installs the skills into the project, under
 `.claude/skills/indexgap-*/`. Claude Code reads them on its own. For Codex,

@@ -124,14 +124,14 @@ MESSAGES = {
         "has its own submission system and needs a separate registration.",
 
     # ── install ───────────────────────────────────────────────────────────────
-    "{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`).\n{a6}":
+    "{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`), ИИ-поиск и цитирование (`indexgap-cite`).\n{a6}":
         "{a0}\n## SEO pipeline\n\nThis project has indexgap installed. Content "
         "profile: `{a1}`, pages in `{a2}`.\n\nBefore publishing generated "
         "pages:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nFull "
         "instructions live in `.claude/skills/indexgap-*/SKILL.md`: keyword "
         "planning (`indexgap-plan`), the pre-publish review (`indexgap-review`), "
         "sitemap and IndexNow (`indexgap-publish`), several sites at once "
-        "(`indexgap-portfolio`).\n{a6}",
+        "(`indexgap-portfolio`), AI search and citations (`indexgap-cite`).\n{a6}",
     "{a0} страниц без явных признаков другого типа":
         "{a0} pages with no clear sign of another type",
     "{a0} страниц, почти все собранный HTML — похоже на лендинги":

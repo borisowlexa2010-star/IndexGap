@@ -84,6 +84,16 @@ KIND_PROVES = {
 TOOLS = {
     # цитирование в ИИ-ответах. Столбец-подпись `citations` не встречается
     # больше ни у одного инструмента: по нему источник узнаётся уверенно.
+    # Замер `indexgap cite`: подаётся в doctor через --cite, не через --indexed,
+    # поэтому ни по имени файла, ни по шапке не узнаётся.
+    "cite-perplexity": {"kind": CITATION, "title": N_("Perplexity (замер indexgap cite)"),
+                        "file": (), "header": ()},
+    "cite-openai":   {"kind": CITATION, "title": N_("ChatGPT API (замер indexgap cite)"),
+                      "file": (), "header": ()},
+    "cite-gemini":   {"kind": CITATION, "title": N_("Gemini API (замер indexgap cite)"),
+                      "file": (), "header": ()},
+    "cite-xai":      {"kind": CITATION, "title": N_("Grok (замер indexgap cite)"),
+                      "file": (), "header": ()},
     "copilot":       {"kind": CITATION, "title": "Bing AI Performance (Copilot)",
                       "file": ("aiperformance", "ai-performance", "ai_performance",
                                "copilot"),

@@ -55,11 +55,65 @@ CONFIG = {
 # `1.299,99` — одно число. Без них выражение брало `1,299`, а остаток `.99`
 # склеивался со следующим куском, и цена, дословно стоящая в данных,
 # объявлялась выдуманной «299.99 USD».
-NUMBER = (r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d+)?|"
-          r"\d{1,3}(?:[  \u00a0]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
+# Индийская запись (`12,34,567` — двенадцать лакхов) идёт раньше западной:
+# иначе `12,34` бралось целиком как дробь 12,34, и верная цена из данных
+# объявлялась выдуманной. Швейцарский апостроф `1'234.50` — разряды.
+NUMBER = (r"\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d+)?|"
+          r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d+)?|"
+          r"\d{1,3}(?:'\d{3})+(?:[.,]\d+)?|"
+          r"\d{1,3}(?:[ \u202f\u00a0]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
 
 # Число не начинается с середины другого: перед ним не цифра и не разделитель.
 NOT_INSIDE = r"(?<![\d.,])"
+
+# Пробелы, которыми разделяют разряды и число с единицей.
+_SP = r"[   ]"
+
+# Знаки, которыми другие письменности пишут то же самое. Арабский десятичный
+# `٫` и разрядный `٬`, арабский `٪` и полноширинный `％`, типографский
+# апостроф в `1’234`. Без этого `١٬٢٣٤٫٥٠` распадалось на куски, а `٩٥٪`
+# не считалось процентом вовсе — выдуманная доля проходила молча.
+_SAME_SIGNS = str.maketrans({"٫": ".", "٬": ",", "٪": "%",
+                             "％": "%", "﹪": "%", "’": "'",
+                             "ʼ": "'", "，": ",", "．": "."})
+
+
+def _same_signs(text: str) -> str:
+    return (text or "").translate(_SAME_SIGNS)
+
+
+# Множители после числа. «3万円» — тридцать тысяч иен, «1,5 млн» — полтора
+# миллиона: в данных стоит 30000 и 1500000, и без множителя верная цифра
+# объявлялась выдуманной, а выдуманная «5万» при 30000 в данных уходила
+# в «просмотри глазами». CJK-знаки идут вплотную, словам нужна граница.
+SCALES = {
+    "万": 10**4, "萬": 10**4, "만": 10**4, "億": 10**8, "亿": 10**8, "억": 10**8,
+    "千": 10**3, "천": 10**3,
+    "тыс": 10**3, "тысяч": 10**3, "тысячи": 10**3, "тысяча": 10**3,
+    "млн": 10**6, "миллион": 10**6, "миллиона": 10**6, "миллионов": 10**6,
+    "млрд": 10**9, "миллиард": 10**9, "миллиарда": 10**9, "миллиардов": 10**9,
+    "thousand": 10**3, "million": 10**6, "millions": 10**6, "mln": 10**6,
+    "billion": 10**9, "billions": 10**9, "bn": 10**9,
+    "lakh": 10**5, "lakhs": 10**5, "lac": 10**5, "crore": 10**7, "crores": 10**7,
+    "mio": 10**6, "mrd": 10**9, "millionen": 10**6, "milliarden": 10**9,
+    "millón": 10**6, "millones": 10**6, "mil": 10**3, "milliard": 10**9,
+    "milliards": 10**9, "milioni": 10**6, "milione": 10**6, "miliardi": 10**9,
+    "milhão": 10**6, "milhões": 10**6,
+}
+_CJK_SCALES = "万萬만億亿억千천"
+_SCALE_WORDS = "|".join(re.escape(w) for w in sorted(
+    (k for k in SCALES if k[0] not in _CJK_SCALES), key=len, reverse=True))
+_SCALE_AFTER = re.compile(
+    _SP + r"?(?:([" + _CJK_SCALES + r"])|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
+
+
+def _scale_at(text: str, end: int) -> tuple:
+    """(множитель, длина) множителя сразу после числа — или (1, 0)."""
+    match = _SCALE_AFTER.match(text, end)
+    if not match:
+        return 1, 0
+    word = (match.group(1) or match.group(2)).lower()
+    return SCALES.get(word, 1), match.end() - end
 
 PERCENT = re.compile(NOT_INSIDE + r"(" + NUMBER + r")\s*%")
 
@@ -70,6 +124,25 @@ CURRENCY_CODES = ("USD|EUR|GBP|JPY|CNY|INR|AUD|CAD|CHF|SGD|AED|RUB|BRL|MXN|KRW|T
                   "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH")
 PREFIX_PRICE = re.compile(
     r"(?<![\w.,])([$€£¥₹₽]|(?:" + CURRENCY_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
+
+# Валюта после числа: `9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `3万円`. Раньше
+# ценой считалась только валюта перед числом, и выдуманная цена на испанском,
+# иврите или арабском уходила в «просмотри глазами» вместо критичной находки.
+CURRENCY_SIGNS = "€£¥₹₽₪₩₫₺₴₸฿$₱₦₵₡₲₭₮৳﷼円元圓원"
+CURRENCY_WORDS = (
+    "dollars?|euros?|pounds?|rupees?|yen|yuan|baht|pesos?|reais|"
+    "francs?|lira|lire|zł|złotych|kronor|kroner|kč|lei|"
+    "руб(?:л[а-яё]*)?|грн|гривен[а-яё]*|гривн[а-яё]*|тенге|сум|сомов|лари|"
+    "دولار[ًا]?|دولارات|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
+    "שקל|שקלים|ש\"ח|"
+    "रुपये|रुपया|रुपए|บาท|đồng"
+)
+SUFFIX_PRICE = re.compile(
+    NOT_INSIDE + r"(" + NUMBER + r")"
+    r"(?:" + _SP + r"?(?:[" + _CJK_SCALES + r"]|(?:" + _SCALE_WORDS + r")\.?))?"
+    + _SP + r"?(?:[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES
+    + r")(?![^\W\d_]))", re.I | re.U)
+
 
 # Общее «число + слово»: ловит «12 лет», «25 тонн», «3500 заказов» —
 # то, чего нет в списке единиц проекта, но что всё равно является фактом.
@@ -123,7 +196,7 @@ def _norm_number(raw: str) -> str:
     полтора. Раньше и то и другое становилось 1.5: правильная цена
     объявлялась выдумкой, а ошибка в тысячу раз проходила молча.
     """
-    s = re.sub(r"[\s  ]", "", str(raw)).strip(".,")
+    s = re.sub(r"[\s\xa0 ']", "", _same_signs(str(raw))).strip(".,")
     if not s:
         return ""
     if "." in s and "," in s:
@@ -152,6 +225,17 @@ def _norm_number(raw: str) -> str:
     return str(int(value)) if value == int(value) else str(value)
 
 
+def _scaled(raw: str, factor: int) -> str:
+    number = _norm_number(raw)
+    if factor == 1 or not number:
+        return number
+    try:
+        value = float(number) * factor
+    except ValueError:
+        return number
+    return str(int(round(value))) if abs(value - round(value)) < 1e-6 else str(value)
+
+
 def _numbers_in(text: str, fact_pattern) -> dict:
     """
     Числа, которые в этом тексте выглядят как факт.
@@ -160,6 +244,7 @@ def _numbers_in(text: str, fact_pattern) -> dict:
     «25 тонн», а не просто «25»: без неё находку невозможно проверить глазами.
     """
     found = {}
+    text = _same_signs(text)
     for match in PERCENT.finditer(text or ""):
         number = _norm_number(match.group(1))
         if number:
@@ -170,9 +255,16 @@ def _numbers_in(text: str, fact_pattern) -> dict:
             if number:
                 found[number] = match.group(0)[len(match.group(1)):].strip()
     for match in PREFIX_PRICE.finditer(text or ""):
-        number = _norm_number(match.group(2))
+        factor, length = _scale_at(text, match.end())
+        number = _scaled(match.group(2), factor)
         if number:
-            found.setdefault(number, match.group(1).strip())
+            scale = text[match.end():match.end() + length].strip()
+            found.setdefault(number, (match.group(1).strip() + " " + scale).strip())
+    for match in SUFFIX_PRICE.finditer(text or ""):
+        factor, _ = _scale_at(text, match.end(1))
+        number = _scaled(match.group(1), factor)
+        if number:
+            found.setdefault(number, match.group(0)[len(match.group(1)):].strip())
     return found
 
 
@@ -185,12 +277,13 @@ def _generic_numbers_in(text: str) -> dict:
     found = {}
     # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
     # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
-    text = _SCALE.sub(" ", text or "")
+    text = _SCALE.sub(" ", _same_signs(text))
     for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
             continue
-        number = _norm_number(match.group(1))
+        factor, _ = _scale_at(text, match.end(1))
+        number = _scaled(match.group(1), factor)
         if not number:
             continue
         # Год в тексте — не факт строки: «в 2026 году», «с 1998 г.» Годом
@@ -209,6 +302,7 @@ def _generic_numbers_in(text: str) -> dict:
 # — три числа. Мешает буква в той же цепочке через дефис. Раньше любой дефис
 # рядом выбрасывал число, и диапазон из данных не поддерживал собственные края.
 ROW_NUMBER = re.compile(r"(?<![\w.,])(" + NUMBER + r")(?!\w)")
+_SCALED_NUMBER = re.compile(r"(?<![\w.,])(" + NUMBER + r")")
 _CHAIN = re.compile(r"[\w\-–—]*")
 _CHAIN_BACK = re.compile(r"[\w\-–—]*$")
 
@@ -228,10 +322,19 @@ def _numbers_of(value) -> list:
 def _row_numbers(row: dict) -> set:
     out = set()
     for value in (row or {}).values():
-        for raw in _numbers_of(value):
+        text = _same_signs(str(value))
+        for raw in _numbers_of(text):
             number = _norm_number(raw)
             if number:
                 out.add(number)
+        # «3万» или «1,5 млн» в самих данных: и как есть, и в единицах. Своё
+        # выражение: обычное отбрасывает число, приклеенное к знаку (артикул),
+        # а CJK-множитель — тоже знак.
+        for match in _SCALED_NUMBER.finditer(text):
+            factor, _ = _scale_at(text, match.end(1))
+            if factor != 1:
+                out.add(_norm_number(match.group(1)))
+                out.add(_scaled(match.group(1), factor))
     return out
 
 
@@ -399,11 +502,43 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
 
 def _shown(number: str, unit: str) -> str:
     """Число с единицей так, как его пишут: `$1900`, а не `1900 $`."""
+    # Множитель показывается так, как стоит на странице: «5万元», а не
+    # «50000 万元», которое читается как пятьсот миллионов.
+    lowered = (unit or "").lower()
+    for word, factor in sorted(SCALES.items(), key=lambda kv: -len(kv[0])):
+        if word in lowered:
+            try:
+                raw = _norm_number(repr(round(float(number) / factor, 6)))
+            except ValueError:
+                break
+            glue = "" if word[0] in _CJK_SCALES and lowered.startswith(word) else " "
+            if unit and unit[0] in "$€£¥₹₽":
+                return f"{unit.split()[0]}{raw} {' '.join(unit.split()[1:])}".strip()
+            return f"{raw}{glue}{unit}".strip()
     if unit and unit in "$€£¥₹₽":
         return f"{unit}{number}"
     if unit and unit.upper() in CURRENCY_CODES.split("|"):
         return f"{unit} {number}"
     return f"{number} {unit}".strip()
+
+
+def _supported(number: str, unit: str, allowed: set) -> bool:
+    """
+    Есть ли число в данных — как есть или до множителя: «1,5 млн» при 1,5
+    в колонке «цена, млн» — тоже из данных.
+    """
+    if number in allowed:
+        return True
+    lowered = (unit or "").lower()
+    for word, factor in SCALES.items():
+        if word in lowered:
+            try:
+                raw = float(number) / factor
+            except ValueError:
+                return False
+            if _norm_number(repr(round(raw, 6))) in allowed:
+                return True
+    return False
 
 
 def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
@@ -433,9 +568,9 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         strong = _numbers_in(page.text, fact_pattern)
         weak = _generic_numbers_in(page.text)
 
-        unknown_strong = {n: u for n, u in strong.items() if n not in allowed}
+        unknown_strong = {n: u for n, u in strong.items() if not _supported(n, u, allowed)}
         unknown_weak = {n: u for n, u in weak.items()
-                        if n not in allowed and n not in unknown_strong}
+                        if not _supported(n, u, allowed) and n not in unknown_strong}
 
         if unknown_strong:
             issues.append((
@@ -454,7 +589,7 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             issues.append((
                 "info", page.url, "check-by-eye",
                 tr("числа, которых нет в данных — просмотри глазами: ")
-                + ", ".join(f"{n} {u}".strip() for n, u in listed)
+                + ", ".join(_shown(n, u) for n, u in listed)
                 + (tr(" и ещё {a0}", a0=len(unknown_weak) - len(listed))
                    if len(unknown_weak) > len(listed) else "")))
     return issues

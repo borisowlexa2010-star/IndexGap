@@ -341,8 +341,24 @@ MESSAGES = {
         "engines and screen readers will get the language wrong.",
     '<h2>Разрывы по разделам</h2>':
         '<h2>Gaps by section</h2>',
-    '<div class="scroll"><table><thead><tr><th>раздел</th><th class="n">страниц</th><th class="n">нет в sitemap</th><th class="n">нет в индексе</th><th class="n">дошло</th></tr></thead><tbody>':
-        '<div class="scroll"><table><thead><tr><th>section</th><th class="n">pages</th><th class="n">not in sitemap</th><th class="n">not indexed</th><th class="n">reached</th></tr></thead><tbody>',
     '<p class="note">По сайту до конца воронки дошло {a0:.0%}. Выделены разделы, которые теряют заметно больше остального сайта: причина там обычно одна на весь раздел — шаблон, перелинковка или sitemap раздела.</p>':
         '<p class="note">Across the site, {a0:.0%} reached the end of the funnel. Highlighted are the sections that lose noticeably more than the rest of the site: the cause there is usually one for the whole section — its template, internal links or sitemap.</p>',
+    '<div class="scroll"><table><thead><tr><th>бот</th><th>зачем приходит</th><th class="n">запросов</th><th class="n">страниц сайта</th><th class="n">страниц с ошибкой</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>bot</th><th>why it comes</th><th class="n">requests</th><th class="n">site pages</th><th class="n">pages with errors</th></tr></thead><tbody>',
+    '<div class="scroll"><table><thead><tr><th>раздел</th><th class="n">страниц</th><th class="n">не открыто</th><th class="n">по запросу человека</th><th class="n">открыто</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>section</th><th class="n">pages</th><th class="n">not opened</th><th class="n">on a person\'s request</th><th class="n">opened</th></tr></thead><tbody>',
+    '<div class="scroll"><table><thead><tr><th>раздел</th><th class="n">страниц</th><th class="n">нет в sitemap</th><th class="n">нет в индексе</th><th class="n">дошло</th>':
+        '<div class="scroll"><table><thead><tr><th>section</th><th class="n">pages</th><th class="n">not in sitemap</th><th class="n">not indexed</th><th class="n">reached</th>',
+    '<h2>Боты по логам сервера</h2>':
+        '<h2>Bots in the server logs</h2>',
+    '<h3>Что ИИ-поиск не открывал, по разделам</h3>':
+        '<h3>What AI search did not open, by section</h3>',
+    '<p class="note">Обучающие боты (GPTBot, ClaudeBot, CCBot) на цитирование сегодня не влияют, поэтому в «открыто ИИ-поиском» не считаются. «По запросу человека» — ассистент открыл страницу, отвечая на чей-то вопрос.</p>':
+        '<p class="note">Training bots (GPTBot, ClaudeBot, CCBot) do not affect today\'s citations, so they are not counted in "opened by AI search". "On a person\'s request" means an assistant opened the page while answering someone\'s question.</p>',
+    '<th class="n">процитировано</th>':
+        '<th class="n">cited</th>',
+    'alt есть, но это заглушка или имя файла: ни поиску, ни диктору он ничего не говорит.':
+        'The alt is there, but it is a placeholder or a file name: it tells neither search nor a screen reader anything.',
+    'alt написан не тем письмом, что страница: шаблон alt не переведён.':
+        'The alt is written in a different script than the page: the alt template was not translated.',
 }

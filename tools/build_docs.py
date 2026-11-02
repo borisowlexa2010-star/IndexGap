@@ -265,6 +265,15 @@ WHY = {
    "Alt text is what a screen reader announces and what image search indexes. "
    "On a generated page it is also usually generated — which means it is either "
    "written once properly or missing on every page at once.",
+ "img-alt-filler":
+   "An alt that says “image”, “фото”, “صورة” or IMG_2034.jpg is worse than it "
+   "looks: it passes a presence check while telling a screen reader and image "
+   "search nothing. On a generated site it is one template value repeated on "
+   "every page, so one fix clears it everywhere.",
+ "img-alt-language":
+   "A Russian, Arabic or Japanese page whose image alts are in English is a "
+   "template nobody translated. The page's lang tells assistive technology and "
+   "search engines which language to expect; the alt contradicts it.",
  "vague-anchor":
    "“Read more” tells neither a reader nor a crawler what is on the other side. "
    "The anchor is one of the few places where you get to say what a page is "
@@ -421,6 +430,7 @@ FAMILIES = [
   ["no-title", "title-short", "title-long", "duplicate-title",
    "no-description", "description-length", "duplicate-description",
    "no-h1", "many-h1", "no-headings", "title-h1-mismatch", "no-structure", "img-no-alt",
+   "img-alt-filler", "img-alt-language",
    "vague-anchor", "no-og", "no-viewport", "heavy-images"]),
 
  ("hreflang", "hreflang and language versions",
@@ -509,7 +519,10 @@ COMMANDS = [
   "one set of links or one sitemap. Given "
   "a Bing Webmaster Tools AI Performance export, it adds the step after the "
   "index: which pages Microsoft Copilot actually cites, which of them you have "
-  "closed from search, and which you left out of the sitemap."),
+  "closed from search, and which you left out of the sitemap. --logs reads the "
+  "server's access log and shows which pages AI search bots and assistants "
+  "acting on a person's request actually fetched — separately from training "
+  "crawlers — and which sections they skip; --cite adds a cite measurement."),
  ("fetch", "Download a live site for check when there is no build",
   "Reads the sitemap (from --sitemap, robots.txt or /sitemap.xml), obeys "
   "robots.txt, never leaves the host, stops at --limit, and saves each page "
@@ -528,7 +541,8 @@ COMMANDS = [
   "Asks Perplexity, the OpenAI Responses API, Gemini and Grok a set of real "
   "user questions and counts how often your domain comes back among the "
   "sources. The only command that needs API keys, and it sends nothing without "
-  "an explicit flag."),
+  "an explicit flag. --baseline compares with a previous measurement and calls "
+  "a change notable only when an exact Fisher test separates it from noise."),
 ]
 
 

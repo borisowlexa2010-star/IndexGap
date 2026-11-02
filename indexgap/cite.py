@@ -256,6 +256,7 @@ def measure(prompts: list, domain: str, brand: str = "", providers: list = None,
     for prompt in prompts:
         for name in providers:
             hits, mentions, cited, competitors, failed = 0, 0, [], {}, 0
+            url_hits = {}
             for _ in range(max(1, runs)):
                 try:
                     answer = ask(name, prompt, cfg, env)
@@ -269,6 +270,8 @@ def measure(prompts: list, domain: str, brand: str = "", providers: list = None,
                 if own:
                     hits += 1
                     cited += own
+                    for url in set(own):
+                        url_hits[url] = url_hits.get(url, 0) + 1
                 for other in hosts:
                     if other and other != domain and not other.endswith("." + domain):
                         competitors[other] = competitors.get(other, 0) + 1
@@ -287,6 +290,8 @@ def measure(prompts: list, domain: str, brand: str = "", providers: list = None,
                 "cited_share": (hits / done) if done else 0.0,
                 "brand_mentions": mentions,
                 "urls": sorted(set(cited)),
+                # в скольких прогонах адрес был среди источников
+                "url_hits": dict(sorted(url_hits.items())),
                 "top_competitors": sorted(competitors.items(),
                                           key=lambda kv: -kv[1])[:8],
             })
@@ -348,3 +353,132 @@ def prompts_from_keywords(rows: list, field: str, limit: int = 10) -> list:
         if len(out) >= limit:
             break
     return out
+
+
+def read_result(path: str) -> dict:
+    """
+    JSON замера `indexgap cite` → {"cite-<провайдер>": {адрес: прогонов}} —
+    в той же форме, в какой doctor держит цитирования Copilot.
+    """
+    data = load_result(path)
+    rows = data["results"]
+    out = {}
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("provider"):
+            continue
+        bucket = out.setdefault("cite-" + str(row["provider"]), {})
+        hits = row.get("url_hits")
+        if not isinstance(hits, dict):          # замер до 1.20: только список
+            hits = {u: 1 for u in row.get("urls") or ()}
+        for url, n in hits.items():
+            bucket[url] = bucket.get(url, 0) + int(n or 0)
+    return {"cited": out, "domain": data.get("domain", ""),
+            "runs": data.get("runs"), "providers": data.get("providers") or []}
+
+
+
+# ── сравнение с прошлым замером ───────────────────────────────────────────────
+
+# Изменение доли считается заметным при p ≤ этого. 0,1, а не 0,05: прогонов
+# мало, и строгий порог не увидел бы почти ничего; ложная тревога здесь дешевле
+# пропущенного сдвига — человек перепроверит замером.
+NOTABLE_P = 0.1
+
+
+def fisher_p(a: int, n1: int, b: int, n2: int) -> float:
+    """
+    Двусторонний точный тест Фишера для «a из n1» против «b из n2».
+
+    Точный, а не z-тест: на трёх прогонах нормальное приближение врёт, и
+    «0 из 3 → 2 из 3» выглядело бы ростом, хотя это шум.
+    """
+    from math import comb
+    hits = a + b
+    total = n1 + n2
+    if not n1 or not n2 or hits in (0, total):
+        return 1.0
+    denom = comb(total, hits)
+
+    def prob(k):
+        return comb(n1, k) * comb(n2, hits - k) / denom
+
+    observed = prob(a)
+    lo, hi = max(0, hits - n2), min(n1, hits)
+    return min(1.0, sum(p for p in (prob(k) for k in range(lo, hi + 1))
+                        if p <= observed * (1 + 1e-9)))
+
+
+def _host_counts(rows: list) -> dict:
+    out = {}
+    for row in rows:
+        for host, n in row.get("top_competitors") or ():
+            out[host] = out.get(host, 0) + n
+    return out
+
+
+def compare(current: dict, previous: dict) -> dict:
+    """
+    Что изменилось с прошлого замера — и что из этого не шум.
+
+    Сравниваются только пары «вопрос × провайдер», которые были в обоих
+    замерах: новый вопрос — не рост, убранный — не падение.
+    """
+    def index(result):
+        return {(r.get("prompt"), r.get("provider")): r
+                for r in (result or {}).get("results") or () if isinstance(r, dict)}
+
+    cur, old = index(current), index(previous)
+    rows = []
+    for key in sorted(set(cur) & set(old)):
+        c, o = cur[key], old[key]
+        n2, n1 = int(c.get("runs") or 0), int(o.get("runs") or 0)
+        b, a = int(c.get("cited") or 0), int(o.get("cited") or 0)
+        if not n1 or not n2:
+            continue
+        p = fisher_p(a, n1, b, n2)
+        rows.append({"prompt": key[0], "provider": key[1],
+                     "before": [a, n1], "after": [b, n2],
+                     "delta": b / n2 - a / n1, "p": p, "notable": p <= NOTABLE_P,
+                     "new_urls": sorted(set(c.get("urls") or ()) - set(o.get("urls") or ())),
+                     "lost_urls": sorted(set(o.get("urls") or ()) - set(c.get("urls") or ()))})
+
+    providers = []
+    for name in sorted({k[1] for k in set(cur) & set(old)}):
+        mine = [r for r in rows if r["provider"] == name]
+        a = sum(r["before"][0] for r in mine)
+        n1 = sum(r["before"][1] for r in mine)
+        b = sum(r["after"][0] for r in mine)
+        n2 = sum(r["after"][1] for r in mine)
+        if not n1 or not n2:
+            continue
+        p = fisher_p(a, n1, b, n2)
+        was = _host_counts([old[k] for k in old if k[1] == name and k in cur])
+        now = _host_counts([cur[k] for k in cur if k[1] == name and k in old])
+        top_now = {h for h, _ in sorted(now.items(), key=lambda kv: -kv[1])[:10]}
+        top_was = {h for h, _ in sorted(was.items(), key=lambda kv: -kv[1])[:10]}
+        providers.append({"provider": name, "before": [a, n1], "after": [b, n2],
+                          "delta": b / n2 - a / n1, "p": p, "notable": p <= NOTABLE_P,
+                          "competitors_new": sorted(top_now - set(was)),
+                          "competitors_gone": sorted(top_was - set(now))})
+    return {
+        "rows": rows,
+        "providers": providers,
+        "only_now": sorted(f"[{k[1]}] {k[0]}" for k in set(cur) - set(old)),
+        "only_before": sorted(f"[{k[1]}] {k[0]}" for k in set(old) - set(cur)),
+        "domain_changed": (current or {}).get("domain") != (previous or {}).get("domain"),
+    }
+
+
+def load_result(path: str) -> dict:
+    """Полный JSON замера — для сравнения нужен он, а не только адреса."""
+    if not os.path.exists(path):
+        raise SourceError(tr("Файл замера {a0} не найден.", a0=path))
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise SourceError(tr("{a0}: не JSON замера cite ({a1})", a0=path, a1=exc))
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+        raise SourceError(tr("{a0}: это не результат `indexgap cite --send` — нет "
+                             "поля results", a0=path))
+    return data
