@@ -294,7 +294,7 @@ def foreign_urls(funnel_result: dict, site: str = "") -> dict:
     """
     То, что поисковик знает, а среди страниц сайта нет, — по смыслу.
 
-    Раньше это только считалось. На news-site.example среди таких адресов были
+    Раньше это только считалось. На живом сайте сообщества среди таких адресов были
     тестовый стенд и внутренний GitLab — самое важное в выгрузке, и оно не
     доходило до человека. Чужие хосты, файлы и пропавшие страницы требуют
     разного: закрыть, ничего не делать, перенаправить.
@@ -403,8 +403,8 @@ def verify_live(foreign: dict, limit: int = 50, timeout: int = 10) -> dict:
     """
     Что из «поисковик знает, а на сайте нет» ещё требует действий.
 
-    Выгрузка показывает прошлое: на events-site.example четыре «пропавшие» страницы из
-    пяти уже отдавали 301, на news-site.example шесть чужих хостов из семи уже были
+    Выгрузка показывает прошлое: на живом сайте событий четыре «пропавшие» страницы из
+    пяти уже отдавали 301, на живом сайте сообщества шесть чужих хостов из семи уже были
     закрыты noindex. Сделанное отделяется от несделанного по живому ответу.
 
     Пропавшая страница в порядке, если отдаёт 3xx, 404 или 410; живой ответ 200
@@ -1067,8 +1067,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     missing_from_sitemap = show(publishable - in_sitemap) if in_sitemap is not None else []
     stale_in_sitemap = sorted(in_sitemap - generated) if in_sitemap is not None else []
     # Показывать — как записано в sitemap: ключ теряет `www`, слэш и `.html`,
-    # и отчёт выдавал `https://multilingual-site.example/en/start`, которого в
-    # sitemap нет, — на сайте, где все 1328 адресов с `www`.
+    # и отчёт выдавал `https://example.com/en/start`, которого в
+    # sitemap нет, — на сайте, где все адреса sitemap с `www`.
     as_listed = {}
     for url in sitemap_urls or ():
         for key in fold({url_key(url)}):

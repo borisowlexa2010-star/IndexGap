@@ -2,7 +2,7 @@
 """
 Абзац — это проза: таблица, список определений и блок кода ею не являются.
 
-Прогон по собранному events-site.example дал `long-paragraph` на 43 страницах из 87.
+Прогон по собранному сайту событий дал `long-paragraph` на 43 страницах из 87.
 Из 55 блоков длиннее 900 символов абзацем прозы был один. 53 — таблицы,
 склеенные в строку «подпись заголовки ячейка ячейка …», ещё один — `<dl>` на
 /ai-facts, все `<dt>` и `<dd>` подряд. На сайте документации самого пакета то
@@ -209,7 +209,7 @@ class TestMarkdown(Fixture):
         self.assertNotIn("long-paragraph", self.codes(page))
 
     def test_table_written_in_tags_is_not_a_paragraph(self):
-        """Так таблицы записаны в исходниках events-site.example: `<table>` внутри Markdown."""
+        """Так таблицы записаны в исходниках сайта событий: `<table>` внутри Markdown."""
         page = self.md(f"{PROSE}\n\n<div class=\"table-scroll\">\n{table()}\n</div>\n\n{PROSE}")
         self.assertEqual(page.paragraphs, [PROSE, PROSE])
         self.assertNotIn("long-paragraph", self.codes(page))

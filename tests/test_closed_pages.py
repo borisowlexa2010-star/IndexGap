@@ -173,7 +173,7 @@ class TestParkedTranslations(Fixture):
         self.assertFalse(on_contact & {"orphan", "unreachable", "deep"}, on_contact)
 
     def test_a_parked_page_without_hreflang_is_not_asked_for_it(self):
-        """Пакет советует снять hreflang с запаркованных переводов. multilingual-site
+        """Пакет советует снять hreflang с запаркованных переводов. живой многоязычный каталог
         так и сделал — и 1.9.0 ответил 1 418 предупреждениями «нет hreflang».
         Закрытой странице hreflang не нужен: совет не должен спорить с собой."""
         # Каждой странице её язык, как на настоящем сайте: иначе сайт не

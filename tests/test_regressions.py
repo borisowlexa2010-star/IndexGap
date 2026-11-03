@@ -108,10 +108,10 @@ class TestUrlMatching(Fixture):
 class TestReading(Fixture):
     def test_cp1251_is_decoded_not_mangled(self):
         self.write_bytes("a.html",
-                         "<html><head><title>Виза в Сингапур</title></head>"
+                         "<html><head><title>Виза в Таиланд</title></head>"
                          "<body><p>Текст страницы</p></body></html>".encode("cp1251"))
         pages, _ = self.load()
-        self.assertEqual(pages[0].title, "Виза в Сингапур")
+        self.assertEqual(pages[0].title, "Виза в Таиланд")
         self.assertTrue(any("cp1251" in n for n in pages[0].notes))
 
     def test_utf16_is_decoded(self):
@@ -167,7 +167,7 @@ class TestReading(Fixture):
 
     def test_a_markdown_file_beside_built_html_is_a_file_not_a_page(self):
         """
-        В сборке news-site.example рядом с HTML лежит `auth.md` — описание входа для
+        В сборке живого сайта сообщества рядом с HTML лежит `auth.md` — описание входа для
         агентов, живой сайт отдаёт его как text/markdown. Пакет брал его за
         страницу `/auth/`: сирота, нет title, тонкая, нет в sitemap — а по
         адресу `/auth` живой сайт отвечает 404.
@@ -395,8 +395,8 @@ class TestFacts(unittest.TestCase):
         self.assertTrue([i for i in issues if "90" in i[3]])
 
     def test_ambiguous_match_is_refused(self):
-        rows = [{"keyword": "виза сингапур"}, {"keyword": "сингапур виза"}]
-        page = FakePage("https://example.com/a/", "Текст", title="Виза Сингапур")
+        rows = [{"keyword": "виза таиланд"}, {"keyword": "таиланд виза"}]
+        page = FakePage("https://example.com/a/", "Текст", title="Виза Таиланд")
         result = content.match_rows([page], rows, "keyword", ".")
         self.assertNotIn(page.url, result["matched"])
         self.assertIn(page.url, result["ambiguous"])
@@ -406,10 +406,10 @@ class TestFacts(unittest.TestCase):
 
 class TestGenerate(Fixture):
     def test_cp1251_csv_is_read(self):
-        self.write_bytes("k.csv", "keyword;city\nвиза сингапур;Сингапур\n".encode("cp1251"))
+        self.write_bytes("k.csv", "keyword;city\nвиза таиланд;Таиланд\n".encode("cp1251"))
         data = generate.read_dataset(os.path.join(self.dir, "k.csv"))
         self.assertEqual(len(data["rows"]), 1)
-        self.assertEqual(data["rows"][0]["city"], "Сингапур")
+        self.assertEqual(data["rows"][0]["city"], "Таиланд")
 
     def test_xlsx_gets_a_human_message(self):
         self.write_bytes("k.csv", b"PK\x03\x04rest-of-a-zip")
@@ -418,7 +418,7 @@ class TestGenerate(Fixture):
         self.assertIn("xlsx", str(ctx.exception))
 
     def test_ragged_row_does_not_crash_write(self):
-        self.write("k.csv", "keyword,city\nвиза,Сингапур,ЛИШНЕЕ\nтур,Бали\n")
+        self.write("k.csv", "keyword,city\nвиза,Таиланд,ЛИШНЕЕ\nтур,Бали\n")
         data = generate.read_dataset(os.path.join(self.dir, "k.csv"))
         audit = generate.audit_dataset(data["rows"], data["fields"], "keyword")
         result = generate.write_tasks(audit, os.path.join(self.dir, "out"), "keyword")
@@ -484,7 +484,7 @@ class TestGenerate(Fixture):
         self.assertNotEqual(generate.slugify(a), generate.slugify(b))
 
     def test_synonyms_are_caught_across_word_order_and_prepositions(self):
-        pairs = [("виза в сингапур", "сингапур виза"),
+        pairs = [("виза в таиланд", "таиланд виза"),
                  ("квартиры москва аренда", "аренда квартир в москве"),
                  ("ремонт стиральных машин москва", "ремонт стиральной машины в москве"),
                  ("buy iphone 15", "iphone 15 buy")]
@@ -547,7 +547,7 @@ class TestGenerate(Fixture):
         self.assertEqual(data["problems"], [])
 
     def test_longer_key_is_not_a_synonym(self):
-        pairs = [("виза в сингапур", "виза в сингапур для россиян"),
+        pairs = [("виза в таиланд", "виза в таиланд для россиян"),
                  ("iphone 15", "iphone 15 pro"),
                  ("аренда квартиры в москве недорого с мебелью посуточно",
                   "аренда квартиры в москве недорого с мебелью посуточно центр")]
@@ -749,7 +749,7 @@ class TestAeo(Fixture):
     def test_preamble_first_paragraph_is_flagged(self):
         page = FakePage("https://example.com/a/", "текст")
         page.paragraphs = ["В этой статье мы рассмотрим, как получить визу "
-                           "в Сингапур и что для этого нужно."]
+                           "в Таиланд и что для этого нужно."]
         issues = aeo.check_answer(page)
         self.assertTrue([i for i in issues if i[2] == "answer-preamble"])
 
@@ -761,7 +761,7 @@ class TestAeo(Fixture):
     def test_faq_markup_must_match_the_text(self):
         page = FakePage("https://example.com/a/", "видимый текст страницы")
         page.jsonld = [json.dumps({"@type": "FAQPage", "mainEntity": [
-            {"@type": "Question", "name": "Сколько стоит виза в Сингапур?"}]})]
+            {"@type": "Question", "name": "Сколько стоит виза в Таиланд?"}]})]
         self.assertTrue([i for i in aeo.check_jsonld(page)
                          if i[2] == "jsonld-faq-invisible"])
 

@@ -1,9 +1,24 @@
 # Changelog
 
+## 1.21.1 — 2026-11-03
+
+* **Calibration sites are no longer named.** Checks are tuned on live
+  projects; the repository now keeps only the general part. Code comments,
+  tests, examples, skills and this changelog describe those sites as "a live
+  multilingual catalogue", "a live community site" and so on; fixtures moved
+  to a neutral niche with the same structure (same word forms, same question
+  shapes, same scripts). `tests/test_no_private_names.py` fails if a known
+  project name comes back — it stores SHA-256 hashes only. CONTRIBUTING has
+  the rule.
+* **`release-notes` workflow** rewrites the notes of already published GitHub
+  releases from `CHANGELOG.md` on `main` (`workflow_dispatch`, `tags: all` or a
+  list). Code, tags and PyPI files are untouched.
+
 ## 1.21.0 — 2026-11-03
 
-Calibrated on a live multilingual site: multilingual-site.example, 4000+ pages in ten
-languages (en, ru, ar, ur, fa, hi, bn, zh, id, ms).
+Calibrated on a live multilingual catalogue: several thousand pages in ten
+languages, including Arabic, Urdu, Persian, Hindi, Bengali, Chinese, Indonesian
+and Malay.
 
 * **`doctor --baseline old-doctor.json`** — what changed since the last run:
   funnel steps, pages that dropped out of the index or the sitemap and pages
@@ -28,7 +43,7 @@ languages (en, ru, ar, ur, fa, hi, bn, zh, id, ms).
 * **A closed page that is also left out of the sitemap is a decision.** With
   `--sitemap`, `noindex` on such a page is info, not critical; a closed page
   that the sitemap lists stays critical. On the live site all 136 critical
-  `noindex` were legal, quiz and sanctioned-country pages left out of the
+  `noindex` were legal and service pages deliberately left out of the
   sitemap, and they pushed real problems out of "fix in this order".
 * **`doctor --verify-bots`** checks bot addresses against the ranges OpenAI,
   Perplexity, Google and Bing publish, or DNS where documented, and drops
@@ -37,8 +52,8 @@ languages (en, ru, ar, ur, fa, hi, bn, zh, id, ms).
 * **Vercel log drains** are read: the request sits under `proxy` and the
   User-Agent is a list. Such a log used to read as "no bots".
 * **Sitemap entries are shown as written.** "In the sitemap but not on the
-  site" printed the comparison key, which drops `www` — a sitemap of 1,328
-  `www` URLs appeared to list `https://multilingual-site.example/en/start`.
+  site" printed the comparison key, which drops `www` — a sitemap of `www` URLs
+  appeared to list the same addresses without `www`.
 * **Counting words in more languages** for "check by eye": `3 Schritte`,
   `5 pasos`, `4 langkah`, `15 janvier` are not facts; `12 Jahre` still is.
 * `re.split` with a positional `maxsplit`, deprecated in Python 3.13, fixed.
@@ -359,7 +374,7 @@ items were already covered; these were not.
   generated first. Whole words only: "bestiary" is not "best".
 
 Checked against ten built sites (APISIX, dplyr, hugo-theme-relearn, Zola,
-MkDocs, events-site.example, news-site.example, a 4,312-page visa catalogue, this package's own
+MkDocs, a live events site, a live community site, a multilingual catalogue of several thousand pages, this package's own
 docs): `no-viewport` and `jsonld-mismatch` stayed silent, as they should; two
 false alarms the run found — a blog post about a past year, an Arabic article
 prefix — were fixed before release. The demo site's titles lost their "in 2026"
@@ -434,8 +449,8 @@ from 14,699 to 2,720; what remains was sampled by hand.
   heading — `Plumbers in , TX`, a title opening with ` | Brand` — is a warning.
   Code blocks, scripts, comments, TeX formulas and Markdown sources (where
   `{{ }}` is Hugo's and Jekyll's own syntax) are not judged. On the seeded
-  catalogue: 40 pages found, none of them false; on events-site.example, news-site.example and
-  a 4,292-page visa catalogue: nothing, as it should be.
+  catalogue: 40 pages found, none of them false; on a live events site, a live community site and
+  a multilingual catalogue: nothing, as it should be.
 * **`llm-leftover`** (warning): "As an AI language model…", "Certainly! Here
   is…", "Конечно! Вот…" left in place of the text. **`mojibake`** (warning):
   `CafÃ©`, `Weâ€™re` — UTF-8 read as Latin-1 somewhere in the pipeline.
@@ -445,7 +460,7 @@ from 14,699 to 2,720; what remains was sampled by hand.
   into a section that is in the build (checking `/blog` does not make every link
   to `/pricing` broken), assets and feeds are not pages, and the build's own
   server routes are known: Next.js `[lang]/start/page.js`, route groups,
-  `[...slug]`. The visa catalogue's 527 links to its dynamic `/en/start` were
+  `[...slug]`. A catalogue's hundreds of links to its dynamic `/en/start` were
   the false alarm that made this rule.
 * **`robots-blocks-page`** (critical). robots.txt rules were parsed but only
   `Disallow: /` was read. Each indexable page is now matched the way Google
@@ -566,7 +581,7 @@ keeps the HTML report as an artifact and fails on critical findings. The
 repository's own CI runs it on the demo site both ways: failing without a
 baseline, passing with one. Python 3.15 joined the test matrix.
 
-**A paragraph is prose.** On the built events-site.example `long-paragraph` stood on 43
+**A paragraph is prose.** On the built a live events site `long-paragraph` stood on 43
 of 87 pages. Of the 55 blocks over 900 characters one was a paragraph: 53 were
 tables read as "caption headers cell cell …" and one was a `<dl>`. On this
 package's own documentation the same finding sat on the `<pre>` blocks holding
@@ -593,7 +608,7 @@ nothing, so everything between two of those boundaries was one block.
   are not paragraphs, and every list item is its own block instead of the whole
   list being one.
 
-events-site.example: 43 pages → 1, the real paragraph. The documentation: 8 → 1, also
+a live events site: 43 pages → 1, the real paragraph. The documentation: 8 → 1, also
 real. On 4,201 built pages of five other projects: 491 such blocks → 33, with
 the page text, word count, hash, counters and headings identical on every page
 and the first paragraph unchanged on every one.
@@ -603,7 +618,7 @@ Seen on the same run, and fixed as well:
 * **Headings of the site template are not the article's.** `no-question-headings`
   counted the footer columns ("Platform", "Blog"), the related-reading box
   ("Keep reading") and the call to action together with the article's own
-  subheadings: 23% of the median events-site.example page's subheadings came from the
+  subheadings: 23% of the median a live events site page's subheadings came from the
   template. Headings inside `<aside>`, `<footer>` and `<nav>` (or the matching
   ARIA roles) no longer count for it. `no-h1`, `many-h1` and the
   repeated-skeleton check still read every heading on the page.
@@ -839,15 +854,15 @@ what was needed around them.
 ## 1.9.5 — 2026-09-25
 
 * **Breadcrumbs, bylines and a table of contents are not the answer.**
-  events-site.example places all three inside `<main>`, ahead of the text, and
+  a live events site places all three inside `<main>`, ahead of the text, and
   "Home / Attendee Retention" became the first paragraph: 35 of 39 pages were
   told their answer was under 40 characters. With navigation, `breadcrumb`,
   `byline` and `toc` blocks skipped, 3 remain — and what was hidden underneath
   shows: on 30 pages the real first paragraph runs 320–600 characters. The
   page text itself is unchanged; only the choice of the first paragraph moved.
-  multilingual-site.example: 629 → 448.
+  a live multilingual catalogue: 629 → 448.
 * **"hreflang missing" no longer claims a translation.** A page at the same
-  path under another language is a candidate, not proof: on news-site.example
+  path under another language is a candidate, not proof: on a live community site
   `/en/lines/holidays` is about Halloween and `/hi/lines/holidays` about
   Propose Day. The warning now says to link them if they are translations and
   to leave them if each market has its own text.
@@ -856,17 +871,17 @@ what was needed around them.
 
 ## 1.9.4 — 2026-09-25
 
-Two findings from news-site.example that described pages that are not there.
+Two findings from a live community site that described pages that are not there.
 
 * **hreflang is asked for only where there is a translation.** A page without
   alternates is reported when the same path exists under another language
   prefix, and the warning names that version (`/en/lines/holidays` →
   `/hi/lines/holidays`). A page with no counterpart — `/about`, the policies,
   `/hi/lines/shayari/bengali` — has nothing to link, and is counted in one note
-  instead: 68 warnings on news-site.example became 15. Translations published under a
+  instead: 68 warnings on a live community site became 15. Translations published under a
   different slug cannot be matched by path; the note says to link those by
   hand.
-* **A `.md` file beside built HTML is a file, not a page.** news-site.example ships
+* **A `.md` file beside built HTML is a file, not a page.** a live community site ships
   `auth.md`, agent sign-in instructions served as `text/markdown`. It was read
   as a page `/auth/` and reported as an orphan with no title, thin and missing
   from the sitemap — while the live `/auth` answers 404. When the tree holds
@@ -879,7 +894,7 @@ Two findings from news-site.example that described pages that are not there.
 ## 1.9.3 — 2026-09-25
 
 * **Images in a sitemap are not pages.** The reader took every element named
-  `loc`, and `<image:loc>` is one. On multilingual-site.example 831 cover images
+  `loc`, and `<image:loc>` is one. On a live multilingual catalogue 831 cover images
   entered the "in sitemap" step and the list "in the sitemap, but no such
   page", which read 833 instead of 2. Only `<url>/<loc>` counts now; images,
   videos and hreflang alternates inside a `<url>` are ignored.
@@ -888,7 +903,7 @@ Two findings from news-site.example that described pages that are not there.
 
 ## 1.9.2 — 2026-09-25
 
-* **A redirect stub is not judged as a page.** On multilingual-site.example the
+* **A redirect stub is not judged as a page.** On a live multilingual catalogue the
   `/connect` page in nine languages is a Next.js `NEXT_REDIRECT` stub to
   `/en/connect`, and the live site answers 307. Each stub, and the root, was
   reported for a missing title, a missing description, an empty JavaScript
@@ -901,7 +916,7 @@ Two findings from news-site.example that described pages that are not there.
 ## 1.9.1 — 2026-09-25
 
 * **A closed page is no longer asked for hreflang.** The package advises
-  removing hreflang from parked translations; multilingual-site.example did exactly
+  removing hreflang from parked translations; a live multilingual catalogue did exactly
   that, and 1.9.0 answered with 1,566 "hreflang missing" warnings on the same
   noindex pages — more than every other finding on the site together. A page
   that is closed to indexing, or a redirect stub such as a locale-switching
@@ -912,7 +927,7 @@ Two findings from news-site.example that described pages that are not there.
 
 ## 1.9.0 — 2026-09-25
 
-events-site.example, the third live site, was clean page by page. What it showed was
+a live events site, the third live site, was clean page by page. What it showed was
 how the funnel talks about data it cannot fully see.
 
 * **An impressions report is no longer called an index.** The Search Console
@@ -927,21 +942,21 @@ how the funnel talks about data it cannot fully see.
   Console → Indexing → Pages for the actual index status. A real index export
   alongside restores the index step.
 * **`doctor --live`.** The engine's addresses that are not on the site are an
-  echo of the past: on events-site.example four of five "missing" pages already answered
-  301 to the right place, and on news-site.example six of seven stray hosts were
+  echo of the past: on a live events site four of five "missing" pages already answered
+  301 to the right place, and on a live community site six of seven stray hosts were
   already closed. `--live` checks each over the network and lists only what is
   left. A page is fine on 3xx, 404 or 410; a live 200 means the local build is
   stale. A host is fine if it sends `noindex`, answers 401/403, is gone, or
   redirects to another host. It is the only part of `doctor` that uses the
   network, so it runs only on the flag.
 * **Redirects within a host are followed.** The first version of `--live`
-  counted a host closed on any redirect, and on news-site.example reported "8 of 8
-  already fine" about the one real problem: gitlab.news-site.example answers 302 to a
+  counted a host closed on any redirect, and on a live community site reported "8 of 8
+  already fine" about the one real problem: gitlab.<site> answers 302 to a
   public sign-in page that carries no `noindex`. It now follows the chain on
   the same host and judges the final answer. Caught by reading the details
   behind the green line rather than trusting it.
 
-Also confirmed on events-site.example and now pinned by a test: `#fragment` rows
+Also confirmed on a live events site and now pinned by a test: `#fragment` rows
 Search Console reports as separate pages are folded into their page, and
 downloadable CSV templates are not taken for pages.
 
@@ -969,18 +984,18 @@ read the real one correctly; only the label was wrong.
 
 ## 1.8.0 — 2026-09-24
 
-Three things a live Search Console export of news-site.example showed the tool
+Three things a live Search Console export of a live community site showed the tool
 getting wrong or keeping to itself.
 
 * **The engine's addresses that are not on the site are finally shown.** The
   funnel counted them and printed them nowhere — not in the console, not in the
-  HTML. On news-site.example there were nine, and among them a staging host and an
+  HTML. On a live community site there were nine, and among them a staging host and an
   internal GitLab: the most important thing in the export never reached the
   person reading it. They are now listed by meaning — other hosts, grouped (the
   ones to close with `X-Robots-Tag: noindex` or a login), pages that no longer
   exist (redirect those with traffic), and files.
 * **Every network request introduces itself.** Without a header urllib sends
-  `Python-urllib/3.x`, which many firewalls refuse by default: the news-site.example
+  `Python-urllib/3.x`, which many firewalls refuse by default: the community site's
   sitemap answered the tool 403 and answered curl 200, and the report blamed the
   site. Sitemaps, IndexNow, the engine registry and the AI APIs now send
   `indexgap/<version> (+repository URL)`. The tool does not pretend to be a
@@ -1004,7 +1019,7 @@ which pages Microsoft Copilot cited, and `doctor` now reads it.
   step after the index: which pages Copilot actually cites. The format was taken
   from a live account, not guessed: every field quoted, `\r\n` line endings.
 * **It is not merged into the index step, on purpose.** The export is a sample:
-  on the live visa catalogue, 93 cited pages against more than a thousand
+  on a live catalogue, 93 cited pages against more than a thousand
   indexed. Merged into the index, it would have declared everything else
   unindexed — the most expensive kind of confident wrong answer. Citation is its
   own step, it reports no "lost", and the report says that silence in it proves
@@ -1171,7 +1186,7 @@ catalogue in ten languages showed exactly how much.
   counted as English — 201 "words" instead of 654. **All 174 `thin` findings
   on that site were false, and all 174 were Chinese.** Width also handles what
   a per-language factor could not: mixed strings, and the live catalogue's
-  Chinese titles are only 43% Han, the rest Latin brand names and "Form 14A".
+  Chinese titles are only 43% Han, the rest Latin brand names and "Form B14".
 * **Anchor length is judged only where length means something** — Latin,
   Cyrillic, Greek. **All 914 `vague-anchor` findings on that site were false**:
   «यमन» (Yemen) and «হোম» (Home) are three characters and whole words. Not one

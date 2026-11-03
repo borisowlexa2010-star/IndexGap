@@ -101,7 +101,7 @@ class TestFormats(Fixture):
         self.assertNotIn("аренда берлин", flat)
 
     def test_the_real_search_console_export_is_recognised_as_google(self):
-        """Копия настоящего экспорта news-site.example, а не выдумка.
+        """Копия настоящего экспорта живого сайта, а не выдумка.
 
         Google называет архив `<домен>-Performance-on-Search-<дата>.zip`, лист
         страниц в русской панели — `Страницы.csv` с шапкой «Популярные страницы»
@@ -111,14 +111,14 @@ class TestFormats(Fixture):
         """
         import zipfile
         from indexgap import doctor
-        path = self.path("news-site.example-Performance-on-Search-2026-09-24.zip")
+        path = self.path("example.com-Performance-on-Search-2026-09-24.zip")
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr("Диаграмма.csv", "Дата,Kлики,Показы,CTR,Позиция\n"
                                               "2026-06-22,4,70,5.71%,12.7\n")
             archive.writestr("Запросы.csv", "Популярные запросы,Kлики,Показы,CTR,Позиция\n"
                                             "pantun gombal bikin salting,42,4261,0.99%,8\n")
             archive.writestr("Страницы.csv", "Популярные страницы,Kлики,Показы,CTR,Позиция\n"
-                                             "https://news-site.example/,146,6168,2.37%,9.35\n")
+                                             "https://example.com/,146,6168,2.37%,9.35\n")
             archive.writestr("Фильтры.csv", "Фильтр,Значение\nТип поиска,Веб\n")
         name, kind, confident = sources.identify(path, doctor.read_indexed_header(path))
         self.assertEqual((name, kind, confident), ("google", sources.INDEX, True))
@@ -300,7 +300,7 @@ class TestKeywordColumn(Fixture):
     def test_plan_accepts_an_ahrefs_export_as_is(self):
         from indexgap import cli
         path = self.write("ahrefs-keywords.csv",
-                          "Keyword,Volume,KD\nвиза сингапур,1200,12\n"
+                          "Keyword,Volume,KD\nвиза таиланд,1200,12\n"
                           "аренда авто бали,900,11\n")
         out = io.StringIO()
         from unittest import mock

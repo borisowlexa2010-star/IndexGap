@@ -31,10 +31,10 @@ class TestDuplicateIndexability(unittest.TestCase):
                 links += "".join(f'<link rel="alternate" hreflang="{code}" href="{SITE}{url}">'
                                  for code, url in alternates)
                 file.write_text(
-                    f'<html lang="{lang}"><head><title>Singapore visa documents</title>'
+                    f'<html lang="{lang}"><head><title>Thailand visa documents</title>'
                     '<meta name="description" content="The same checklist and official submission details.">'
                     f'<meta name="robots" content="{robots}">{links}</head>'
-                    f'<body><main><h1>Singapore visa documents</h1><p>{BODY}</p></main></body></html>',
+                    f'<body><main><h1>Thailand visa documents</h1><p>{BODY}</p></main></body></html>',
                     encoding="utf-8")
             return core.load_pages(root, SITE)[0]
 

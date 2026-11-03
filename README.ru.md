@@ -239,7 +239,7 @@ keywords.csv` (и `--keyword`, если колонка называется ин
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.21.0
+- uses: borisowlexa2010-star/IndexGap@v1.21.1
   with:
     root: out
     site: https://example.com
@@ -263,7 +263,7 @@ keywords.csv` (и `--keyword`, если колонка называется ин
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.21.0
+- uses: borisowlexa2010-star/IndexGap@v1.21.1
   with:
     root: out
     site: https://example.com
@@ -285,8 +285,8 @@ keywords.csv` (и `--keyword`, если колонка называется ин
 **До генерации** — точные дубли ключей, коллизии slug и одинаковые интенты.
 Последнее важнее всего: два ключа с одним смыслом гарантированно дадут две
 почти одинаковые страницы. Одинаковым считается совпадение значимых слов
-после нормализации словоформ, поэтому «виза в сингапур» и «сингапур виза» —
-это одна страница, а «виза в сингапур для россиян» — уже другая. Каждый ключ
+после нормализации словоформ, поэтому «виза в таиланд» и «таиланд виза» —
+это одна страница, а «виза в таиланд для россиян» — уже другая. Каждый ключ
 ещё и помечается по намерению — покупка, выбор, информация, — чтобы первыми
 генерировать страницы, которые приводят клиентов.
 
@@ -386,12 +386,12 @@ MinHash с LSH-бэндингом, и группы очень похожих с�
 Язык определяется по служебным словам примерно для двадцати языков;
 индонезийский и малайский различаются по обиходным словам (paspor/pasport,
 tim/pasukan); если ни один язык не ведёт уверенно, проверка молчит. На живом
-сайте из 4000+ страниц на десяти языках — ни одного неверного вердикта на 400
+сайте из нескольких тысяч страниц на десяти языках — ни одного неверного вердикта на 400
 страницах выборки.
 
 **Вопросы на любом языке.** Заголовок — вопрос и по вопросительному слову, а не
-только по `?`: «أين ستقيم», «Apa sebenarnya yang dilihat ICA», а там, где слово
-стоит внутри фразы, — «ICA वास्तव में क्या देख रहा है», «您将住在哪里». На том же
+только по `?`: «أين ستقيم», «Apa sebenarnya yang dilihat konsulat», а там, где слово
+стоит внутри фразы, — «दूतावास वास्तव में क्या देख रहा है», «您将住在哪里». На том же
 сайте это сняло 150 ложных `no-question-headings`.
 
 **alt картинок на любом языке.** `img-alt-filler` — alt, который ничего не
@@ -411,30 +411,30 @@ tim/pasukan); если ни один язык не ведёт уверенно, 
 ```json
 {
   "projects": [
-    {"name": "visa",    "root": "../visa/content",   "site": "https://visa.example",
-     "profile": "catalog", "dataset": "../visa/keywords.csv"},
-    {"name": "events-site", "root": "../events-site/events", "site": "https://events-site.example",
+    {"name": "catalog", "root": "../catalog/content",   "site": "https://catalog.example",
+     "profile": "catalog", "dataset": "../catalog/keywords.csv"},
+    {"name": "events", "root": "../events/events", "site": "https://events.example",
      "profile": "events"},
-    {"name": "news-site",  "root": "../news-site/content", "site": "https://news-site.example",
+    {"name": "community",  "root": "../community/content", "site": "https://community.example",
      "profile": "ugc"},
-    {"name": "relocation-site",  "root": "../relocation-site/out",     "site": "https://relocation-site.example",
+    {"name": "blog", "root": "../blog/out",     "site": "https://blog.example",
      "profile": "product"}
   ]
 }
 ```
 
 ```
-  · visa      2933 стр.  критично  412  внимание  980  [catalog]
-  · events-site    840 стр.  критично   61  внимание  210  [events]
-  · news-site    5100 стр.  критично    0  внимание  430  [ugc]
-  · relocation-site      34 стр.  критично    2  внимание   18  [product]
+  · catalog   2933 стр.  критично  412  внимание  980  [catalog]
+  · events    840 стр.  критично   61  внимание  210  [events]
+  · community 5100 стр.  критично    0  внимание  430  [ugc]
+  · blog      34 стр.  критично    2  внимание   18  [product]
 
 Общие грабли на страницах (доля страниц проекта):
-  orphan       3 проекта: visa 41%, events-site 38%, relocation-site 35%
-  same-opening 2 проекта: visa 62%, events-site 55%
+  orphan       3 проекта: catalog 41%, events 38%, blog 35%
+  same-opening 2 проекта: catalog 62%, events 55%
 
 Общее в настройке сайтов:
-  ai-crawler-blocked   visa, events-site, news-site
+  ai-crawler-blocked   catalog, events, community
 ```
 
 Доля важнее абсолютного числа: сто находок на трёх тысячах страниц и десять

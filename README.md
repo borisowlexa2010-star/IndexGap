@@ -100,7 +100,7 @@ indexgap notify --key <your-key>    # tell IndexNow what actually changed
 indexgap doctor --sitemap ./public/sitemap.xml --indexed gsc.csv
 indexgap portfolio projects.json    # every site you own, in one run
 indexgap profiles                   # what the content-type presets change
-indexgap cite --domain example.com --prompt "best visa service for Singapore"
+indexgap cite --domain example.com --prompt "best visa service for Thailand"
                                     # do AI answers cite you? (your own API keys)
 indexgap fetch https://example.com --out-dir ./live
                                     # no build? download the live site for check
@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.21.0
+- uses: borisowlexa2010-star/IndexGap@v1.21.1
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.21.0
+- uses: borisowlexa2010-star/IndexGap@v1.21.1
   with:
     root: out
     site: https://example.com
@@ -526,11 +526,12 @@ the untranslated body of a translated template, which the script alone cannot
 show. It recognises about twenty languages by their function words, tells
 Indonesian from Malay by the everyday words that differ (paspor/pasport,
 tim/pasukan), and stays silent when no language clearly leads. On a live
-4000+-page site in ten languages it made no wrong call on 400 sampled pages.
+site of several thousand pages in ten languages it made no wrong call on 400
+sampled pages.
 
 **Questions in every language.** A heading is a question by its question word
-too, not only by `?`: "أين ستقيم", "Apa sebenarnya yang dilihat ICA", and, where
-the word sits mid-sentence, "ICA वास्तव में क्या देख रहा है" or "您将住在哪里".
+too, not only by `?`: "أين ستقيم", "Apa sebenarnya yang dilihat konsulat", and, where
+the word sits mid-sentence, "दूतावास वास्तव में क्या देख रहा है" or "您将住在哪里".
 On that site this removed 150 false `no-question-headings`.
 
 **Image alts in every language.** `img-alt-filler` flags alts that say nothing:
@@ -575,14 +576,14 @@ Separate reports answer "what's wrong with this site". A portfolio answers the
 question you can't see in them: **what breaks the same way everywhere.**
 
 ```
-  · visa       2933 pages  critical  412  [catalog]
+  · catalog    2933 pages  critical  412  [catalog]
   · events      840 pages  critical   61  [events]
   · feed       5100 pages  critical    0  [ugc]
   · product      34 pages  critical    2  [product]
 
 Shared problems, as a share of each project's pages:
-  orphan        3 projects: visa 41%, events 38%, product 35%
-  same-opening  2 projects: visa 62%, events 55%
+  orphan        3 projects: catalog 41%, events 38%, product 35%
+  same-opening  2 projects: catalog 62%, events 55%
 ```
 
 Shares, not counts: a hundred findings across three thousand pages and ten

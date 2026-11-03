@@ -144,7 +144,7 @@ class Slots(unittest.TestCase):
         self.assertEqual(self.codes(html(body)), [])
 
     def test_a_preposition_ending_a_question_is_not_an_empty_slot(self):
-        # events-site.example: «Where do non-dues revenue numbers come from?»
+        # a live events site: «Where do non-dues revenue numbers come from?»
         for value in ("Where do non-dues revenue numbers come from?",
                       "What is it made of.", "Pick-up lines to flirt in: a list"):
             with self.subTest(value=value):

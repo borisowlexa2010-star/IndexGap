@@ -3,31 +3,31 @@
 
   "projects": [
     {
-      "name": "visa",
-      "root": "../multilingual-site/content",
-      "site": "https://multilingual-site.example",
+      "name": "catalog",
+      "root": "../catalog/content",
+      "site": "https://a live multilingual catalogue",
       "profile": "catalog",
-      "dataset": "../multilingual-site/keywords.csv",
-      "robots": "../multilingual-site/public/robots.txt",
-      "sitemap": "../multilingual-site/public/sitemap.xml"
+      "dataset": "../catalog/keywords.csv",
+      "robots": "../catalog/public/robots.txt",
+      "sitemap": "../catalog/public/sitemap.xml"
     },
     {
-      "name": "events-site",
-      "root": "../events-site/src/content/events",
-      "site": "https://events-site.example",
+      "name": "events",
+      "root": "../events/src/content/events",
+      "site": "https://events.example",
       "profile": "events",
-      "dataset": "../events-site/data/events.csv"
+      "dataset": "../events/data/events.csv"
     },
     {
-      "name": "news-site",
-      "root": "../news-site/content",
-      "site": "https://news-site.example",
+      "name": "community",
+      "root": "../community/content",
+      "site": "https://a live community site",
       "profile": "ugc"
     },
     {
-      "name": "relocation-site",
-      "root": "../relocation-site/out",
-      "site": "https://relocation-site.io",
+      "name": "blog",
+      "root": "../blog/out",
+      "site": "https://blog.example",
       "profile": "product"
     }
   ]

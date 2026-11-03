@@ -70,7 +70,7 @@ class TestScriptNotLanguage(Fixture):
     def test_chinese_page_is_not_thin_because_the_site_is_english(self):
         """174 ложных `thin` на живом сайте — ровно этот случай."""
         pages = self.pages({
-            "zh/index.html": page_html("zh", "新加坡签证", "新加坡签证申请指南。" * 60),
+            "zh/index.html": page_html("zh", "泰国签证", "泰国签证的申请指南。" * 60),
         })
         page = pages[0]
         self.assertGreater(settings.text_volume(page, "en"), 250)
@@ -81,8 +81,8 @@ class TestScriptNotLanguage(Fixture):
         латиница. Делить такую строку пополам — вдвое занизить латиницу.
         """
         pages = self.pages({
-            "zh/index.html": page_html("zh", "新加坡签证 Form 14A",
-                                       "新加坡签证 " * 50 + "Form 14A guide " * 50),
+            "zh/index.html": page_html("zh", "泰国签证 Form B14",
+                                       "泰国签证 " * 50 + "Form B14 guide " * 50),
         })
         volume = settings.text_volume(pages[0], "")
         # 50 латинских слов ×3 + 150 иероглифов / 2 — порядок должен быть сотнями.
@@ -90,8 +90,8 @@ class TestScriptNotLanguage(Fixture):
 
     def test_width_not_character_count_for_title(self):
         self.assertEqual(settings.display_width("abcd"), 4)
-        self.assertEqual(settings.display_width("新加坡"), 6)
-        self.assertEqual(settings.display_width("新加坡 Form"), 6 + 5)
+        self.assertEqual(settings.display_width("泰国"), 4)
+        self.assertEqual(settings.display_width("泰国 Form"), 4 + 5)
 
     def test_latin_title_bounds_are_unchanged(self):
         bounds = checks._length_bounds(checks.CONFIG)
@@ -197,7 +197,7 @@ class TestHreflang(Fixture):
 
     def test_a_page_with_no_counterpart_is_not_asked_for_hreflang(self):
         """
-        hreflang связывает переводы одной страницы. На news-site.example `/about`,
+        hreflang связывает переводы одной страницы. На живом сайте сообщества `/about`,
         политики и `/hi/lines/shayari/bengali` существуют на одном языке —
         пары у них нет, и связывать нечего. 1.9.0 требовал hreflang у каждой.
         """

@@ -109,22 +109,22 @@ class TestTokens(unittest.TestCase):
         return core.Page(path="a.html", url=SITE + "/a/", text=text).words
 
     def test_words_keep_combining_marks(self):
-        self.assertEqual(self.words("सिंगापुर का वीज़ा"), ["सिंगापुर", "का", "वीज़ा"])
-        self.assertEqual(self.words("সিঙ্গাপুর ভিসা"), ["সিঙ্গাপুর", "ভিসা"])
-        self.assertEqual(self.words("تَأْشِيرَة سنغافورة"), ["تَأْشِيرَة", "سنغافورة"])
+        self.assertEqual(self.words("थाईलैंड का वीज़ा"), ["थाईलैंड", "का", "वीज़ा"])
+        self.assertEqual(self.words("থাইল্যান্ড ভিসা"), ["থাইল্যান্ড", "ভিসা"])
+        self.assertEqual(self.words("تَأْشِيرَة تايلاند"), ["تَأْشِيرَة", "تايلاند"])
 
     def test_cjk_is_counted_by_character(self):
-        self.assertEqual(self.words("新加坡签证 Form 14A"), ["新", "加", "坡", "签", "证", "form", "14a"])
+        self.assertEqual(self.words("泰国签证 Form B14"), ["泰", "国", "签", "证", "form", "b14"])
 
     def test_latin_and_cyrillic_are_unchanged(self):
-        self.assertEqual(self.words("Виза в Сингапур: 30 days, e-Visa"),
-                         ["виза", "в", "сингапур", "30", "days", "e", "visa"])
+        self.assertEqual(self.words("Виза в Таиланд: 30 days, e-Visa"),
+                         ["виза", "в", "таиланд", "30", "days", "e", "visa"])
 
     def test_content_hash_does_not_move_with_the_tokenizer(self):
         """Иначе обновление пакета поменяло бы `lastmod` у каждой страницы на
         хинди и китайском и отправило бы их в IndexNow заново."""
         import hashlib, re
-        for text in ("सिंगापुर का वीज़ा", "新加坡签证 Form 14A", "Виза в Сингапур"):
+        for text in ("थाईलैंड का वीज़ा", "泰国签证 Form B14", "Виза в Таиланд"):
             page = core.Page(path="a.html", url=SITE + "/a/", text=text, title="T")
             old = "\x00".join(["T", "", " ".join(re.findall(r"\w+", text.lower(), flags=re.UNICODE))])
             self.assertEqual(page.content_hash,
@@ -133,7 +133,7 @@ class TestTokens(unittest.TestCase):
 
 class TestCjkTwins(Fixture):
     def test_cjk_twins_are_near_duplicates(self):
-        base = "新加坡签证申请需要护照照片和填写完整的表格申请人应当提前准备好所有材料并在网上提交" * 12
+        base = "泰国签证申请需要护照照片和填写完整的表格申请人应当提前准备好所有材料并在网上提交" * 12
         files = {f"zh/{i}/index.html": html(f"签证指南 {i}", base + f"第{i}页", lang="zh")
                  for i in range(4)}
         _, result = self.site(files)

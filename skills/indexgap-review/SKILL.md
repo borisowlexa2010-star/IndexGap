@@ -183,7 +183,7 @@ indexgap check --out indexgap-baseline.json                # once; commit the fi
 indexgap check --baseline indexgap-baseline.json --strict  # fails only on new critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.21.0` with `root`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.21.1` with `root`,
 `site`, and optional `baseline` and `args`.
 
 ## Before a deploy
