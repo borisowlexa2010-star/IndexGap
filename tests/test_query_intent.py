@@ -26,7 +26,7 @@ class Intent(unittest.TestCase):
             "buy plumbing tools": "transactional",
             "plumber price austin": "transactional",
             "emergency plumber near me": "transactional",
-            "купить визу в сингапур": "transactional",
+            "купить визу в таиланд": "transactional",
             "аренда экскаватора цена": "transactional",
             "best plumbers in austin": "commercial",
             "pex vs copper pipes": "commercial",

@@ -99,7 +99,7 @@ class Crashes(Dir):
                                   "--out", self.path("o.html")), 0)
 
     def test_nul_byte_in_a_keyword_csv(self):
-        path = self.write("nul.csv", b"keyword,volume\nvi\x00sa,1\nvisa singapore,2\n")
+        path = self.write("nul.csv", b"keyword,volume\nvi\x00sa,1\nvisa thailand,2\n")
         code = self.cli("plan", path)
         self.assertIn(code, (0, 1))
         self.assertNotIn("Traceback", self.stderr.getvalue())
@@ -126,7 +126,7 @@ class Linear(Dir):
 
 
 class Encodings(Dir):
-    RU = "<title>Виза в Сингапур</title>"
+    RU = "<title>Виза в Таиланд</title>"
 
     def doc(self, head="", body="<p>Подробное руководство</p>"):
         return (f"<!doctype html><html><head>{head}{self.RU}</head>"
@@ -136,26 +136,26 @@ class Encodings(Dir):
         data = self.doc('<meta charset="utf-8">').encode().replace(
             b"</main>", b"</main><footer>\xa9 2024</footer>")
         page = self.page("stray.html", data)
-        self.assertEqual(page.title, "Виза в Сингапур")
+        self.assertEqual(page.title, "Виза в Таиланд")
         self.assertTrue(any("UTF-8" in n for n in page.notes))
 
     def test_charset_in_a_description_is_not_a_declaration(self):
         data = self.doc('<meta name="description" content="How to set charset=iso-8859-1">').encode()
-        self.assertEqual(self.page("d.html", data).title, "Виза в Сингапур")
+        self.assertEqual(self.page("d.html", data).title, "Виза в Таиланд")
 
     def test_a_commented_out_meta_is_not_a_declaration(self):
         data = self.doc('<!-- <meta charset="koi8-r"> -->').encode()
-        self.assertEqual(self.page("c.html", data).title, "Виза в Сингапур")
+        self.assertEqual(self.page("c.html", data).title, "Виза в Таиланд")
 
     def test_valid_utf8_beats_a_stale_cp1251_declaration(self):
         data = self.doc('<meta charset="windows-1251">').encode()
-        self.assertEqual(self.page("s.html", data).title, "Виза в Сингапур")
+        self.assertEqual(self.page("s.html", data).title, "Виза в Таиланд")
 
     def test_cp1251_declared_and_undeclared_still_read(self):
         for head in ('<meta charset="windows-1251">', ""):
             with self.subTest(head=head):
                 page = self.page("w.html", self.doc(head).encode("cp1251"))
-                self.assertEqual(page.title, "Виза в Сингапур")
+                self.assertEqual(page.title, "Виза в Таиланд")
 
     def test_latin1_without_declaration_is_not_read_as_cyrillic(self):
         data = ("<!doctype html><html><head><title>Visa pour Singapour : guide "
@@ -167,9 +167,9 @@ class Encodings(Dir):
 
     def test_iso_8859_1_label_means_windows_1252(self):
         data = ('<!doctype html><html><head><meta charset="iso-8859-1">'
-                "<title>Don’t miss “Singapore”</title></head>"
+                "<title>Don’t miss “Thailand”</title></head>"
                 "<body><main><p>x</p></main></body></html>").encode("cp1252")
-        self.assertEqual(self.page("q.html", data).title, "Don’t miss “Singapore”")
+        self.assertEqual(self.page("q.html", data).title, "Don’t miss “Thailand”")
 
     def test_utf16_without_bom_is_a_page(self):
         data = PAGE.replace("Home", "Visa guide").encode("utf-16-le")
@@ -185,9 +185,9 @@ class Encodings(Dir):
 
 class FrontMatter(Dir):
     def test_comment_after_a_value(self):
-        page = self.page("d.md", "---\ntitle: \"Visa guide: Singapore\" # SEO title\n"
+        page = self.page("d.md", "---\ntitle: \"Visa guide: Thailand\" # SEO title\n"
                                  "draft: true # flip before launch\n---\n\nbody text\n")
-        self.assertEqual(page.title, "Visa guide: Singapore")
+        self.assertEqual(page.title, "Visa guide: Thailand")
         self.assertTrue(publish.is_draft(page))
 
     def test_a_hash_inside_quotes_stays(self):

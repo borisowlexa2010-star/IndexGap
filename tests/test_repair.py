@@ -177,7 +177,7 @@ class TestWhatTheBriefSays(Fixture):
         из строки данных, а не выдумываются тем, кто пишет текст.
         """
         pages = self.pages({"p/index.html": html("Стр", "текст " * 50)})
-        rows = {pages[0].url: {"keyword": "виза в сингапур",
+        rows = {pages[0].url: {"keyword": "виза в таиланд",
                                "срок": "30 дней", "пусто": "  "}}
         briefs = repair.build(pages, {"issues": [
             ("critical", pages[0].url, "unsupported-number", "числа 45 нет")]},

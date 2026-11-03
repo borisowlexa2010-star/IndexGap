@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Что прогон по eventiq.io увидел вместе с таблицами и оставил на потом.
+Что прогон по живому сайту событий увидел вместе с таблицами и оставил на потом.
 
 * `no-question-headings` считал заголовки шаблона вместе с заголовками
   статьи: колонки подвала («Platform», «Blog») стоят на 86 страницах из 87,
@@ -29,7 +29,7 @@ PROSE = ("Смена экскаватора стоит 18000 рублей за �
 
 def doc(main, after=""):
     return ("<!doctype html><html lang=\"en\"><head><title>Event reports</title></head>"
-            f"<body><header><a href=\"/\">EventIQ</a></header>"
+            f"<body><header><a href=\"/\">Acme Events</a></header>"
             f"<main><article><h1>Event reports</h1>{main}</article></main>{after}"
             "</body></html>")
 
@@ -47,11 +47,11 @@ class Fixture(unittest.TestCase):
 
 
 class TemplateHeadings(Fixture):
-    """Устройство страницы eventiq.io: вставки в <aside>, колонки в <footer>."""
+    """Устройство страницы сайта событий: вставки в <aside>, колонки в <footer>."""
 
     ARTICLE = (f"<h2>Who reads event reports?</h2><p>{PROSE}</p>"
                f"<h2>How often should each report go out?</h2><p>{PROSE}</p>"
-               f"<h2>Where EventIQ fits</h2><p>{PROSE}</p>"
+               f"<h2>Where Acme Events fits</h2><p>{PROSE}</p>"
                f"<h2>See the records behind a report</h2><p>{PROSE}</p>")
     TEMPLATE_IN_MAIN = ("<aside class=\"article-related\"><h2>Keep reading</h2>"
                         "<a href=\"/a\">Event budgets explained</a></aside>"

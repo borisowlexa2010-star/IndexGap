@@ -157,11 +157,11 @@ class TestHalfDoneFixes(Fixture):
     def test_charset_in_a_script_url_is_ignored(self):
         body = ('<html><head><meta charset="utf-8">'
                 '<script src="/x.js?charset=koi8-r"></script>'
-                '<title>Виза в Сингапур</title></head><body><p>Текст</p></body></html>')
+                '<title>Виза в Таиланд</title></head><body><p>Текст</p></body></html>')
         with open(os.path.join(self.dir, "a.html"), "wb") as fh:
             fh.write(body.encode("utf-8"))
         page = self.load()[0][0]
-        self.assertEqual(page.title, "Виза в Сингапур")
+        self.assertEqual(page.title, "Виза в Таиланд")
 
     def test_utf8_aliases_do_not_produce_a_warning(self):
         with open(os.path.join(self.dir, "a.html"), "wb") as fh:
@@ -337,7 +337,7 @@ class TestFalseAlarms(Fixture):
 
     def test_crumbs_byline_and_contents_inside_main_are_not_the_answer(self):
         """
-        На eventiq.io крошки, подпись автора и оглавление стоят внутри <main>,
+        На живом сайте событий крошки, подпись автора и оглавление стоят внутри <main>,
         до текста. Первым абзацем становилось «Home / Attendee Retention», и
         «первый абзац короче 40 символов» получили 35 страниц из 39 — все,
         где ответ на самом деле стоит первым.

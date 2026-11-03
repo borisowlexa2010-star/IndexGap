@@ -95,7 +95,7 @@ class BrokenLinks(unittest.TestCase):
 
     def test_server_routes_of_the_build_are_not_broken(self):
         # Next.js: динамический маршрут без HTML — `[lang]/start/page.js`.
-        # На visatosingapore 527 страниц ссылались на /en/start и /ru/start.
+        # На живом многоязычном каталоге 527 страниц ссылались на /en/start и /ru/start.
         issues = self.build({
             "index.html": html("Главная", ["/en/", "/en/a/", "/en/start", "/pricing",
                                             "/blog/hello-world", "/en/missing/"]),
