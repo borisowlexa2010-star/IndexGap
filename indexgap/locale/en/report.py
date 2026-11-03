@@ -363,4 +363,6 @@ MESSAGES = {
         'The alt is written in a different script than the page: the alt template was not translated.',
     'Текст страницы на другом языке, чем её lang: тело страницы не переведено.':
         "The page's text is in a different language than its lang: the page body was not translated.",
+    'Цена или процент в переводе не совпадает с оригиналом: читатель этой версии видит другую цифру.':
+        'A price or percentage in the translation differs from the original: readers of this version see another number.',
 }

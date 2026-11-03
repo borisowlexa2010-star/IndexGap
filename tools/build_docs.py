@@ -265,6 +265,12 @@ WHY = {
    "Alt text is what a screen reader announces and what image search indexes. "
    "On a generated page it is also usually generated — which means it is either "
    "written once properly or missing on every page at once.",
+ "fact-drift":
+   "The same page in two languages quoting two different prices or percentages. "
+   "A translation made from an older version of the page, or a number retyped by "
+   "hand, and the reader of each version sees only their own. Compared only "
+   "within one currency, so a version that deliberately shows local prices is "
+   "not a drift; closed translations are left out.",
  "lang-text-mismatch":
    "The script is right and the language is not: English text under lang=\"de\", "
    "Indonesian under lang=\"ms\", Arabic under lang=\"fa\". It is how an untranslated "
@@ -444,7 +450,7 @@ FAMILIES = [
   "template gets wrong in three different ways. These checks validate the "
   "cluster as a whole rather than the tag in isolation.",
   ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
-   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch", "lang-text-mismatch",
+   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch", "lang-text-mismatch", "fact-drift",
    "hreflang-canonical-conflict",
    "hreflang-target-blocked", "hreflang-static-cluster"]),
 
@@ -530,7 +536,8 @@ COMMANDS = [
   "acting on a person's request actually fetched — separately from training "
   "crawlers — and which sections they skip; --verify-bots drops spoofed bots by "
   "their published address ranges; --cite adds a cite measurement; --baseline "
-  "says what dropped out and which sections became gaps since the last run."),
+  "says what dropped out and which sections became gaps since the last run; "
+  "--history keeps every run and draws the funnel over time."),
  ("fetch", "Download a live site for check when there is no build",
   "Reads the sitemap (from --sitemap, robots.txt or /sitemap.xml), obeys "
   "robots.txt, never leaves the host, stops at --limit, and saves each page "

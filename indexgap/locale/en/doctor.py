@@ -320,4 +320,14 @@ MESSAGES = {
         'the page is closed from indexing and left out of the sitemap — that looks like a decision, not a template error',
     'страница объявляет lang=«{a0}», а текст написан на другом языке ({a1}) — похоже, тело страницы не переведено':
         'the page declares lang="{a0}", but its text is in another language ({a1}) — the page body looks untranslated',
+    'Динамика воронки':
+        'Funnel over time',
+    'Каждая точка — один прогон `indexgap doctor --history`. Наведи на точку, чтобы увидеть число.':
+        'Each point is one `indexgap doctor --history` run. Hover a point to see the number.',
+    'Папку истории {a0} не создать: {a1}':
+        'Cannot create the history folder {a0}: {a1}',
+    'прогонов: {a0}':
+        'runs: {a0}',
+    'в переводе {a0}, а в оригинале ({a1}) {a2} — цифра разошлась при переводе или осталась старой':
+        'the translation says {a0}, the original ({a1}) says {a2} — the number drifted in translation or was left from an older version',
 }

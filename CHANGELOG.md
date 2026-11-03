@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.22.0 — 2026-11-03
+
+* **`fact-drift` — the same fact in every language.** Prices and percentages
+  of a page are compared with its translations in the same hreflang cluster:
+  a `$35` fee that became `53 دولار` in the Arabic version, an 85% that became
+  58% in the Indonesian one. The reference is the `x-default` target, else the
+  English version. Compared only within one currency (a version that shows
+  local prices on purpose is localised, not drifted); a translation that only
+  drops a number is not flagged; closed translations are left out. Calibrated
+  on a live ten-language catalogue: 294 clusters, 72 compared pairs, no false
+  findings.
+* **`doctor --history reports/`** keeps every run in that folder, compares it
+  with the previous one automatically (no `--baseline`) and draws
+  `reports/trend.html` — the funnel steps and AI-search coverage run by run,
+  as an inline SVG chart with no dependencies.
+* **Currency words after the number** in more languages: `35 dolar`,
+  `35 долларов`, `1 200 евро` are prices now.
+
 ## 1.21.1 — 2026-11-03
 
 * **Calibration sites are no longer named.** Checks are tuned on live

@@ -610,4 +610,8 @@ MESSAGES = {
         'check the bot addresses from --logs against published ranges and DNS and drop spoofed ones. Uses the network',
     'прошлый JSON doctor: что выпало и что вернулось с того прогона, какие разделы стали разрывом':
         'a previous doctor JSON: what dropped out and came back since that run, which sections became gaps',
+    'История: {a0} — график {a1}':
+        'History: {a0} — chart {a1}',
+    'папка истории: прогон сохраняется туда, сравнивается с прошлым из неё, а рядом рисуется trend.html':
+        'a history folder: the run is saved there, compared with the previous one in it, and trend.html is drawn beside it',
 }
