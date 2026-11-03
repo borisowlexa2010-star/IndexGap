@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.20.0
+- uses: borisowlexa2010-star/IndexGap@v1.21.0
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.20.0
+- uses: borisowlexa2010-star/IndexGap@v1.21.0
   with:
     root: out
     site: https://example.com
@@ -520,6 +520,19 @@ signs — `3万円` is 30,000, `2億` is 200,000,000, `12,5 млн`, `₹12 lakh
 Until 1.20 `₹12,34,567` was read as 12.34, and an invented `٩٥٪` or `9.900 €`
 went to "check by eye" instead of a critical finding.
 
+**The right script, the wrong language.** `lang-text-mismatch` flags English
+under `lang="de"`, Indonesian under `lang="ms"`, Arabic under `lang="fa"` —
+the untranslated body of a translated template, which the script alone cannot
+show. It recognises about twenty languages by their function words, tells
+Indonesian from Malay by the everyday words that differ (paspor/pasport,
+tim/pasukan), and stays silent when no language clearly leads. On a live
+4,311-page site in ten languages it made no wrong call on 400 sampled pages.
+
+**Questions in every language.** A heading is a question by its question word
+too, not only by `?`: "أين ستقيم", "Apa sebenarnya yang dilihat ICA", and, where
+the word sits mid-sentence, "ICA वास्तव में क्या देख रहा है" or "您将住在哪里".
+On that site this removed 150 false `no-question-headings`.
+
 **Image alts in every language.** `img-alt-filler` flags alts that say nothing:
 "image", "фото", "صورة", "画像1", "이미지", `IMG_2034.jpg`. `img-alt-language`
 flags a Russian, Arabic, Japanese or Greek page whose alts are in Latin script —
@@ -609,6 +622,17 @@ highlighted like any other gap by section, and an AI bot getting 401/403 on
 most requests is named for what it usually is: a CDN or WAF rule (Cloudflare
 blocks AI bots by default), not robots.txt. Bots are identified by User-Agent,
 which can be faked, and the report says so.
+
+`--verify-bots` checks each bot address against the ranges OpenAI, Perplexity,
+Google and Bing publish (and DNS where the operator documents it) and drops
+spoofed requests; it uses the network, so it runs only when asked. Vercel log
+drains are read as they are, as well as Cloudflare, Fastly and nginx/Apache.
+
+**What changed since the last run.** `doctor --baseline old-doctor.json`
+compares this run with a previous one: funnel steps up or down, pages that
+dropped out of the index or the sitemap and pages that came back, sections that
+newly became gaps, AI bots that disappeared from the logs. A gap is cheapest to
+fix the week it appears, because then it points at one deploy.
 
 **Measurements compared, noise named.** `cite --baseline old.json --against
 new.json` compares two measurements without sending anything (`--send

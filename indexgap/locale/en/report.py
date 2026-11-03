@@ -361,4 +361,6 @@ MESSAGES = {
         'The alt is there, but it is a placeholder or a file name: it tells neither search nor a screen reader anything.',
     'alt написан не тем письмом, что страница: шаблон alt не переведён.':
         'The alt is written in a different script than the page: the alt template was not translated.',
+    'Текст страницы на другом языке, чем её lang: тело страницы не переведено.':
+        "The page's text is in a different language than its lang: the page body was not translated.",
 }

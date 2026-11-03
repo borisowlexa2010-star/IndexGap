@@ -50,8 +50,13 @@ What to do with the findings:
   robots.txt (`ai-crawler-blocked` in `check`) and the CDN before measuring
   citations; measuring now spends money to get zero.
 
-A User-Agent can be faked. Read the numbers for rare bots with that caveat,
-and do not present them as verified.
+A User-Agent can be faked. For verified numbers add `--verify-bots`: bot
+addresses are checked against the ranges OpenAI, Perplexity, Google and Bing
+publish and against DNS, and spoofed requests are dropped. It uses the network.
+Anthropic publishes no ranges for its bots, so those stay "not checked".
+Without the flag, do not present the numbers for rare bots as verified.
+
+Vercel (log drain), Cloudflare, Fastly and other CDN logs are read as they are.
 
 ## 2. Measuring citations: only with the person's consent
 
