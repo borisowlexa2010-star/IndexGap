@@ -20,8 +20,12 @@ jobs:
         os: [ubuntu-latest]
         # 3.9 is the floor the package promises; 3.15 is the ceiling it must
         # not break on. 3.11 and 3.14 sit between so a break has a bisect point.
-        python-version: ["3.9", "3.11", "3.14", "3.15"]
+        python-version: ["3.11", "3.14", "3.15"]
         include:
+          # Ubuntu 26.04 — нынешний ubuntu-latest — Python 3.9 уже не ставит,
+          # а пакет его обещает. Нижняя граница проверяется на 24.04, где он есть.
+          - os: ubuntu-24.04
+            python-version: "3.9"
           - os: macos-latest
             python-version: "3.12"
           - os: windows-latest
