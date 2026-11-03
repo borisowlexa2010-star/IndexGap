@@ -574,4 +574,40 @@ MESSAGES = {
         'the output of `indexgap cite --send`: cited pages join the funnel and the gaps by section',
     'сравнить --baseline с готовым замером, ничего не отправляя':
         'compare --baseline with an existing measurement, sending nothing',
+    '\nС прошлого прогона ({a0}):':
+        '\nSince the previous run ({a0}):',
+    '  ! {a0}: {a1} адрес(ов) не принадлежат оператору — {a2} запрос(ов) исключены как подделка':
+        '  ! {a0}: {a1} address(es) do not belong to the operator — {a2} request(s) dropped as spoofed',
+    '  ! боты пропали из логов: {a0} — проверь robots.txt и защиту CDN':
+        '  ! bots gone from the logs: {a0} — check robots.txt and the CDN protection',
+    '  ! прогоны для разных сайтов — сравнение почти ничего не значит':
+        '  ! the runs are for different sites — the comparison means little',
+    '  {a0:<24} потеряно было {a1}, стало {a2} ({a3:+d})':
+        '  {a0:<24} lost was {a1}, now {a2} ({a3:+d})',
+    '  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})':
+        '  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})',
+    '  {a0}: не проверено {a1} адрес(ов) — оператор не публикует диапазоны':
+        '  {a0}: {a1} address(es) not checked — the operator publishes no ranges',
+    '  боты появились в логах: {a0}':
+        '  bots new in the logs: {a0}',
+    '  ничего не изменилось':
+        '  nothing changed',
+    '  ✓ {a0}: все {a1} адрес(ов) подтверждены':
+        '  ✓ {a0}: all {a1} address(es) confirmed',
+    '  ✓ вернулись в индекс: {a0}, в sitemap: {a1}':
+        '  ✓ back in the index: {a0}, in the sitemap: {a1}',
+    '  ✓ разрыв закрыт: {a0}':
+        '  ✓ gap closed: {a0}',
+    'Выпали из sitemap ({a0}):':
+        'Dropped out of the sitemap ({a0}):',
+    'Выпали из индекса ({a0}):':
+        'Dropped out of the index ({a0}):',
+    'Новые разрывы ИИ-поиска по разделам: {a0}':
+        'New AI-search gaps by section: {a0}',
+    'Новые разрывы по разделам: {a0}':
+        'New gaps by section: {a0}',
+    'проверить адреса ботов из --logs по опубликованным диапазонам и DNS и исключить поддельных. Ходит в сеть':
+        'check the bot addresses from --logs against published ranges and DNS and drop spoofed ones. Uses the network',
+    'прошлый JSON doctor: что выпало и что вернулось с того прогона, какие разделы стали разрывом':
+        'a previous doctor JSON: what dropped out and came back since that run, which sections became gaps',
 }

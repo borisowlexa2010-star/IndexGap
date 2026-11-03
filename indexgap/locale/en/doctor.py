@@ -288,8 +288,6 @@ MESSAGES = {
         '{a0} is a directory; a log file is needed (.gz is fine).',
     '{a0}: {a1} из {a2} запросов получили 401/403. Похоже, его отсекает защита CDN или WAF, а не robots.txt (Cloudflare блокирует ИИ-ботов по умолчанию) — страницы для этого ИИ-поиска закрыты, хотя robots.txt их разрешает':
         '{a0}: {a1} of {a2} requests got 401/403. It looks like CDN or WAF protection is cutting it off, not robots.txt (Cloudflare blocks AI bots by default) — the pages are closed to this AI search even though robots.txt allows them',
-    'Бот определён по User-Agent, а его может подделать кто угодно. Проверка по обратному DNS здесь не делается — цифры по редким ботам читай с этой поправкой':
-        'Bots are identified by User-Agent, which anyone can fake. No reverse-DNS check is made here — read the numbers for rare bots with that caveat',
     'В логах ({a0} строк) нет ни одного известного бота. Либо это не access-лог (нужен формат combined nginx/Apache или JSON-строки), либо User-Agent в нём не пишется.':
         'The logs ({a0} lines) contain no known bot. Either this is not an access log (the combined nginx/Apache format or JSON lines is needed), or it does not record the User-Agent.',
     'ИИ по запросу человека':
@@ -310,4 +308,16 @@ MESSAGES = {
         'the page is lang="{a0}", but its image alts are in another script ({a1}): the alt template looks untranslated',
     'у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка или имя файла, а не описание':
         '{a0} of {a1} image alts say nothing: {a2} — a placeholder or a file name, not a description',
+    '{a0}: не JSON прогона doctor ({a1})':
+        '{a0}: not a doctor run JSON ({a1})',
+    '{a0}: это не данные `indexgap doctor` — нет поля funnel':
+        '{a0}: this is not `indexgap doctor` output — there is no funnel field',
+    'Бот определён по User-Agent, а его может подделать кто угодно. Адреса не проверялись — это делает --verify-bots (ходит в сеть)':
+        'Bots are identified by User-Agent, which anyone can fake. Addresses were not checked — --verify-bots does that (uses the network)',
+    'Прошлый прогон {a0} не найден.':
+        'Previous run {a0} not found.',
+    'страница закрыта от индексации и убрана из sitemap — похоже на решение, а не на ошибку шаблона':
+        'the page is closed from indexing and left out of the sitemap — that looks like a decision, not a template error',
+    'страница объявляет lang=«{a0}», а текст написан на другом языке ({a1}) — похоже, тело страницы не переведено':
+        'the page declares lang="{a0}", but its text is in another language ({a1}) — the page body looks untranslated',
 }

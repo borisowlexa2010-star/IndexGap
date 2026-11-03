@@ -176,6 +176,48 @@ NON_UNITS = {
     "september", "october", "november", "december",
 }
 
+# То же для других языков: служебные слова, счётные контексты и месяцы.
+# Только то, что после числа не бывает фактом строки: «3 Schritte», «5 pasos»,
+# «15 janvier». «Jahre», «días», «tahun» сюда не входят — «12 Jahre am Markt»
+# и есть тот факт, который проверка должна видеть.
+NON_UNITS |= {
+    # de
+    "und", "oder", "der", "die", "das", "den", "dem", "des", "ein", "eine", "von",
+    "im", "am", "zu", "zum", "zur", "für", "mit", "bis", "ab", "schritt", "schritte",
+    "schritten", "tipps", "gründe", "mal", "sterne", "punkte", "stufe", "stufen",
+    "januar", "februar", "märz", "mai", "juni", "juli", "oktober", "dezember",
+    # fr
+    "et", "ou", "le", "la", "les", "du", "des", "à", "au", "aux", "pour", "par",
+    "sur", "étape", "étapes", "conseils", "raisons", "fois", "étoiles", "façons",
+    "janvier", "février", "mars", "avril", "juin", "juillet", "août", "septembre",
+    "octobre", "novembre", "décembre",
+    # es / pt / it
+    "y", "e", "o", "el", "lo", "los", "las", "del", "en", "por", "para", "con", "da",
+    "do", "os", "as", "em", "no", "na", "com", "il", "gli", "di", "per",
+    "paso", "pasos", "passo", "passos", "passi", "consejos", "dicas", "consigli",
+    "razones", "razões", "motivi", "veces", "vezes", "volte", "estrellas", "estrelas",
+    "stelle", "maneras", "formas", "modi",
+    "enero", "febrero", "marzo", "mayo", "junio", "julio", "agosto", "octubre",
+    "noviembre", "diciembre", "janeiro", "fevereiro", "março", "maio", "junho",
+    "julho", "outubro", "novembro", "dezembro", "gennaio", "febbraio", "aprile",
+    "maggio", "giugno", "luglio", "settembre", "ottobre", "dicembre",
+    # nl / tr / pl
+    "en", "of", "het", "een", "van", "op", "voor", "met", "stap", "stappen", "keer",
+    "ve", "veya", "ile", "için", "bir", "adım", "adımda", "kez", "kere",
+    "i", "lub", "w", "z", "na", "do", "krok", "kroki", "kroków", "razy",
+    # id / ms
+    "dan", "atau", "di", "ke", "dari", "untuk", "yang", "pada", "dengan", "langkah",
+    "tips", "cara", "alasan", "kali", "bintang", "poin", "tahap",
+    "januari", "februari", "maret", "mac", "april", "mei", "juni", "juli",
+    "agustus", "ogos", "september", "oktober", "november", "desember", "disember",
+    # ar / fa / ur / hi / bn
+    "و", "أو", "في", "من", "إلى", "على", "خطوات", "خطوة", "مرات", "طرق", "نصائح",
+    "و", "یا", "در", "از", "به", "مرحله", "بار", "روش",
+    "اور", "یا", "میں", "سے", "مراحل", "مرحلے", "بار",
+    "और", "या", "में", "से", "चरण", "बार", "तरीके", "सुझाव",
+    "এবং", "বা", "ধাপ", "বার", "উপায়",
+}
+
 
 def build_fact_pattern(units: list):
     """Собирает выражение «число + единица» под единицы конкретного проекта."""
