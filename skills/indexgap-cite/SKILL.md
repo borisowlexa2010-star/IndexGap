@@ -68,7 +68,7 @@ indexgap cite --domain example.com --dataset keywords.csv --limit 10
 
 Show the person the number of calls and providers and **ask whether to spend
 the money**. Do not add `--send` without an explicit yes. The questions must be
-real ones, what a person asks ("where to get a Singapore visa"), not "tell me
+real ones, what a person asks ("where to get a Thailand visa"), not "tell me
 about company X": citations happen in answers to questions, not to a query
 about the brand.
 

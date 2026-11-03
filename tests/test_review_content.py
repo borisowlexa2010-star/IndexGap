@@ -194,7 +194,7 @@ class TestShell(Loaded):
     def test_cjk_page_not_shell(self):
         self.assertFalse(self.shell(
             f"<html><head><title>签证</title>{SCRIPTS}</head><body><main><p>"
-            + "新加坡签证申请需要护照照片和填写完整的表格" * 12 + "</p></main></body></html>"))
+            + "泰国签证申请需要护照照片和填写完整的表格" * 12 + "</p></main></body></html>"))
 
     def test_an_empty_page_without_scripts_is_not_a_shell(self):
         self.assertFalse(self.shell("<html><head><title>Empty</title></head><body></body></html>"))

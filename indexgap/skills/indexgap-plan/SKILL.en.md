@@ -28,8 +28,8 @@ identical pages, and the engine keeps one of them. Not creating the second is
 cheaper than fixing canonicals later.
 
 Two keywords share an intent when their meaningful words match after
-normalising word forms: "visa to singapore" = "singapore visa" = "singapore
-visas". "singapore visa for indians" is a different intent — it carries a word
+normalising word forms: "visa to thailand" = "thailand visa" = "thailand
+visas". "thailand visa for indians" is a different intent — it carries a word
 the first one does not. The first row of a group is kept.
 
 Show the person the rejected list and ask whether they agree. Do not decide

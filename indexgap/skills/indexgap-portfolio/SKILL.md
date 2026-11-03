@@ -28,13 +28,13 @@ indexgap portfolio projects.json --reports ./reports
 ```json
 {
   "projects": [
-    {"name": "visa", "root": "../visa/content", "site": "https://visa.example",
-     "profile": "catalog", "dataset": "../visa/keywords.csv"},
-    {"name": "eventiq", "root": "../eventiq/events", "site": "https://eventiq.example",
+    {"name": "catalog", "root": "../catalog/content", "site": "https://catalog.example",
+     "profile": "catalog", "dataset": "../catalog/keywords.csv"},
+    {"name": "events", "root": "../events/events", "site": "https://events.example",
      "profile": "events"},
-    {"name": "rumors", "root": "../rumors/content", "site": "https://rumors.example",
+    {"name": "community", "root": "../community/content", "site": "https://community.example",
      "profile": "ugc"},
-    {"name": "reloca", "root": "../reloca/out", "site": "https://reloca.example",
+    {"name": "blog", "root": "../blog/out", "site": "https://blog.example",
      "profile": "product"}
   ]
 }

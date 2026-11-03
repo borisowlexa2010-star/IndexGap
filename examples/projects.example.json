@@ -3,31 +3,31 @@
 
   "projects": [
     {
-      "name": "visa",
-      "root": "../visatosingapore/content",
-      "site": "https://visatosingapore.com",
+      "name": "catalog",
+      "root": "../catalog/content",
+      "site": "https://a live multilingual catalogue",
       "profile": "catalog",
-      "dataset": "../visatosingapore/keywords.csv",
-      "robots": "../visatosingapore/public/robots.txt",
-      "sitemap": "../visatosingapore/public/sitemap.xml"
+      "dataset": "../catalog/keywords.csv",
+      "robots": "../catalog/public/robots.txt",
+      "sitemap": "../catalog/public/sitemap.xml"
     },
     {
-      "name": "eventiq",
-      "root": "../eventiq/src/content/events",
-      "site": "https://eventiq.io",
+      "name": "events",
+      "root": "../events/src/content/events",
+      "site": "https://events.example",
       "profile": "events",
-      "dataset": "../eventiq/data/events.csv"
+      "dataset": "../events/data/events.csv"
     },
     {
-      "name": "rumors",
-      "root": "../rumors/content",
-      "site": "https://rumors.app",
+      "name": "community",
+      "root": "../community/content",
+      "site": "https://a live community site",
       "profile": "ugc"
     },
     {
-      "name": "reloca",
-      "root": "../reloca/out",
-      "site": "https://reloca.io",
+      "name": "blog",
+      "root": "../blog/out",
+      "site": "https://blog.example",
       "profile": "product"
     }
   ]

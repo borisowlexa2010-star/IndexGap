@@ -31,7 +31,7 @@ PAGES_CSV = ('"Page","Citations"\r\n'
              f'"{SITE}/en/closed","7"\r\n')
 
 QUERIES_CSV = ('"Grounding Query","Intent","Topic","Citations","Citation Share"\r\n'
-               '"form 14a","Informational","Visas & Entry Requirements","764","24.49%"\r\n')
+               '"form b14","Informational","Visas & Entry Requirements","764","24.49%"\r\n')
 
 
 def page(title, head=""):

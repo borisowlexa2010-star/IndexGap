@@ -1,0 +1,44 @@
+# Перезаписать заметки уже выпущенных релизов текстом из CHANGELOG.md на main.
+#
+# Нужен, когда CHANGELOG поправили после выпуска — например, убрали из него
+# то, что не должно было стать публичным. Код, теги и пакеты на PyPI не
+# трогает: меняется только текст страницы релиза на GitHub.
+
+name: release-notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "теги через пробел (v1.21.0 v1.9.3) или all"
+        required: true
+        default: all
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rewrite release notes from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGS: ${{ inputs.tags }}
+        run: |
+          if [ "$TAGS" = "all" ]; then
+            TAGS=$(gh release list --limit 200 --json tagName --jq '.[].tagName')
+          fi
+          for tag in $TAGS; do
+            ver="${tag#v}"
+            awk -v v="$ver" '
+              /^## / { if (found) exit; if (index($0, "## " v " ") == 1) { found = 1; next } }
+              found { print }
+            ' CHANGELOG.md > notes.md
+            if [ ! -s notes.md ]; then
+              echo "::warning::no CHANGELOG section for $ver — $tag left as is"
+              continue
+            fi
+            gh release edit "$tag" --notes-file notes.md && echo "updated $tag"
+          done

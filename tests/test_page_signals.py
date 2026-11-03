@@ -223,8 +223,8 @@ class TitleAndHeading(Site):
         self.assertIn(("info", "title-h1-mismatch"), self.codes({"index.html": page}))
 
     def test_an_article_prefix_is_the_same_word(self):
-        # visatosingapore.com/ar/guides: «أدلة» и «الأدلة».
-        page = html(title="أدلة وأخبار تأشيرات سنغافورة | VisatoSingapore", h1="الأدلة والأخبار")
+        # живой многоязычный каталог, /ar/guides: «أدلة» и «الأدلة».
+        page = html(title="أدلة وأخبار تأشيرات تايلاند | Acme", h1="الأدلة والأخبار")
         self.assertNotIn(("info", "title-h1-mismatch"), self.codes({"index.html": page}))
 
     def test_brand_and_wording_differences_are_fine(self):

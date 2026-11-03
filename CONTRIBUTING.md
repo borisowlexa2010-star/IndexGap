@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking. Three rules keep this package what it is.
+Thanks for looking. Four rules keep this package what it is.
 
 ## 1. No dependencies
 
@@ -35,7 +35,18 @@ python3 -m unittest discover -s tests
 A pull request that changes behaviour and adds no test will be asked for one.
 Write the test so it fails before your change.
 
-## 3. Never answer confidently when you don't know
+### 4. Calibrate on real sites, publish only what is general
+
+Checks get better on live projects — that is where every false positive in
+`CHANGELOG.md` was found. What lands in this repository is the general part:
+the rule, the test and an anonymised example. A real site's name, domain, URL
+paths, niche-specific terms and exact page counts stay out of code, tests,
+docs, issues and release notes: write "a live multilingual catalogue", use
+`example.com`, and move a fixture to another niche with the same structure.
+`tests/test_no_private_names.py` fails if a known project name slips in; it
+stores only SHA-256 hashes, so it does not publish the names itself.
+
+# 3. Never answer confidently when you don't know
 
 This is the rule the package was rebuilt around, and it is worth stating
 plainly because it is easy to violate while writing correct code.

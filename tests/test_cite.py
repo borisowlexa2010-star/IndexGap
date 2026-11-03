@@ -93,14 +93,14 @@ class TestNothingLeavesWithoutSend(unittest.TestCase):
         self.addCleanup(__import__("shutil").rmtree, folder, True)
         path = os.path.join(folder, "keys.csv")
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write("keyword,volume\nвиза в сингапур,900\nвиза в таиланд,500\n")
+            fh.write("keyword,volume\nвиза в таиланд,900\nвиза в таиланд,500\n")
         with mock.patch("urllib.request.urlopen") as opened:
             code, out = self.run_cli(
                 ["cite", "--domain", "example.com", "--dataset", path, "--lang", "ru"],
                 env={"PERPLEXITY_API_KEY": "x"})
         self.assertEqual(code, 0, out)
         opened.assert_not_called()
-        self.assertIn("виза в сингапур", out)
+        self.assertIn("виза в таиланд", out)
 
 
 class TestMeasurement(unittest.TestCase):
@@ -149,8 +149,8 @@ class TestMeasurement(unittest.TestCase):
     def test_brand_mention_without_a_link_is_counted_separately(self):
         """Упомянули без ссылки — это не цитирование, но и не ничто."""
         with mock.patch.object(cite, "ask", return_value={
-                "urls": ["https://rival.com/"], "text": "по данным VisatoSingapore…"}):
-            got = cite.measure(["q"], "example.com", brand="VisatoSingapore",
+                "urls": ["https://rival.com/"], "text": "по данным Acme…"}):
+            got = cite.measure(["q"], "example.com", brand="Acme",
                                providers=["perplexity"], runs=1, env=self.env,
                                pause=0)
         row = got["results"][0]
@@ -252,10 +252,10 @@ class TestHonesty(unittest.TestCase):
 
 class TestPromptsFromKeywords(unittest.TestCase):
     def test_questions_come_from_the_keyword_column(self):
-        rows = [{"keyword": "виза в сингапур"}, {"keyword": "виза в сингапур"},
-                {"keyword": "sg arrival card"}]
+        rows = [{"keyword": "виза в таиланд"}, {"keyword": "виза в таиланд"},
+                {"keyword": "arrival card"}]
         self.assertEqual(cite.prompts_from_keywords(rows, "keyword"),
-                         ["виза в сингапур", "sg arrival card"])
+                         ["виза в таиланд", "arrival card"])
 
     def test_the_limit_is_respected(self):
         rows = [{"keyword": f"ключ {i}"} for i in range(50)]

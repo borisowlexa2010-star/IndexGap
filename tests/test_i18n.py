@@ -252,7 +252,7 @@ class TestNothingRussianLeaks(unittest.TestCase):
     def test_plan_is_english_only(self):
         path = os.path.join(self.dir, "k.csv")
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write("keyword,city\nvisa to singapore,SG\nsingapore visa,SG\n")
+            fh.write("keyword,city\nvisa to thailand,SG\nthailand visa,SG\n")
         code, out = self.run_cli(["plan", path, "--lang", "en"])
         self.assertEqual(code, 0)
         self.assertNoRussian(out, "plan")
