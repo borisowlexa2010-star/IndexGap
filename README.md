@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.21.1
+- uses: borisowlexa2010-star/IndexGap@v1.22.0
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.21.1
+- uses: borisowlexa2010-star/IndexGap@v1.22.0
   with:
     root: out
     site: https://example.com
@@ -529,6 +529,15 @@ tim/pasukan), and stays silent when no language clearly leads. On a live
 site of several thousand pages in ten languages it made no wrong call on 400
 sampled pages.
 
+**The same fact in every language.** `fact-drift` compares the prices and
+percentages of a page with its translations in the same hreflang cluster: a
+fee of `$35` that became `53 دولار` in the Arabic version, an 85% that became
+58% in the Indonesian one. Only within one currency — a version that shows
+local prices on purpose is localised, not drifted — and a translation that
+merely drops a number is not flagged. Closed translations are left out. On a
+live ten-language catalogue it compared 72 translation pairs and found
+nothing, as it should have.
+
 **Questions in every language.** A heading is a question by its question word
 too, not only by `?`: "أين ستقيم", "Apa sebenarnya yang dilihat konsulat", and, where
 the word sits mid-sentence, "दूतावास वास्तव में क्या देख रहा है" or "您将住在哪里".
@@ -628,6 +637,11 @@ which can be faked, and the report says so.
 Google and Bing publish (and DNS where the operator documents it) and drops
 spoofed requests; it uses the network, so it runs only when asked. Vercel log
 drains are read as they are, as well as Cloudflare, Fastly and nginx/Apache.
+
+**Keep a history.** `doctor --history reports/` saves every run in that
+folder, compares it with the previous one by itself (no `--baseline` needed)
+and draws `reports/trend.html`: the pages at every funnel step and the pages
+AI search opened, run by run. It is how you see that a fix worked.
 
 **What changed since the last run.** `doctor --baseline old-doctor.json`
 compares this run with a previous one: funnel steps up or down, pages that

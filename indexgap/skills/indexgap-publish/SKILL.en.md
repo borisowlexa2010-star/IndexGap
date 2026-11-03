@@ -128,7 +128,9 @@ threshold count as "near-duplicates": no canonical between `similar` pages. The
 report is `indexgap-doctor.html`; content checks do not run here — `indexgap
 check` does those.
 
-Keep each run's `indexgap-doctor.json` and pass it next time as
+Pass `--history reports/` on every run: each run is kept there, compared
+with the previous one automatically, and `reports/trend.html` shows the funnel
+over time. Or keep `indexgap-doctor.json` yourself and pass it as
 `--baseline old.json`: the report then says what dropped out of the index or
 the sitemap since that run, which sections newly became gaps and which bots
 disappeared from the logs. A gap is cheapest to fix the week it appears — it

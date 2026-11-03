@@ -315,4 +315,6 @@ MESSAGES = {
         "Translate the alt template into the page's language, or build the alt from the row's data in that language.",
     'Переведи тело страницы или закрой её от индекса, пока перевода нет: непереведённая страница в кластере hreflang выдаётся там, где читатель ждёт свой язык.':
         'Translate the page body, or close it from the index until there is a translation: an untranslated page in an hreflang cluster is served where the reader expects their own language.',
+    'Сверь цифру перевода с оригиналом и с данными: обычно перевод сделан со старой версии страницы или число переписано вручную. Цифры в переводах лучше подставлять из тех же данных, что и в оригинале.':
+        'Check the translated number against the original and the data: usually the translation was made from an older version of the page or the number was retyped by hand. Fill numbers in translations from the same data as the original.',
 }

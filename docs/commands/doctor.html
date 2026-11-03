@@ -92,13 +92,14 @@ font-size:.85rem;color:var(--ink3)}
 <h1>indexgap doctor</h1>
 <div class="meta"><span class="tag acc">command</span></div>
 <p class="lede">The crawl-to-index funnel.</p>
-<p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost, section by section: the URL section that loses noticeably more than the rest of the site is highlighted, because the cause there is usually one template, one set of links or one sitemap. Given a Bing Webmaster Tools AI Performance export, it adds the step after the index: which pages Microsoft Copilot actually cites, which of them you have closed from search, and which you left out of the sitemap. --logs reads the server's access log and shows which pages AI search bots and assistants acting on a person's request actually fetched — separately from training crawlers — and which sections they skip; --verify-bots drops spoofed bots by their published address ranges; --cite adds a cite measurement; --baseline says what dropped out and which sections became gaps since the last run.</p>
+<p>Follows the pages from what was generated, through the sitemap, to what each search engine has actually indexed — and reports where they were lost, section by section: the URL section that loses noticeably more than the rest of the site is highlighted, because the cause there is usually one template, one set of links or one sitemap. Given a Bing Webmaster Tools AI Performance export, it adds the step after the index: which pages Microsoft Copilot actually cites, which of them you have closed from search, and which you left out of the sitemap. --logs reads the server's access log and shows which pages AI search bots and assistants acting on a person's request actually fetched — separately from training crawlers — and which sections they skip; --verify-bots drops spoofed bots by their published address ranges; --cite adds a cite measurement; --baseline says what dropped out and which sections became gaps since the last run; --history keeps every run and draws the funnel over time.</p>
 <h2>Usage</h2>
 <pre><code>usage: indexgap doctor [-h] [--site SITE] [--home HOME] [--config CONFIG]
                        [--profile PROFILE] [--sitemap SITEMAP] [--live]
                        [--indexed [engine=]file.csv] [--gsc GSC]
                        [--logs access.log] [--baseline old-doctor.json]
-                       [--verify-bots] [--cite indexgap-cite.json] [--out OUT]
+                       [--history reports/] [--verify-bots]
+                       [--cite indexgap-cite.json] [--out OUT]
                        [--lang {en,ru}]
                        [root]
 
@@ -131,6 +132,9 @@ options:
   --baseline old-doctor.json
                         a previous doctor JSON: what dropped out and came back
                         since that run, which sections became gaps
+  --history reports/    a history folder: the run is saved there, compared
+                        with the previous one in it, and trend.html is drawn
+                        beside it
   --verify-bots         check the bot addresses from --logs against published
                         ranges and DNS and drop spoofed ones. Uses the network
   --cite indexgap-cite.json
@@ -148,8 +152,8 @@ options:
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-11-03">2026-11-03</time>,
-  for indexgap 1.21.1.</p>
-  <p>indexgap 1.21.1 — quality control for programmatic SEO pipelines.
+  for indexgap 1.22.0.</p>
+  <p>indexgap 1.22.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

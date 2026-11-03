@@ -28,6 +28,7 @@ from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
 from . import (aeo, checks, cite, content, crawlers, doctor, engines, fetch, freshness, generate,
+               history,
                install, portfolio, profiles, publish, repair, report, settings,
                sources)
 from . import diff as diffs
@@ -1027,6 +1028,11 @@ def cmd_doctor(args):
     _check_report_pair(args.out)
     # База читается до работы: тот же файл может быть и базой, и результатом.
     previous = doctor.load_run(args.baseline) if getattr(args, "baseline", "") else None
+    history_dir = getattr(args, "history", "") or ""
+    baseline_label = args.baseline if getattr(args, "baseline", "") else ""
+    if previous is None and history_dir:
+        previous = history.latest(history_dir)
+        baseline_label = (previous or {}).get("_path", "")
     apply_project_defaults(args)
     pages = _load(args)
     _sitemap_hreflang(args, pages)
@@ -1152,15 +1158,18 @@ def cmd_doctor(args):
            "ai_crawlers": crawl or None, "ai_segments": ai_seg}
     trend = doctor.compare_runs(run, previous) if previous is not None else None
     if trend is not None:
-        _print_trend(trend, args.baseline)
+        _print_trend(trend, baseline_label)
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
                             "segments": segments,
-                            **({"baseline": dict(path=args.baseline, **trend)} if trend else {}),
+                            **({"baseline": dict(path=baseline_label, **trend)} if trend else {}),
                             "ai_crawlers": crawl or None, "ai_segments": ai_seg,
                             "foreign": foreign, "live": live, "near_page_one": near,
                             "notes": notes})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
+    if history_dir:
+        saved = history.save(history_dir, run)
+        print(tr("История: {a0} — график {a1}", a0=saved, a1=history.render(history_dir, args.site or "")))
     print(tr("Проверки текста здесь не запускались — это делает `indexgap check`."))
     return 0
 
@@ -2177,6 +2186,8 @@ def build_parser():
                    help=tr("access-лог сервера (combined или JSON-строки, можно .gz): какие страницы забирали боты ИИ-поиска; несколько раз для нескольких файлов"))
     p.add_argument("--baseline", default="", metavar="old-doctor.json",
                    help=tr("прошлый JSON doctor: что выпало и что вернулось с того прогона, какие разделы стали разрывом"))
+    p.add_argument("--history", default="", metavar="reports/",
+                   help=tr("папка истории: прогон сохраняется туда, сравнивается с прошлым из неё, а рядом рисуется trend.html"))
     p.add_argument("--verify-bots", action="store_true",
                    help=tr("проверить адреса ботов из --logs по опубликованным диапазонам и DNS и исключить поддельных. Ходит в сеть"))
     p.add_argument("--cite", action="append", metavar="indexgap-cite.json",

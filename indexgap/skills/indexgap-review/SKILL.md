@@ -147,6 +147,7 @@ robots.txt ищется рядом со страницами и уровнем �
 | `hreflang-missing` | warning | у сайта несколько языков, а страница о версиях молчит |
 | `hreflang-bad-code`, `hreflang-lang-mismatch` | warning | неверный код или пустой href; язык не совпадает с текстом |
 | `lang-script-mismatch` | warning | `<html lang>` называет один язык, а текст написан другим алфавитом (китайский текст при `lang="en"`) — поправить `lang` в шаблоне |
+| `fact-drift` | warning | цена или процент в переводе не совпадает с оригиналом в том же кластере hreflang — сверить цифру с данными; обычно перевод сделан со старой версии |
 | `lang-text-mismatch` | warning | письмо то, язык другой: английский при `lang="de"`, индонезийский при `lang="ms"`, арабский при `lang="fa"` — тело не переведено; перевести или держать страницу закрытой, пока перевода нет |
 | `hreflang-target-blocked` | warning | кластер ведёт на закрытую от индекса страницу |
 | `hreflang-unknown-target` | info | адрес из кластера не найден среди страниц |
@@ -182,7 +183,7 @@ indexgap check --out indexgap-baseline.json                # один раз; ф
 indexgap check --baseline indexgap-baseline.json --strict  # падает только на новых critical
 ```
 
-GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.21.1` с `root`, `site`,
+GitHub Action: `uses: borisowlexa2010-star/IndexGap@v1.22.0` с `root`, `site`,
 необязательными `baseline` и `args`.
 
 ## Перед деплоем

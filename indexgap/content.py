@@ -130,7 +130,8 @@ PREFIX_PRICE = re.compile(
 # иврите или арабском уходила в «просмотри глазами» вместо критичной находки.
 CURRENCY_SIGNS = "€£¥₹₽₪₩₫₺₴₸฿$₱₦₵₡₲₭₮৳﷼円元圓원"
 CURRENCY_WORDS = (
-    "dollars?|euros?|pounds?|rupees?|yen|yuan|baht|pesos?|reais|"
+    "dollars?|dolar|dólares|dollari|euros?|pounds?|rupees?|yen|yuan|baht|pesos?|reais|"
+    "доллар(?:ов|а|ы)?|евро|фунт(?:ов|а)?|"
     "francs?|lira|lire|zł|złotych|kronor|kroner|kč|lei|"
     "руб(?:л[а-яё]*)?|грн|гривен[а-яё]*|гривн[а-яё]*|тенге|сум|сомов|лари|"
     "دولار[ًا]?|دولارات|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
