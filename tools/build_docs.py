@@ -265,6 +265,12 @@ WHY = {
    "Alt text is what a screen reader announces and what image search indexes. "
    "On a generated page it is also usually generated — which means it is either "
    "written once properly or missing on every page at once.",
+ "lang-text-mismatch":
+   "The script is right and the language is not: English text under lang=\"de\", "
+   "Indonesian under lang=\"ms\", Arabic under lang=\"fa\". It is how an untranslated "
+   "page looks on a multilingual pipeline — the template was translated, the body "
+   "was not. Detected by common function words, and only when one language clearly "
+   "leads; otherwise the check stays silent.",
  "img-alt-filler":
    "An alt that says “image”, “фото”, “صورة” or IMG_2034.jpg is worse than it "
    "looks: it passes a presence check while telling a screen reader and image "
@@ -438,7 +444,7 @@ FAMILIES = [
   "template gets wrong in three different ways. These checks validate the "
   "cluster as a whole rather than the tag in isolation.",
   ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
-   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch",
+   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch", "lang-text-mismatch",
    "hreflang-canonical-conflict",
    "hreflang-target-blocked", "hreflang-static-cluster"]),
 
@@ -522,7 +528,9 @@ COMMANDS = [
   "closed from search, and which you left out of the sitemap. --logs reads the "
   "server's access log and shows which pages AI search bots and assistants "
   "acting on a person's request actually fetched — separately from training "
-  "crawlers — and which sections they skip; --cite adds a cite measurement."),
+  "crawlers — and which sections they skip; --verify-bots drops spoofed bots by "
+  "their published address ranges; --cite adds a cite measurement; --baseline "
+  "says what dropped out and which sections became gaps since the last run."),
  ("fetch", "Download a live site for check when there is no build",
   "Reads the sitemap (from --sitemap, robots.txt or /sitemap.xml), obeys "
   "robots.txt, never leaves the host, stops at --limit, and saves each page "

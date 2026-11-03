@@ -1097,7 +1097,7 @@ CODE_WEIGHT = {
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
     "hreflang-no-self": 5, "hreflang-no-return": 6,
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
-    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12,
+    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
     "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
@@ -1522,6 +1522,28 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
 
     return [("info",) + tuple(i[1:]) if i[2] == "noindex" and i[0] == "critical"
             and inside(i[1]) else i for i in issues]
+
+
+def closed_off_map(issues: list, sitemap_urls) -> list:
+    """
+    noindex на странице, которой нет и в sitemap, — два согласованных решения
+    владельца, а не ошибка шаблона: служебные страницы, юридические, закрытые
+    по стране. На multilingual-site все 136 критичных noindex были такими и
+    вытесняли настоящие беды из «чинить в этом порядке». Закрытая страница,
+    которая стоит в sitemap, — противоречие и остаётся критичной.
+    """
+    if not sitemap_urls:
+        return issues
+    listed = {url_key(u) for u in sitemap_urls}
+    out = []
+    for item in issues:
+        if (item[0] == "critical" and item[2] == "noindex" and item[1]
+                and url_key(item[1]) not in listed):
+            item = ("info", item[1], item[2], tr(
+                "страница закрыта от индексации и убрана из sitemap — похоже на "
+                "решение, а не на ошибку шаблона"), *item[4:])
+        out.append(item)
+    return out
 
 
 def drop_closed_noise(issues: list, pages: list) -> list:

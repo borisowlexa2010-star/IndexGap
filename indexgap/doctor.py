@@ -1066,6 +1066,14 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
 
     missing_from_sitemap = show(publishable - in_sitemap) if in_sitemap is not None else []
     stale_in_sitemap = sorted(in_sitemap - generated) if in_sitemap is not None else []
+    # Показывать — как записано в sitemap: ключ теряет `www`, слэш и `.html`,
+    # и отчёт выдавал `https://multilingual-site.example/en/start`, которого в
+    # sitemap нет, — на сайте, где все 1328 адресов с `www`.
+    as_listed = {}
+    for url in sitemap_urls or ():
+        for key in fold({url_key(url)}):
+            as_listed.setdefault(key, url)
+    stale_listed = [as_listed.get(k, k) for k in stale_in_sitemap]
     # Закрытая страница в sitemap — противоречие: сайт просит её обойти и
     # запрещает индексировать. Раньше оно считалось, но нигде не показывалось.
     closed_in_sitemap = show(in_sitemap & blocked) if in_sitemap is not None else []
@@ -1211,6 +1219,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "blocked": show(blocked),
         "missing_from_sitemap": missing_from_sitemap,
         "stale_in_sitemap": stale_in_sitemap,
+        "stale_in_sitemap_urls": stale_listed,
         "not_indexed": not_indexed,
         "indexed_unknown": indexed_unknown,
         "closed_in_sitemap": closed_in_sitemap,
@@ -1553,4 +1562,91 @@ def section_gaps(publishable: dict, stats) -> dict:
                  "coverage": site["reached"] / site["pages"]},
         "rows": top,
         "highlighted": sorted(chosen, key=lambda r: (-r["lost"], r["segment"])),
+    }
+
+
+# ── динамика: этот прогон против прошлого ──────────────────────────────────────
+
+def load_run(path: str) -> dict:
+    """JSON прошлого `doctor` — то, что он сам пишет рядом с отчётом."""
+    import json
+    if not os.path.exists(path):
+        raise SourceError(tr("Прошлый прогон {a0} не найден.", a0=path))
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise SourceError(tr("{a0}: не JSON прогона doctor ({a1})", a0=path, a1=exc))
+    if not isinstance(data, dict) or not isinstance(data.get("funnel"), dict):
+        raise SourceError(tr("{a0}: это не данные `indexgap doctor` — нет поля funnel", a0=path))
+    return data
+
+
+def _step_key(step: dict) -> tuple:
+    return (step.get("id"), step.get("engine") or "")
+
+
+def compare_runs(current: dict, previous: dict) -> dict:
+    """
+    Что изменилось с прошлого прогона. Разрыв ценнее всего в момент, когда он
+    появился: «раздел /rent/ потерял 40 страниц за неделю» указывает на
+    конкретный деплой, а «в /rent/ не хватает 40 страниц» — нет.
+
+    Сравниваются ключи страниц, а не адреса как строки: смена слэша или
+    кодировки между прогонами — не выпадение из индекса.
+    """
+    cur_f, old_f = current.get("funnel") or {}, previous.get("funnel") or {}
+
+    old_steps = {_step_key(s): s for s in old_f.get("steps") or () if isinstance(s, dict)}
+    steps = []
+    for step in cur_f.get("steps") or ():
+        before = old_steps.get(_step_key(step))
+        if before is None:
+            continue
+        delta = (step.get("count") or 0) - (before.get("count") or 0)
+        if delta:
+            steps.append({"id": step.get("id"), "name": step.get("name"),
+                          "before": before.get("count") or 0,
+                          "after": step.get("count") or 0, "delta": delta})
+
+    def moved(field):
+        now, was = _keys(cur_f.get(field) or ()), _keys(old_f.get(field) or ())
+        shown = {url_key(u): u for u in list(old_f.get(field) or ()) + list(cur_f.get(field) or ())}
+        return (sorted(shown[k] for k in now - was), sorted(shown[k] for k in was - now))
+
+    newly_lost, recovered = moved("not_indexed")
+    newly_off_map, back_on_map = moved("missing_from_sitemap")
+
+    def sections(key):
+        cur = {r["segment"]: r for r in ((current.get(key) or {}).get("rows") or ())}
+        old = {r["segment"]: r for r in ((previous.get(key) or {}).get("rows") or ())}
+        hl_now = {h["segment"] for h in ((current.get(key) or {}).get("highlighted") or ())}
+        hl_was = {h["segment"] for h in ((previous.get(key) or {}).get("highlighted") or ())}
+        rows = []
+        for name in sorted(set(cur) & set(old)):
+            delta = cur[name]["lost"] - old[name]["lost"]
+            if delta:
+                rows.append({"segment": name, "before": old[name]["lost"],
+                             "after": cur[name]["lost"], "delta": delta})
+        rows.sort(key=lambda r: (-abs(r["delta"]), r["segment"]))
+        return {"rows": rows, "new_gaps": sorted(hl_now - hl_was),
+                "closed_gaps": sorted(hl_was - hl_now)}
+
+    bots_now = {b["name"]: b for b in ((current.get("ai_crawlers") or {}).get("bots") or ())}
+    bots_was = {b["name"]: b for b in ((previous.get("ai_crawlers") or {}).get("bots") or ())}
+    bots = {
+        "appeared": sorted(set(bots_now) - set(bots_was)) if bots_was else [],
+        "gone": sorted(set(bots_was) - set(bots_now)) if bots_now else [],
+        "pages": [{"name": n, "before": bots_was[n]["pages"], "after": bots_now[n]["pages"],
+                   "delta": bots_now[n]["pages"] - bots_was[n]["pages"]}
+                  for n in sorted(set(bots_now) & set(bots_was))
+                  if bots_now[n]["pages"] != bots_was[n]["pages"]],
+    }
+    return {
+        "steps": steps,
+        "newly_not_indexed": newly_lost, "recovered": recovered,
+        "newly_off_sitemap": newly_off_map, "back_in_sitemap": back_on_map,
+        "segments": sections("segments"), "ai_segments": sections("ai_segments"),
+        "bots": bots,
+        "site_changed": (current.get("site") or "") != (previous.get("site") or ""),
     }

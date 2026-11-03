@@ -318,7 +318,20 @@ def lang_script(pages: list) -> list:
         expected = declared_scripts(page.lang)
         if not expected:
             continue
-        script, share, letters = text_script("\n".join(page.paragraphs or ()), expected)
+        prose = "\n".join(page.paragraphs or ())
+        script, share, letters = text_script(prose, expected)
+        if letters >= LANG_SCRIPT_MIN_LETTERS and script in expected:
+            # Письмо то, но язык может быть другим: английский под lang="de",
+            # индонезийский под lang="ms", арабский под lang="fa". Письменность
+            # этого не видит, служебные слова — видят.
+            from . import langid
+            other = langid.mismatch(page.lang, prose)
+            if other and not (other == "en" and _CODE_TAG.search(page.raw or "", 0, 400_000)):
+                issues.append(("warning", page.url, "lang-text-mismatch", tr(
+                    "страница объявляет lang=«{a0}», а текст написан на другом языке "
+                    "({a1}) — похоже, тело страницы не переведено", a0=page.lang.strip(),
+                    a1=other)))
+            continue
         if (letters < LANG_SCRIPT_MIN_LETTERS or share < LANG_SCRIPT_SHARE
                 or script in expected):
             continue

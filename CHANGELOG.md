@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.21.0 — 2026-11-03
+
+Calibrated on a live multilingual site: multilingual-site.example, 4000+ pages in ten
+languages (en, ru, ar, ur, fa, hi, bn, zh, id, ms).
+
+* **`doctor --baseline old-doctor.json`** — what changed since the last run:
+  funnel steps, pages that dropped out of the index or the sitemap and pages
+  that came back, sections that newly became gaps or closed, AI bots that
+  appeared or vanished from the logs. In the terminal and in the JSON under
+  `baseline`.
+* **`lang-text-mismatch`** — the script is right, the language is not: English
+  under `lang="de"`, Indonesian under `lang="ms"`, Arabic under `lang="fa"`.
+  New zero-dependency language identification by function words for about
+  twenty languages (`indexgap/langid.py`); Indonesian and Malay are told apart
+  by the everyday words that differ. No verdict unless one language clearly
+  leads. On 400 sampled live pages: 394 matched their declared language,
+  3 were correctly found to be in English (parked untranslated pages), 3 got
+  no verdict.
+  `img-alt-language` now also catches Latin-script alts in another
+  Latin-script language.
+* **Question headings in every language.** Question words now count in
+  German, French, Spanish, Portuguese, Italian, Indonesian, Malay, Turkish,
+  Arabic, Persian and Urdu at the start of a heading, and in Hindi, Bengali,
+  Urdu, Persian, Chinese, Japanese and Korean anywhere in it. On the live site
+  this removed 150 of 1,024 `no-question-headings`.
+* **A closed page that is also left out of the sitemap is a decision.** With
+  `--sitemap`, `noindex` on such a page is info, not critical; a closed page
+  that the sitemap lists stays critical. On the live site all 136 critical
+  `noindex` were legal, quiz and sanctioned-country pages left out of the
+  sitemap, and they pushed real problems out of "fix in this order".
+* **`doctor --verify-bots`** checks bot addresses against the ranges OpenAI,
+  Perplexity, Google and Bing publish, or DNS where documented, and drops
+  spoofed requests. Network only on that flag; Anthropic bots stay "not
+  checked" because no ranges are published.
+* **Vercel log drains** are read: the request sits under `proxy` and the
+  User-Agent is a list. Such a log used to read as "no bots".
+* **Sitemap entries are shown as written.** "In the sitemap but not on the
+  site" printed the comparison key, which drops `www` — a sitemap of 1,328
+  `www` URLs appeared to list `https://multilingual-site.example/en/start`.
+* **Counting words in more languages** for "check by eye": `3 Schritte`,
+  `5 pasos`, `4 langkah`, `15 janvier` are not facts; `12 Jahre` still is.
+* `re.split` with a positional `maxsplit`, deprecated in Python 3.13, fixed.
+
 ## 1.20.0 — 2026-11-02
 
 * **AI crawlers from the server logs.** `doctor --logs access.log` (combined

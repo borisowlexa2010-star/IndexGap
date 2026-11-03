@@ -68,8 +68,38 @@ def _is_preamble(lowered: str) -> bool:
 
 # В ar/fa/ur используется U+061F: без него восемь вопросных заголовков
 # выглядели как ноль. Это тот же вопросный знак, а не исключение из порога.
+# Вопрос — это знак вопроса в конце или вопросительное слово. Где оно стоит,
+# зависит от языка: в русском, английском, арабском, индонезийском — в начале
+# («أين ستقيم», «Apa sebenarnya yang dilihat ICA»), а в хинди, бенгали, фарси,
+# китайском и японском — внутри фразы («ICA वास्तव में क्या देख रहा है»,
+# «您将住在哪里»). Раньше слова знались только русские и английские, и на
+# многоязычном сайте вопросы без «?» в половине языков не считались вопросами.
+_Q_START = (
+    "как|что|где|когда|почему|зачем|сколько|какой|какая|какие|какое|кто|можно ли|нужно ли|"
+    "how|what|where|when|why|who|which|can|do|does|is|are|should|will|"
+    "wie|was|wo|wann|warum|wer|welche|welcher|kann|muss|"
+    "comment|quoi|où|quand|pourquoi|qui|quel|quelle|quels|est-ce|"
+    "cómo|qué|dónde|cuándo|por qué|quién|cuál|cuánto|"
+    "como|o que|onde|quando|por que|quem|qual|quanto|"
+    "cosa|dove|perché|chi|quale|quanto|"
+    "apa|apakah|bagaimana|mengapa|kenapa|kapan|bila|bilakah|di mana|siapa|berapa|adakah|"
+    "nasıl|nerede|neden|hangi|"
+    "ما|ماذا|كيف|متى|أين|لماذا|كم|هل|"
+    "کیا|چه|چگونه|چطور|کجا|چرا|آیا"
+)
+_INDIC = "\u0900-\u0dff\u0600-\u06ff"
+_Q_INSIDE = (
+    "क्या|कैसे|कब|कहाँ|कहां|क्यों|कौन|कितना|कितने|कितनी|"
+    "কি|কী|কীভাবে|কিভাবে|কখন|কোথায়|কেন|কে|কত|"
+    "کیسے|کب|کہاں|کیوں|کون|کتنا|کتنے|"
+    "چه|چگونه|کجا|چرا|چند"
+)
+_Q_CJK = "什么|甚麼|哪里|哪裡|哪儿|哪个|怎么|怎样|如何|为什么|為什麼|多少|几|是否|吗|嗎|呢|何|どう|なぜ|いつ|どこ|だれ|誰|ですか|무엇|어떻게|언제|어디|왜|누구|얼마|나요"
 QUESTION = re.compile(
-    "^(как|что|где|когда|почему|зачем|сколько|какой|какая|какие|какое|кто|можно ли|нужно ли|how|what|where|when|why|who|which|can|do|does|is|are)\\b|[?？؟]\\s*$", re.I | re.U)
+    "^(?:" + _Q_START + ")(?![\\w" + _INDIC + "])"
+    "|(?<![\\w" + _INDIC + "])(?:" + _Q_INSIDE + ")(?![\\w" + _INDIC + "])"
+    "|(?:" + _Q_CJK + ")"
+    "|[?？؟]\\s*$", re.I | re.U)
 
 # Кто ходит за содержимым для ИИ-ответов и что теряется при блокировке.
 AI_AGENTS = {
@@ -467,7 +497,12 @@ def check_alt_text(page) -> list:
     meaningful = [a for a in alts if a not in fillers]
     if expected and meaningful:
         script, share, letters = text_script(" ".join(meaningful), expected)
-        if letters >= 20 and share >= 0.8 and script not in expected:
+        from . import langid
+        same_script_other = (script in expected and letters >= 20
+                             and langid.identify(" ".join(meaningful), min_tokens=12)[0]
+                             not in ("", langid.primary(page.lang))
+                             and langid.primary(page.lang) in langid.WORDS)
+        if same_script_other or (letters >= 20 and share >= 0.8 and script not in expected):
             issues.append(("info", page.url, "img-alt-language", tr(
                 "страница на lang=«{a0}», а alt изображений написан другим письмом "
                 "({a1}): похоже, шаблон alt не переведён", a0=page.lang.strip(),

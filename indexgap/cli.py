@@ -628,6 +628,11 @@ def cmd_check(args):
             print(tr("  ! sitemap не прочитан: {a0}", a0=error))
         if sm["urls"]:
             sitemap_urls = sm["urls"]
+            analysis["issues"] = checks.sort_issues(
+                checks.closed_off_map(analysis["issues"], sitemap_urls))
+            got["template_notes"] = checks.template_wide(analysis["issues"], len(pages),
+                                                         pages=pages)
+            got["templates"] = checks.template_risk(analysis["issues"], pages)
         else:
             print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
         _warn_undeclared(args.robots or _guess_robots(args), args.sitemap, args.root, args.site)
@@ -1020,6 +1025,8 @@ def cmd_notify(args):
 def cmd_doctor(args):
     _given_files_exist(args)
     _check_report_pair(args.out)
+    # База читается до работы: тот же файл может быть и базой, и результатом.
+    previous = doctor.load_run(args.baseline) if getattr(args, "baseline", "") else None
     apply_project_defaults(args)
     pages = _load(args)
     _sitemap_hreflang(args, pages)
@@ -1057,6 +1064,10 @@ def cmd_doctor(args):
             print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} прогонов с цитатой",
                      a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
     logs = crawlers.read_logs(getattr(args, "logs", None) or [], site=args.site or "")
+    verdicts = None
+    if logs and getattr(args, "verify_bots", False):
+        verdicts = crawlers.verify(logs)
+        logs = crawlers.without_spoofed(logs, verdicts.pop("_spoofed"))
     if sitemap_urls is None and not by_engine and not by_source and not cited and not logs:
         raise SourceError(
             tr("Нужен хотя бы --sitemap, --indexed или --logs, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv\n    --logs /var/log/nginx/access.log"))
@@ -1067,7 +1078,7 @@ def cmd_doctor(args):
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
     segments = doctor.segments(funnel_result, pages)
-    crawl = crawlers.coverage(pages, logs) if logs else {}
+    crawl = crawlers.coverage(pages, logs, verified=verdicts) if logs else {}
     if crawl:
         funnel_result["steps"].append({
             "id": "ai-fetched", "name": tr("Открыто ИИ-поиском (по логам)"),
@@ -1137,9 +1148,15 @@ def cmd_doctor(args):
                         title=tr("Разбор потерь"), segments=segments,
                         crawl=crawl, ai_segments=ai_seg)
     json_path = report_pair(args.out)[1]
+    run = {"site": args.site, "funnel": funnel_result, "segments": segments,
+           "ai_crawlers": crawl or None, "ai_segments": ai_seg}
+    trend = doctor.compare_runs(run, previous) if previous is not None else None
+    if trend is not None:
+        _print_trend(trend, args.baseline)
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
                             "segments": segments,
+                            **({"baseline": dict(path=args.baseline, **trend)} if trend else {}),
                             "ai_crawlers": crawl or None, "ai_segments": ai_seg,
                             "foreign": foreign, "live": live, "near_page_one": near,
                             "notes": notes})
@@ -1186,6 +1203,57 @@ def _print_segments(result: dict, limit: int = 8) -> None:
                  "sitemap этого раздела, а не каждая страница по отдельности."))
 
 
+def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
+    """С прошлого прогона: сначала то, что ухудшилось, — это и есть новые разрывы."""
+    print(tr("\nС прошлого прогона ({a0}):", a0=path))
+    if trend.get("site_changed"):
+        print(tr("  ! прогоны для разных сайтов — сравнение почти ничего не значит"))
+    quiet = True
+    for step in trend["steps"]:
+        quiet = False
+        print(tr("  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})",
+                 a0=step["name"].strip(), a1=step["before"], a2=step["after"], a3=step["delta"]))
+    for key, title in (("segments", tr("Новые разрывы по разделам: {a0}")),
+                       ("ai_segments", tr("Новые разрывы ИИ-поиска по разделам: {a0}"))):
+        part = trend.get(key) or {}
+        if part.get("new_gaps"):
+            quiet = False
+            print("  ! " + title.format(a0=", ".join(part["new_gaps"])))
+        for row in (part.get("rows") or [])[:limit]:
+            if row["delta"] > 0:
+                quiet = False
+                print(tr("  {a0:<24} потеряно было {a1}, стало {a2} ({a3:+d})",
+                         a0=row["segment"], a1=row["before"], a2=row["after"], a3=row["delta"]))
+        if part.get("closed_gaps"):
+            quiet = False
+            print(tr("  ✓ разрыв закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
+    for field, title in (("newly_not_indexed", tr("Выпали из индекса ({a0}):")),
+                         ("newly_off_sitemap", tr("Выпали из sitemap ({a0}):"))):
+        urls = trend.get(field) or []
+        if urls:
+            quiet = False
+            print("  " + title.format(a0=len(urls)))
+            for url in urls[:limit]:
+                print(f"         {url}")
+            if len(urls) > limit:
+                print(tr("         … и ещё {a0}", a0=len(urls) - limit))
+    back = len(trend.get("recovered") or ()) + len(trend.get("back_in_sitemap") or ())
+    if back:
+        quiet = False
+        print(tr("  ✓ вернулись в индекс: {a0}, в sitemap: {a1}",
+                 a0=len(trend.get("recovered") or ()), a1=len(trend.get("back_in_sitemap") or ())))
+    bots = trend.get("bots") or {}
+    if bots.get("gone"):
+        quiet = False
+        print(tr("  ! боты пропали из логов: {a0} — проверь robots.txt и защиту CDN",
+                 a0=", ".join(bots["gone"])))
+    if bots.get("appeared"):
+        quiet = False
+        print(tr("  боты появились в логах: {a0}", a0=", ".join(bots["appeared"])))
+    if quiet:
+        print(tr("  ничего не изменилось"))
+
+
 def _print_crawlers(crawl: dict, ai_seg: dict = None, limit: int = 12) -> None:
     """Кто из ботов приходил, сколько страниц сайта открыл и где получил ошибку."""
     if not crawl:
@@ -1227,6 +1295,15 @@ def _print_crawlers(crawl: dict, ai_seg: dict = None, limit: int = 12) -> None:
                      a3=row["segment"], a4=flag))
     for note in crawl.get("notes") or ():
         print(f"  ! {note}")
+    for name, row in sorted((crawl.get("verified") or {}).items()):
+        if row["spoofed"]:
+            print(tr("  ! {a0}: {a1} адрес(ов) не принадлежат оператору — {a2} запрос(ов) "
+                     "исключены как подделка", a0=name, a1=row["spoofed"], a2=row["spoofed_hits"]))
+        elif row["genuine"] and not row["unknown"]:
+            print(tr("  ✓ {a0}: все {a1} адрес(ов) подтверждены", a0=name, a1=row["genuine"]))
+        elif row["unknown"]:
+            print(tr("  {a0}: не проверено {a1} адрес(ов) — оператор не публикует диапазоны",
+                     a0=name, a1=row["unknown"]))
 
 
 def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:
@@ -1242,8 +1319,9 @@ def _print_sitemap_detail(funnel_result: dict, limit: int = 10) -> None:
          "missing"),
         (funnel_result.get("closed_in_sitemap"),
          "closed"),
-        (["https:" + k if k.startswith("//") else k
-          for k in funnel_result.get("stale_in_sitemap") or ()],
+        (funnel_result.get("stale_in_sitemap_urls")
+         or ["https:" + k if k.startswith("//") else k
+             for k in funnel_result.get("stale_in_sitemap") or ()],
          "stale"),
     )
     for urls, kind in groups:
@@ -2097,6 +2175,10 @@ def build_parser():
     p.add_argument("--gsc", help=tr("то же, что --indexed google=... (для совместимости)"))
     p.add_argument("--logs", action="append", metavar=tr("access.log"),
                    help=tr("access-лог сервера (combined или JSON-строки, можно .gz): какие страницы забирали боты ИИ-поиска; несколько раз для нескольких файлов"))
+    p.add_argument("--baseline", default="", metavar="old-doctor.json",
+                   help=tr("прошлый JSON doctor: что выпало и что вернулось с того прогона, какие разделы стали разрывом"))
+    p.add_argument("--verify-bots", action="store_true",
+                   help=tr("проверить адреса ботов из --logs по опубликованным диапазонам и DNS и исключить поддельных. Ходит в сеть"))
     p.add_argument("--cite", action="append", metavar="indexgap-cite.json",
                    help=tr("результат `indexgap cite --send`: процитированные страницы идут в воронку и в разбивку по разделам"))
     p.add_argument("--out", default="indexgap-doctor.html",

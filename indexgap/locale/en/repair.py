@@ -313,4 +313,6 @@ MESSAGES = {
         "Replace the placeholder alt with a description of what the image shows — from the row's data, not the file name.",
     'Переведи шаблон alt на язык страницы или собирай alt из данных строки на её языке.':
         "Translate the alt template into the page's language, or build the alt from the row's data in that language.",
+    'Переведи тело страницы или закрой её от индекса, пока перевода нет: непереведённая страница в кластере hreflang выдаётся там, где читатель ждёт свой язык.':
+        'Translate the page body, or close it from the index until there is a translation: an untranslated page in an hreflang cluster is served where the reader expects their own language.',
 }

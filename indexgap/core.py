@@ -1607,7 +1607,7 @@ def _yaml_scalar(value: str) -> str:
             i += 1
         return value
     # Комментарий начинается с « #»; «C#» и «#42» без пробела перед — текст.
-    return re.split(r"\s#", value, 1)[0].strip() if " #" in value or "\t#" in value else value
+    return re.split(r"\s#", value, maxsplit=1)[0].strip() if " #" in value or "\t#" in value else value
 
 
 def _parse_toml_frontmatter(block: str) -> dict:

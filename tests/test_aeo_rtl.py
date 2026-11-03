@@ -94,16 +94,31 @@ class TestRtlQuestionHeadings(unittest.TestCase):
             with self.subTest(lang=lang):
                 self.assertNotIn("no-question-headings", self.codes(self.page(headings, lang)))
 
+    # Утверждения, а не вопросы без «؟». Раньше тут снимали «؟» с вопросов, но
+    # «هل يمكن…», «آیا…», «کیا…» остаются вопросами и без знака: вопрос делает
+    # слово в начале, и пакет теперь его видит.
+    DECLARATIVE = {
+        "ar": ["الوثائق المطلوبة للتأشيرة", "رسوم التأشيرة والدفع", "مدة معالجة الطلب",
+               "تذكرة العودة أو المغادرة", "الحجز في الفندق", "إثبات التمويل",
+               "خطاب التوضيح", "الوصول إلى سنغافورة", "مثال: أول عطلة دون مرافق"],
+        "fa": ["مدارک لازم برای ویزا", "هزینه ویزا و پرداخت", "زمان بررسی درخواست",
+               "بلیط بازگشت یا ادامه سفر", "رزرو هتل", "مدرک تمکن مالی",
+               "نامه توضیحی", "ورود به سنگاپور", "نمونه: نخستین سفر تنها"],
+        "ur": ["ویزا کے لیے ضروری دستاویزات", "ویزا فیس اور ادائیگی", "درخواست کی کارروائی کا وقت",
+               "واپسی یا آگے کا ٹکٹ", "ہوٹل کی بکنگ", "مالی ثبوت",
+               "وضاحتی خط", "سنگاپور آمد", "مثال: پہلی تنہا چھٹی"],
+    }
+
     def test_declarative_rtl_headings_still_report_a_low_question_share(self):
-        for lang, headings in BODY_HEADINGS.items():
+        for lang, headings in self.DECLARATIVE.items():
             with self.subTest(lang=lang):
-                page = self.page([h.rstrip("؟") for h in headings], lang)
-                self.assertIn("no-question-headings", self.codes(page))
+                self.assertEqual(sum(bool(aeo.QUESTION.search(h)) for h in headings), 0)
+                self.assertIn("no-question-headings", self.codes(self.page(headings, lang)))
 
     def test_one_rtl_question_does_not_disable_the_share_check(self):
         for lang, headings in BODY_HEADINGS.items():
             with self.subTest(lang=lang):
-                page = self.page([headings[0]] + [h.rstrip("؟") for h in headings[1:]], lang)
+                page = self.page([headings[0]] + self.DECLARATIVE[lang][1:], lang)
                 self.assertIn("no-question-headings", self.codes(page))
 
     def test_question_mark_inside_a_declarative_heading_is_not_enough(self):
