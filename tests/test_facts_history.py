@@ -106,6 +106,92 @@ class TestFactDrift(Cluster):
         self.assertIn("fact-drift", codes)
 
 
+class TestPricesInEveryScript(unittest.TestCase):
+    """1.23: цена и процент находятся в любой письменности и с местным знаком."""
+
+    def kinds(self, text):
+        from indexgap import content
+        return {n: facts._kind(u) for n, u in content._numbers_in(text, None).items()}
+
+    def test_currency_words_in_more_scripts(self):
+        for text, kind in (("هزینه ۳۵ دلار", "USD"), ("費用は35ドルです", "USD"),
+                           ("费用为35美元", "USD"), ("수수료는 35달러", "USD"),
+                           ("ค่าธรรมเนียม 35 ดอลลาร์", "USD"), ("Збір 35 доларів", "USD"),
+                           ("فیس 35 ڈالر", "USD"), ("ফি 35 টাকা", "BDT"),
+                           ("Preis 35 ユーロ", "EUR"), ("35 ringgit", "MYR")):
+            with self.subTest(text):
+                self.assertEqual(self.kinds(text), {"35": kind})
+
+    def test_local_dollar_signs_are_their_own_currency(self):
+        for text, number, kind in (("S$35", "35", "SGD"), ("HK$200", "200", "HKD"),
+                                   ("R$ 90", "90", "BRL"), ("US$ 35", "35", "USD"),
+                                   ("RM 35", "35", "MYR"), ("Rp 350.000", "350000", "IDR"),
+                                   ("Rs. 500", "500", "INR")):
+            with self.subTest(text):
+                self.assertEqual(self.kinds(text), {number: kind})
+        self.assertEqual(self.kinds("$35 and S$47"), {"35": "USD", "47": "SGD"})
+
+    def test_percent_written_as_a_word(self):
+        for text in ("85 per cent", "85 процентов", "۸۵ درصد", "85 Prozent", "85 por ciento"):
+            with self.subTest(text):
+                self.assertEqual(self.kinds(text), {"85": "%"})
+
+    def test_a_list_shares_the_unit_written_after_its_last_number(self):
+        self.assertEqual(self.kinds("چهار خدمت ۲۹، ۴۹، ۱۴۹ و ۲۴۹ دلار آمریکا"),
+                         {"29": "USD", "49": "USD", "149": "USD", "249": "USD"})
+        self.assertEqual(self.kinds("plans at 29, 49 and 149 dollars"),
+                         {"29": "USD", "49": "USD", "149": "USD"})
+        self.assertEqual(self.kinds("1, 2 und 3 Prozent"), {"1": "%", "2": "%", "3": "%"})
+
+    def test_a_year_or_a_lone_comma_is_not_a_list(self):
+        self.assertEqual(self.kinds("Since 2019, 35 dollars"), {"35": "USD"})
+        self.assertEqual(self.kinds("In 2026, 15% of visas"), {"15": "%"})
+        self.assertEqual(self.kinds("between 2019 and 2026, 40%"), {"40": "%"})
+
+    def test_ordinary_words_are_not_currencies(self):
+        self.assertEqual(self.kinds("we won 3 awards"), {})
+        self.assertEqual(self.kinds("Version 2.5 percentile"), {})
+
+    def test_local_signs_are_shown_as_written(self):
+        from indexgap import content
+        self.assertEqual(content._shown("30", "S$"), "S$30")
+        self.assertEqual(content._shown("35", "RM"), "RM 35")
+
+
+class TestDriftInEveryScript(Cluster):
+    def test_a_persian_price_that_changed(self):
+        self.page("en", "fee", "The visa fee is $35 for adults.")
+        self.page("ar", "fee", "هزینه ویزا ۵۳ دلار برای بزرگسالان.")
+        self.assertEqual(sorted(self.drift()), [f"{SITE}/ar/fee/"])
+
+    def test_a_percent_word_that_changed(self):
+        self.page("en", "fee", "The approval rate is 85% this year.")
+        self.page("de", "fee", "Die Quote liegt bei 58 Prozent in diesem Jahr.")
+        self.assertEqual(sorted(self.drift()), [f"{SITE}/de/fee/"])
+
+    def test_the_same_list_written_with_one_currency_word(self):
+        self.page("en", "fee", "Plans cost $29, $49 and $149.")
+        self.page("ar", "fee", "الخطط بسعر ۲۹، ۴۹ و ۱۴۹ دلار.")
+        self.assertEqual(self.drift(), {})
+
+    def test_prices_converted_under_the_same_sign_are_localisation(self):
+        """«$700» в песо при «$35» в оригинале — пересчёт, а не расхождение."""
+        self.page("en", "fee", "The fee is $35 and the express fee is $60.")
+        self.page("de", "fee", "Die Gebühr beträgt $700, express $1200.")
+        self.assertEqual(self.drift(), {})
+
+    def test_a_local_dollar_is_another_currency(self):
+        self.page("en", "fee", "The fee is $35 for adults.")
+        self.page("id", "fee", "Biaya S$47 untuk dewasa.")
+        self.assertEqual(self.drift(), {})
+
+    def test_a_longer_translation_is_not_drift(self):
+        """Пример расчёта, которого нет в оригинале, — другой текст, не другая цифра."""
+        self.page("en", "fee", "The official fee is S$30.")
+        self.page("id", "fee", "Hotel S$600, makan S$250, cadangan S$150, total S$1,000.")
+        self.assertEqual(self.drift(), {})
+
+
 class TestHistory(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="indexgap-hist-")

@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.22.0
+- uses: borisowlexa2010-star/IndexGap@v1.23.0
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.22.0
+- uses: borisowlexa2010-star/IndexGap@v1.23.0
   with:
     root: out
     site: https://example.com
@@ -537,6 +537,12 @@ local prices on purpose is localised, not drifted — and a translation that
 merely drops a number is not flagged. Closed translations are left out. On a
 live ten-language catalogue it compared 72 translation pairs and found
 nothing, as it should have.
+
+Prices are found in any script and with any local sign: `۳۵ دلار`, `35ドル`,
+`35美元`, `35달러`, `S$35`, `HK$200`, `RM 35`, `Rp 350.000`; `85 per cent` and
+`۸۵ درصد` are percentages, and in `29, 49 and 149 dollars` every number is a
+price. Prices converted under the same `$` sign (pesos against dollars) are
+read as localisation, not drift.
 
 **Questions in every language.** A heading is a question by its question word
 too, not only by `?`: "أين ستقيم", "Apa sebenarnya yang dilihat konsulat", and, where

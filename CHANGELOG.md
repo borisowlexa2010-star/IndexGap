@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.23.0 — 2026-11-05
+
+* **Prices and percentages in every script.** Currency words are read in
+  Persian (`۳۵ دلار`), Urdu, Bengali, Hindi, Thai, Hebrew, Ukrainian, Japanese
+  (`35ドル`), Chinese (`35美元`) and Korean (`35달러`); local dollar signs and
+  abbreviations — `S$`, `HK$`, `A$`, `C$`, `R$`, `US$`, `RM`, `Rp`, `Rs.` — are
+  prices in their own currency; a percentage written as a word (`85 per cent`,
+  `85 процентов`, `۸۵ درصد`, `85 Prozent`) is a percentage. Before, these pages
+  had no prices at all for `fact-drift` and the content checks.
+* **A list shares its unit.** In `29, 49 and 149 dollars` or
+  `۲۹، ۴۹، ۱۴۹ و ۲۴۹ دلار` every number is a price, not only the last one.
+  A year before a comma (`In 2026, 15%`) is not a list.
+* **`fact-drift` tells localisation from drift.** Prices converted under the
+  same `$` sign — every number off by one factor, such as pesos against dollars
+  — are not flagged; nor is a translation that shows clearly more prices than
+  the original (a worked example the original lacks is a different text).
+  On the ten-language calibration catalogue the wider parsing found three
+  candidates, all of them one of these two cases; with the guards the result is
+  zero false findings, and `check` on the whole catalogue is unchanged.
+
 ## 1.22.0 — 2026-11-03
 
 * **`fact-drift` — the same fact in every language.** Prices and percentages

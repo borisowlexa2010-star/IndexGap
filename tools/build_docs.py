@@ -270,7 +270,13 @@ WHY = {
    "A translation made from an older version of the page, or a number retyped by "
    "hand, and the reader of each version sees only their own. Compared only "
    "within one currency, so a version that deliberately shows local prices is "
-   "not a drift; closed translations are left out.",
+   "not a drift: `S$`, `HK$`, `R$`, `RM` and `Rp` are their own currencies, and "
+   "prices converted under the same `$` sign (all of them off by one factor) are "
+   "read as localisation. Currency and percent words are read in Persian, Urdu, "
+   "Bengali, Hindi, Thai, Hebrew, Ukrainian, Japanese, Chinese and Korean too, and "
+   "a list such as \"29, 49 and 149 dollars\" gives every number its unit. A "
+   "translation with clearly more prices than the original is a different text "
+   "and is not compared; closed translations are left out.",
  "lang-text-mismatch":
    "The script is right and the language is not: English text under lang=\"de\", "
    "Indonesian under lang=\"ms\", Arabic under lang=\"fa\". It is how an untranslated "

@@ -117,13 +117,29 @@ def _scale_at(text: str, end: int) -> tuple:
 
 PERCENT = re.compile(NOT_INSIDE + r"(" + NUMBER + r")\s*%")
 
+# Процент словом: «85 per cent», «85 процентов», «85 درصد». Без этого перевод,
+# где знак `%` заменён словом, выпадал из сравнения цифр между языками.
+PERCENT_WORDS = (
+    "per\\s?cent|percent|pct|процент(?:ов|а|ы)?|відсотк(?:ів|а|и)|prozent|por\\s?ciento|"
+    "pour\\s?cent|per\\s?cento|por\\s?cento|procent|persen|peratus|phần\\s?trăm|"
+    "درصد|بالمائة|بالمئة|في\\s?المائة|प्रतिशत|শতাংশ|فیصد|เปอร์เซ็นต์|אחוז(?:ים)?"
+)
+PERCENT_WORD = re.compile(
+    NOT_INSIDE + r"(" + NUMBER + r")" + _SP + r"?(?:" + PERCENT_WORDS + r")(?![^\W\d_])",
+    re.I | re.U)
+
 # Цена, записанная по-английски: валюта перед числом. Такие числа не искались
 # вовсе, и единственная настоящая выдумка на странице — `$95` при `$60`
 # в данных — была единственным, о чём проверка молчала.
 CURRENCY_CODES = ("USD|EUR|GBP|JPY|CNY|INR|AUD|CAD|CHF|SGD|AED|RUB|BRL|MXN|KRW|TRY|"
                   "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH")
+# Доллар с буквой страны и местные сокращения: `S$35`, `HK$200`, `R$ 90`,
+# `RM 35`, `Rp 350.000`. Раньше такие цены не находились вовсе.
+LOCAL_PREFIXES = r"(?:US|S|A|AU|C|CA|HK|NZ|NT|R|MX|COL|CL)\$|RM|Rp\.?|Rs\.?|₱|₫|₩|₪|₺|₴|₸|৳"
+_LOCAL_PREFIX = re.compile(LOCAL_PREFIXES)
 PREFIX_PRICE = re.compile(
-    r"(?<![\w.,])([$€£¥₹₽]|(?:" + CURRENCY_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
+    r"(?<![\w.,$])((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽]|(?:" + CURRENCY_CODES
+    + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
 
 # Валюта после числа: `9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `3万円`. Раньше
 # ценой считалась только валюта перед числом, и выдуманная цена на испанском,
@@ -136,13 +152,20 @@ CURRENCY_WORDS = (
     "руб(?:л[а-яё]*)?|грн|гривен[а-яё]*|гривн[а-яё]*|тенге|сум|сомов|лари|"
     "دولار[ًا]?|دولارات|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
     "שקל|שקלים|ש\"ח|"
-    "रुपये|रुपया|रुपए|บาท|đồng"
+    "रुपये|रुपया|रुपए|บาท|đồng|"
+    "دلار|یورو|تومن|ڈالر|روپے|روپیہ|ডলার|টাকা|রুপি|डॉलर|डालर|यूरो|"
+    "ดอลลาร์|ยูโร|דולר|דולרים|יורו|долар(?:ів|а|и)?|гривень|"
+    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|"
+    "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로|엔"
 )
+# Валютные слова CJK пишутся вплотную к следующему слову («35ドルです»), поэтому
+# для них граница слова не нужна, в отличие от `dollar` в `dollars-and-sense`.
+CJK_CURRENCY_WORDS = "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로"
 SUFFIX_PRICE = re.compile(
     NOT_INSIDE + r"(" + NUMBER + r")"
     r"(?:" + _SP + r"?(?:[" + _CJK_SCALES + r"]|(?:" + _SCALE_WORDS + r")\.?))?"
-    + _SP + r"?(?:[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES
-    + r")(?![^\W\d_]))", re.I | re.U)
+    + _SP + r"?(?:" + CJK_CURRENCY_WORDS + r"|[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS
+    + "|" + CURRENCY_CODES + r")(?![^\W\d_]))", re.I | re.U)
 
 
 # Общее «число + слово»: ловит «12 лет», «25 тонн», «3500 заказов» —
@@ -292,6 +315,10 @@ def _numbers_in(text: str, fact_pattern) -> dict:
         number = _norm_number(match.group(1))
         if number:
             found.setdefault(number, "%")
+    for match in PERCENT_WORD.finditer(text or ""):
+        number = _norm_number(match.group(1))
+        if number:
+            found.setdefault(number, "%")
     if fact_pattern:
         for match in fact_pattern.finditer(text or ""):
             number = _norm_number(match.group(1))
@@ -307,8 +334,46 @@ def _numbers_in(text: str, fact_pattern) -> dict:
         factor, _ = _scale_at(text, match.end(1))
         number = _scaled(match.group(1), factor)
         if number:
-            found.setdefault(number, match.group(0)[len(match.group(1)):].strip())
+            unit = match.group(0)[len(match.group(1)):].strip()
+            found.setdefault(number, unit)
+            if factor == 1:
+                for earlier in _listed_before(text, match.start(1)):
+                    found.setdefault(earlier, unit)
+    for match in list(PERCENT.finditer(text or "")) + list(PERCENT_WORD.finditer(text or "")):
+        for earlier in _listed_before(text, match.start(1)):
+            found.setdefault(earlier, "%")
     return found
+
+
+# Перечисление, где единица стоит только после последнего числа: «29, 49
+# и 149 долларов», «۲۹، ۴۹، ۱۴۹ و ۲۴۹ دلار», «10, 20 or 30%». Без этого
+# цена бралась одна, и перевод, где так и пишут, «терял» остальные цифры.
+# Перед последним числом нужен союз: «In 2026, 15%» — не перечисление.
+_LIST_AND = (_SP + r"+(?:and|or|и|или|و|یا|und|oder|et|ou|y|o|e|dan|atau|và|hoặc|และ|"
+             r"หรือ|ve|veya|और|या|এবং|ও|та|або|ו)" + _SP + r"+")
+_LIST_COMMA = _SP + r"*[,،、;]" + _SP + r"*"
+_LIST_LAST = re.compile(NOT_INSIDE + r"(" + NUMBER + r")(?:" + _LIST_COMMA + r")?" + _LIST_AND + r"$", re.I)
+_LIST_MORE = re.compile(NOT_INSIDE + r"(" + NUMBER + r")" + _LIST_COMMA + r"$")
+MAX_LISTED = 6
+
+
+def _year_like(number: str) -> bool:
+    return number.isdigit() and 1900 <= int(number) <= 2100
+
+
+def _listed_before(text: str, start: int) -> list:
+    """Числа перечисления прямо перед числом с единицей — без своей единицы."""
+    out, end, pattern = [], start, _LIST_LAST
+    while len(out) < MAX_LISTED:
+        match = pattern.search(text, max(0, end - 40), end)
+        if not match:
+            break
+        number = _norm_number(match.group(1))
+        if not number or _year_like(number):
+            break
+        out.append(number)
+        end, pattern = match.start(), _LIST_MORE
+    return out
 
 
 _SCALE = re.compile(r"(?:\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|/\s?)(?:5|10|100)\b(?!\s?%)",
@@ -560,6 +625,8 @@ def _shown(number: str, unit: str) -> str:
             return f"{raw}{glue}{unit}".strip()
     if unit and unit in "$€£¥₹₽":
         return f"{unit}{number}"
+    if unit and _LOCAL_PREFIX.fullmatch(unit):
+        return f"{unit}{number}" if unit.endswith("$") or len(unit) == 1 else f"{unit} {number}"
     if unit and unit.upper() in CURRENCY_CODES.split("|"):
         return f"{unit} {number}"
     return f"{number} {unit}".strip()

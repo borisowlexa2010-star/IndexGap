@@ -37,11 +37,40 @@ _CURRENCY = {
     "sgd": "SGD", "myr": "MYR", "idr": "IDR", "aud": "AUD", "cad": "CAD",
     "chf": "CHF", "try": "TRY", "₺": "TRY", "lira": "TRY", "ليرة": "TRY",
     "kzt": "KZT", "тенге": "KZT", "uah": "UAH", "грн": "UAH", "₴": "UAH",
+    "гривень": "UAH",
+    # Доллары по-персидски, на урду, бенгали, хинди, тайском, иврите, украинском,
+    # японском, китайском и корейском.
+    "دلار": "USD", "ڈالر": "USD", "ডলার": "USD", "डॉलर": "USD", "डालर": "USD",
+    "ดอลลาร์": "USD", "דולר": "USD", "דולרים": "USD", "долар": "USD", "доларів": "USD",
+    "долара": "USD", "долари": "USD", "ドル": "USD", "美元": "USD", "달러": "USD",
+    "us$": "USD",
+    "یورو": "EUR", "यूरो": "EUR", "ยูโร": "EUR", "יורו": "EUR", "ユーロ": "EUR",
+    "欧元": "EUR", "유로": "EUR",
+    "엔": "JPY", "人民币": "CNY", "港元": "HKD", "hk$": "HKD", "hkd": "HKD",
+    "新元": "SGD", "s$": "SGD", "a$": "AUD", "au$": "AUD", "c$": "CAD", "ca$": "CAD",
+    "nz$": "NZD", "nt$": "TWD", "r$": "BRL", "brl": "BRL", "mx$": "MXN", "mxn": "MXN",
+    "col$": "COP", "cl$": "CLP", "rm": "MYR", "ringgit": "MYR", "rp": "IDR",
+    "rupiah": "IDR", "rs": "INR", "টাকা": "BDT", "৳": "BDT", "রুপি": "INR",
+    "روپے": "PKR", "روپیہ": "PKR", "تومان": "IRR", "تومن": "IRR", "ریال": "IRR",
+    "₱": "PHP", "php": "PHP", "pesos": "MXN", "peso": "MXN", "₫": "VND", "đồng": "VND",
+    "dong": "VND", "vnd": "VND", "riyal": "SAR", "riyals": "SAR", "dirham": "AED",
+    "dirhams": "AED", "shekel": "ILS", "shekels": "ILS", "₦": "NGN", "naira": "NGN",
+    "rand": "ZAR", "zar": "ZAR", "₸": "KZT", "pln": "PLN", "zł": "PLN", "złotych": "PLN",
 }
+
+# Знак `$` без буквы страны пишут и для песо, и для канадского, и для
+# сингапурского доллара. Испанская версия с «$700» в песо при «$35» в
+# оригинале — не расхождение, а пересчёт. Пересчёт виден по тому, что все
+# числа перевода отличаются от оригинала в одно и то же число раз.
+CONVERSION_MIN_RATIO = 2.0
+_CONVERSION_SPREAD = 0.15
 
 # Сколько разных цен одного вида на странице ещё сравнимо. Прайс-лист на сотню
 # позиций — не «факт страницы», а таблица, и порядок строк в переводе другой.
 MAX_FACTS = 25
+
+# Сколько лишних цен одного вида перевод может показать и остаться сравнимым.
+EXTRA_FACTS = 1
 
 
 def _kind(unit: str) -> str:
@@ -106,6 +135,32 @@ def _reference(group: list):
     return max(group, key=lambda p: (sum(len(v) for v in facts_of(p).values()), p.url))
 
 
+def _value(number: str) -> float:
+    try:
+        return float(number)
+    except ValueError:
+        return 0.0
+
+
+def _converted(added: list, missing: list) -> bool:
+    """
+    Перевод показывает те же цены в другой валюте под тем же знаком:
+    все пары «новое/старое» отличаются в одно и то же число раз, и это
+    число далеко от единицы. Опечатка (`35` → `53`) или старая цена так
+    не выглядят: они меняют одно число и ненамного.
+    """
+    if len(added) != len(missing):
+        return False
+    new = sorted(_value(n) for n in added)
+    old = sorted(_value(n) for n in missing)
+    if not all(new) or not all(old):
+        return False
+    ratios = [a / b for a, b in zip(new, old)]
+    low, high = min(ratios), max(ratios)
+    far = low >= CONVERSION_MIN_RATIO or high <= 1 / CONVERSION_MIN_RATIO
+    return far and high / low <= 1 + _CONVERSION_SPREAD
+
+
 def drift(pages: list) -> list:
     """
     `fact-drift`: перевод показывает цену или процент, которых нет в оригинале,
@@ -128,9 +183,13 @@ def drift(pages: list) -> list:
                 ours = mine.get(kind) or {}
                 if not ours or len(theirs) > MAX_FACTS or len(ours) > MAX_FACTS:
                     continue
+                # Перевод с заметно большим числом цен — другой текст (пример
+                # расчёта, лишний абзац), а не те же цифры: сравнивать нечего.
+                if len(ours) > len(theirs) + EXTRA_FACTS:
+                    continue
                 added = sorted(set(ours) - set(theirs))
                 missing = sorted(set(theirs) - set(ours))
-                if added and missing:
+                if added and missing and not _converted(added, missing):
                     issues.append(("warning", page.url, "fact-drift", tr(
                         "в переводе {a0}, а в оригинале ({a1}) {a2} — цифра разошлась при "
                         "переводе или осталась старой",
