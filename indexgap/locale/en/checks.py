@@ -84,6 +84,13 @@ MESSAGES = {
         "decision, not a mistake — old documentation versions, drafts, service copies. "
         "If it is intended, nothing needs doing; the noindex findings there are "
         "lowered to info",
+    "canonical указывает на {a0}, а это другая страница: другое имя и почти нет общего текста. Так бывает, когда шаблон берёт адрес из чужой переменной; страница просит убрать её из индекса":
+        "the canonical points to {a0}, which is a different page: another name "
+        "and almost no text in common. That is what a template does when it takes "
+        "the address from the wrong variable; this page is asking to be dropped "
+        "from the index",
+    " (на эту же страницу ведут canonical ещё {a0} стр.)":
+        " ({a0} more page(s) point their canonical to the same page)",
     "копия страницы {a0}: canonical указывает на неё, и та в сборке открыта — так и должно быть, если это вариант (печатная версия, второй адрес)":
         "a copy of {a0}: the canonical points there, and that page is open in the "
         "build — as it should be if this is a variant (a print version, a second address)",

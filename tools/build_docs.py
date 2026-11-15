@@ -106,7 +106,12 @@ WHY = {
    "A generated page that states a number absent from its own data row is not "
    "a traffic problem — it is a page that misinforms a reader who came looking "
    "for exactly that number. This is the check the rest of the package exists "
-   "to support, and the reason indexgap never writes page text itself.",
+   "to support, and the reason indexgap never writes page text itself. A number "
+   "the page computed from its own row — a product of two of its numbers, or a "
+   "percentage of one, at least 100 — goes to `check-by-eye` with the arithmetic "
+   "shown (`$4350 (= 3 × 1450 from the row?)`). The surest way is still a "
+   "column with the computed value: then the generator and the check read the "
+   "same cell.",
  "check-by-eye":
    "Some numbers in a page are ordinary language — “one of the first”, “two "
    "weeks or so” — and some are invented facts wearing the same clothes. The "
@@ -146,7 +151,12 @@ WHY = {
  "canonical-elsewhere":
    "The page hands its accumulated weight to a different URL and drops out of "
    "the index itself. On a generated site this is nearly always one wrong line "
-   "in the template, repeated across every page it produced.",
+   "in the template, repeated across every page it produced. A copy — a print "
+   "version under the page, the same name in an older version, the same text at "
+   "another address — pointed at an open page of its language is only a note. A "
+   "page with another name and almost no text in common is not a copy: one is a "
+   "warning, several pointed at the same page are critical (the template took the "
+   "address from the wrong variable), and the page keeps its other findings.",
  "jsonld-mismatch":
    "Structured data that disagrees with the page: an Offer price, an aggregate rating or a review count in the JSON-LD that the visible text does not contain, in any spelling (`1,600`, `1 600`, `1600.00` are one number). Google's guidelines require markup to describe what the reader sees; on a generated site the two drift apart when the template takes the markup from one dataset column and the text from another. Ratings of individual reviews are not judged.",
  "hub-missing-links":

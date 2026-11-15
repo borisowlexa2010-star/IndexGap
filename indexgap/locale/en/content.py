@@ -29,6 +29,7 @@ MESSAGES = {
         "{a0} pages — too few to judge boilerplate",
     "те же {a0} заголовков в том же порядке ещё у {a1} страниц":
         "the same {a0} headings in the same order on {a1} other pages",
+    " (= {a0} из строки?)": " (= {a0} from the row?)",
     "числа, которых нет в данных — просмотри глазами: ":
         "numbers that are not in your data — read these with your own eyes: ",
     "швы шаблона не оценивались: ": "template seams were not measured: ",

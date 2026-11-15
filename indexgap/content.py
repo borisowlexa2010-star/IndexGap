@@ -803,6 +803,56 @@ def _supported(number: str, unit: str, allowed: set) -> bool:
     return False
 
 
+# Число, которое страница посчитала из своей строки: «три месяца аренды
+# вперёд — $4,350» при `rent: $1,450` и `deposit: 3 months`. В данных его нет,
+# но и выдумкой оно не является — итог, годовая цена, скидка. Критичной
+# находкой оно роняло `--strict` на верных страницах. Теперь оно уходит в
+# «просмотри глазами» с подсказкой, как его можно было получить: человек
+# проверит, а совпадение не пройдёт незамеченным. Лучшее решение — отдельная
+# колонка с посчитанным значением: тогда генератор и проверка читают одно.
+DERIVED_MIN = 100         # меньше — слишком легко получить случайно
+DERIVED_MAX_INPUTS = 12   # в строке длиннее совпадение пар становится правилом
+
+
+def _derivation(number: str, row_numbers: set) -> str:
+    """Как число получается из двух чисел строки — или пусто."""
+    try:
+        target = float(number)
+    except ValueError:
+        return ""
+    if abs(target) < DERIVED_MIN:
+        return ""
+    values = []
+    for raw in row_numbers:
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value not in (0.0, 1.0):
+            values.append((value, raw))
+    if len(values) > DERIVED_MAX_INPUTS:
+        return ""
+    values.sort()
+
+    def same(x):
+        return abs(x - target) < 0.005 or (target == round(target) and abs(x - target) < 0.5
+                                            and x != round(x))
+
+    for i, (a, ra) in enumerate(values):
+        for b, rb in values[i:]:
+            # Только произведение и доля: суммы и разности пар объясняют
+            # почти любое число, и выдумка уходила бы в «мелочи».
+            if same(a * b):
+                return f"{ra} × {rb}"
+            for big, rbig, pct, rpct in ((b, rb, a, ra), (a, ra, b, rb)):
+                if 0 < pct < 100:
+                    if same(big * pct / 100):
+                        return f"{rpct}% × {rbig}"
+                    if same(big * (100 - pct) / 100):
+                        return f"{rbig} − {rpct}%"
+    return ""
+
+
 def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                 fact_units: list = None) -> list:
     """
@@ -843,10 +893,18 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
 
         def shown(number, unit):
             if number not in written:
-                return _shown(number, unit)
-            return written[number] + (", " + _shown(number, unit) if number in generic else "")
+                text = _shown(number, unit)
+            else:
+                text = written[number] + (", " + _shown(number, unit) if number in generic else "")
+            if number in derived:
+                text += tr(" (= {a0} из строки?)", a0=derived[number])
+            return text
 
         unknown_strong = {n: u for n, u in strong.items() if not _supported(n, u, allowed)}
+        own = _row_numbers(row)
+        derived = {n: how for n in unknown_strong for how in [_derivation(n, own)] if how}
+        for number in derived:
+            weak[number] = unknown_strong.pop(number)
         unknown_weak = {n: u for n, u in weak.items()
                         if not _supported(n, u, allowed) and n not in unknown_strong}
 
@@ -865,7 +923,8 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             # Числа прописью — первыми: у них единица проекта, и за «и ещё N»
             # им не место.
             listed = sorted(unknown_weak.items(),
-                            key=lambda kv: (kv[0] not in written, -len(kv[0]), kv[0]))[:8]
+                            key=lambda kv: (kv[0] not in written and kv[0] not in derived,
+                                           -len(kv[0]), kv[0]))[:8]
             issues.append((
                 "info", page.url, "check-by-eye",
                 tr("числа, которых нет в данных — просмотри глазами: ")
