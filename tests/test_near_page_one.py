@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -65,7 +66,7 @@ class NearPageOne(unittest.TestCase):
                              "--indexed", f"google={self.csv}", "--out", out])
         self.assertEqual(code, 0)
         self.assertIn(SITE + "/a/", buf.getvalue())
-        data = json.load(open(out, encoding="utf-8"))
+        data = json.loads(pathlib.Path(out).read_text(encoding="utf-8"))
         self.assertEqual([r["url"] for r in data["near_page_one"]], [SITE + "/a/", SITE + "/b/"])
 
 

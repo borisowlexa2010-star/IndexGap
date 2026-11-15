@@ -203,7 +203,10 @@ FIX = {
 GROUPED = {"near-duplicate", "similar"}
 SITE_LEVEL = {"robots-blocks-all", "ai-crawler-blocked", "robots-no-sitemap",
               "robots-unreadable", "no-robots", "hreflang-static-cluster",
-              "translations-parked", "heavy-images", "dataset-unbound"}
+              "translations-parked", "heavy-images", "dataset-unbound",
+              # У находки появился адрес раздела; наряд остаётся на сайт: страницы
+              # с таким адресом может не быть, а если есть — чинить надо не её.
+              "stale-year"}
 
 HEADER = "<!-- indexgap-brief -->"
 

@@ -16,6 +16,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -116,7 +117,7 @@ class TestPerformanceExportIsNeverAnIndexList(Fixture):
             cli.main(["doctor", root, "--site", SITE, "--out", out,
                       "--indexed", f"google={google}", "--indexed", f"bing={bing}",
                       "--indexed", f"yandex={yandex}"])
-        data = json.load(open(out, encoding="utf-8"))
+        data = json.loads(pathlib.Path(out).read_text(encoding="utf-8"))
         self.assertFalse([c for c in data["cross_engine"] if c.get("engine") == "google"],
                          data["cross_engine"])
 
@@ -261,7 +262,7 @@ class TestForeignAddressesAreUrls(Fixture):
                       "--out", out])
         self.assertIn(f"{SITE}/rent/nowhere/", buf.getvalue())
         self.assertNotIn(" //example.com/rent/nowhere", buf.getvalue())
-        data = json.load(open(out, encoding="utf-8"))
+        data = json.loads(pathlib.Path(out).read_text(encoding="utf-8"))
         self.assertEqual(data["foreign"]["missing"], [f"{SITE}/rent/nowhere/"])
 
 
@@ -305,7 +306,7 @@ class TestDuplicateMethodIsACode(Fixture):
         with contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
             cli.main(["check", root, "--site", SITE, "--out", out])
-        data = json.load(open(out, encoding="utf-8"))
+        data = json.loads(pathlib.Path(out).read_text(encoding="utf-8"))
         self.assertEqual(data["duplicate_method"], "pairwise")
         self.assertEqual(data["duplicate_method_label"], "попарное сравнение")
 

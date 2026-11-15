@@ -782,7 +782,13 @@ def check_page(code: str, data: dict, family: tuple, siblings: list) -> None:
     fam_slug, fam_title = family[0], family[1]
 
     behaviour = []
-    if data["site_level"]:
+    if data["site_level"] and code == "stale-year":
+        # Наряд у неё общий с сайтом, но находка — одна на раздел.
+        behaviour.append(
+            "This is a <b>section-level</b> finding: it belongs to the title "
+            "template of a section, not to any one page, and is reported once "
+            "per section.")
+    elif data["site_level"]:
         behaviour.append(
             "This is a <b>site-level</b> finding: it belongs to the site, not to "
             "any one page, and is reported once however many pages are audited.")

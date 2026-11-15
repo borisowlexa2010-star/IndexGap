@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -59,7 +60,7 @@ class Ignore(unittest.TestCase):
                              "--out", os.path.join(self.dir, "r.json"), *extra])
 
     def data(self):
-        return json.load(open(os.path.join(self.dir, "r.json"), encoding="utf-8"))
+        return json.loads(pathlib.Path(self.dir, "r.json").read_text(encoding="utf-8"))
 
     def test_without_ignore_strict_fails_on_the_closed_login(self):
         self.config_path = self.config({})

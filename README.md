@@ -692,7 +692,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-941 scenarios. Each one is a reproduced defect: from four waves of adversarial
+More than 1,300 scenarios. Each one is a reproduced defect: from four waves of adversarial
 review (the latest by eight reviewers at once — new generators, a seeded
 catalogue measuring what is missed, messy input, scale, the truth of these
 docs, an agent following the skills, the competition), from runs against live
