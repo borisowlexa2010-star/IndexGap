@@ -322,7 +322,7 @@ that bring customers can be generated first.
 
 | Check | Why it matters |
 |---|---|
-| **Numbers absent from your data** | prices, terms and counts are verified against the source row. A price, or a number with one of your project's units, that is not in the data is a critical finding; a number with any other word ("12 years", "3,500 orders") is listed for you to check by eye. Neither is forgiven for being repeated on many pages |
+| **Numbers absent from your data** | prices, terms and counts are verified against the source row. A price, or a number with one of your project's units, that is not in the data is a critical finding; a number with any other word ("12 years", "3,500 orders") is listed for you to check by eye — and so is a number written out before one of your units ("twelve months" when the row says 6; English and Russian, 2 to 99). Neither is forgiven for being repeated on many pages |
 | Identical heading skeletons | different words, same structure — a stamping tell |
 | Identical opening sentences | the second tell |
 | Unfilled template slots | `{{city}}`, `%CITY%`, `undefined`, `NaN`, `Plumbers in , TX`, lorem ipsum, a model's "Certainly! Here is…" left in the text |
