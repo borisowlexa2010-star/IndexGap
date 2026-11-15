@@ -14,6 +14,7 @@
 import contextlib
 import io
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -123,7 +124,7 @@ class Cli(Fixture):
             code = cli.main(["brief", "out", "--site", SITE, "--dataset", "data/pages.csv",
                              "--write", "--out-dir", "briefs"])
         self.assertEqual(code, 0)
-        text = open(os.path.join(self.project, "briefs", "a.md"), encoding="utf-8").read()
+        text = pathlib.Path(self.project, "briefs", "a.md").read_text(encoding="utf-8")
         self.assertIn("indexgap check out --site https://example.com/ --dataset data/pages.csv",
                       text)
 

@@ -9,6 +9,7 @@
 
 import json
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -231,7 +232,7 @@ class TestPortfolio(Fixture):
         results = [portfolio.run_one(s) for s in specs]
         path = report.build_portfolio(results, portfolio.common_patterns(results), [],
                                       out_path=os.path.join(self.dir, "pf.html"))
-        html = open(path, encoding="utf-8").read()
+        html = pathlib.Path(path).read_text(encoding="utf-8")
         self.assertIn("indexgap-report", html)
         self.assertIn("alpha", html)
 
@@ -239,7 +240,7 @@ class TestPortfolio(Fixture):
         results = [{"name": "a", "error": "нет каталога", "pages": 0, "issues": []}]
         path = report.build_portfolio(results, [], [],
                                       out_path=os.path.join(self.dir, "pf.html"))
-        self.assertIn("не проверен", open(path, encoding="utf-8").read())
+        self.assertIn("не проверен", pathlib.Path(path).read_text(encoding="utf-8"))
 
 
 

@@ -11,6 +11,7 @@
 import io
 import json
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -137,7 +138,7 @@ class TestInstall(Fixture):
     def test_installed_skill_keeps_its_frontmatter(self):
         self.pages()
         result = install.run(self.dir)
-        text = open(os.path.join(self.dir, result["skills"][0]), encoding="utf-8").read()
+        text = pathlib.Path(self.dir, result["skills"][0]).read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---"))
         self.assertIn("name:", text)
         self.assertIn("description:", text)
@@ -147,7 +148,7 @@ class TestInstall(Fixture):
         result = install.run(self.dir)
         for rel in result["skills"]:
             folder = os.path.basename(os.path.dirname(rel))
-            text = open(os.path.join(self.dir, rel), encoding="utf-8").read()
+            text = pathlib.Path(self.dir, rel).read_text(encoding="utf-8")
             declared = [l.split(":", 1)[1].strip()
                         for l in text.splitlines()[:8] if l.startswith("name:")]
             self.assertEqual(declared[0], folder)
@@ -157,7 +158,7 @@ class TestInstall(Fixture):
         self.write("package.json", '{"homepage":"https://p.example"}')
         self.write("keywords.csv", "keyword\nремонт\n")
         install.run(self.dir)
-        config = json.load(open(os.path.join(self.dir, "indexgap.json"), encoding="utf-8"))
+        config = json.loads(pathlib.Path(self.dir, "indexgap.json").read_text(encoding="utf-8"))
         self.assertEqual(config["site"], "https://p.example/")
         self.assertIn("content", config["pages"])
         self.assertIn("keywords.csv", config["dataset"])
@@ -166,7 +167,7 @@ class TestInstall(Fixture):
         """`content` — раздел настроек, путь пишется в `pages`. Столкновение роняло check."""
         self.pages()
         install.run(self.dir)
-        config = json.load(open(os.path.join(self.dir, "indexgap.json"), encoding="utf-8"))
+        config = json.loads(pathlib.Path(self.dir, "indexgap.json").read_text(encoding="utf-8"))
         self.assertIsInstance(config["content"], dict)
         self.assertIsInstance(config["pages"], str)
 
@@ -175,7 +176,7 @@ class TestInstall(Fixture):
         self.write("indexgap.json", '{"profile": "ugc", "checks": {"thin_words": 42}}')
         result = install.run(self.dir)
         self.assertFalse(result["config_written"])
-        config = json.load(open(os.path.join(self.dir, "indexgap.json"), encoding="utf-8"))
+        config = json.loads(pathlib.Path(self.dir, "indexgap.json").read_text(encoding="utf-8"))
         self.assertEqual(config["checks"]["thin_words"], 42)
 
     def test_force_overwrites_the_config(self):
@@ -187,9 +188,9 @@ class TestInstall(Fixture):
     def test_gitignore_is_extended_once(self):
         self.pages()
         install.run(self.dir)
-        first = open(os.path.join(self.dir, ".gitignore"), encoding="utf-8").read()
+        first = pathlib.Path(self.dir, ".gitignore").read_text(encoding="utf-8")
         install.run(self.dir)
-        second = open(os.path.join(self.dir, ".gitignore"), encoding="utf-8").read()
+        second = pathlib.Path(self.dir, ".gitignore").read_text(encoding="utf-8")
         self.assertEqual(first, second)
         self.assertIn("indexgap-check.html", first)
         # Манифест от git не прячется: в нём история lastmod и отправок.
@@ -200,7 +201,7 @@ class TestInstall(Fixture):
         self.write("AGENTS.md", "# Проект\n\nСайт на Astro.\n")
         install.run(self.dir)
         install.run(self.dir)
-        text = open(os.path.join(self.dir, "AGENTS.md"), encoding="utf-8").read()
+        text = pathlib.Path(self.dir, "AGENTS.md").read_text(encoding="utf-8")
         self.assertEqual(text.count(install.AGENTS_START), 1)
         self.assertIn("Сайт на Astro.", text)
 
@@ -216,7 +217,7 @@ class TestInstall(Fixture):
         with open(target, "w", encoding="utf-8") as fh:
             fh.write("испорчено")
         install.run(self.dir)
-        self.assertIn("name:", open(target, encoding="utf-8").read())
+        self.assertIn("name:", pathlib.Path(target).read_text(encoding="utf-8"))
 
 
 # ── ключ IndexNow ─────────────────────────────────────────────────────────────
@@ -225,7 +226,7 @@ class TestKeyIsPerProject(Fixture):
     def test_install_never_writes_a_key_into_the_config(self):
         self.pages()
         install.run(self.dir)
-        text = open(os.path.join(self.dir, "indexgap.json"), encoding="utf-8").read()
+        text = pathlib.Path(self.dir, "indexgap.json").read_text(encoding="utf-8")
         self.assertNotIn("key", json.loads(text))
 
     def test_generated_keys_differ_between_projects(self):

@@ -13,6 +13,7 @@
 import contextlib
 import io
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -81,7 +82,7 @@ class TestInit(Fixture):
         self.assertEqual(code, 1)
         self.assertIn("indexgap init", out)
         import json
-        config = json.load(open(os.path.join(self.dir, "indexgap.json"), encoding="utf-8"))
+        config = json.loads(pathlib.Path(self.dir, "indexgap.json").read_text(encoding="utf-8"))
         self.assertEqual(config["pages"], "")
 
     def test_init_trusts_an_existing_config(self):
@@ -150,7 +151,7 @@ class TestDemoSite(Fixture):
                                 "--robots", os.path.join(self.DEMO, "robots.txt"),
                                 "--out", out])
         self.assertEqual(code, 0)
-        data = json.load(open(out[:-5] + ".json", encoding="utf-8"))
+        data = json.loads(pathlib.Path(out[:-5] + ".json").read_text(encoding="utf-8"))
         found = sorted((i["code"], i["url"].replace("https://demo.example", ""))
                        for i in data["issues"] if i["level"] != "info")
         self.assertEqual(found, [

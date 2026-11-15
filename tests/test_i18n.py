@@ -16,6 +16,7 @@
 
 import io
 import os
+import pathlib
 import re
 import shutil
 import sys
@@ -178,7 +179,7 @@ class TestNothingRussianLeaks(unittest.TestCase):
         path = os.path.join(self.dir, "r.html")
         self.run_cli(["check", os.path.join(self.dir, "content"), "--site", SITE,
                       "--lang", "en", "--out", path])
-        html = open(path, encoding="utf-8").read()
+        html = pathlib.Path(path).read_text(encoding="utf-8")
         self.assertNoRussian(html, "html")
         self.assertIn('lang="en"', html)
 
@@ -216,8 +217,7 @@ class TestNothingRussianLeaks(unittest.TestCase):
              "--out", os.path.join(self.dir, "d.html")])
         self.assertEqual(code, 0)
         self.assertNoRussian(out, "doctor")
-        self.assertNoRussian(open(os.path.join(self.dir, "d.html"),
-                                  encoding="utf-8").read(), "doctor html")
+        self.assertNoRussian(pathlib.Path(self.dir, "d.html").read_text(encoding="utf-8"), "doctor html")
 
     def test_sitemap_and_notify_are_english_only(self):
         out_dir = os.path.join(self.dir, "public")
@@ -237,15 +237,14 @@ class TestNothingRussianLeaks(unittest.TestCase):
         from indexgap import install
         english()
         result = install.run(self.dir)
-        text = open(os.path.join(self.dir, result["skills"][0]),
-                    encoding="utf-8").read()
+        text = pathlib.Path(self.dir, result["skills"][0]).read_text(encoding="utf-8")
         self.assertNotRegex(text, CYRILLIC.pattern)
 
     def test_init_installs_the_russian_skills_in_russian(self):
         from indexgap import install
         russian()
         result = install.run(self.dir, force=True)
-        joined = "\n".join(open(os.path.join(self.dir, rel), encoding="utf-8").read()
+        joined = "\n".join(pathlib.Path(self.dir, rel).read_text(encoding="utf-8")
                             for rel in result["skills"])
         self.assertRegex(joined, CYRILLIC.pattern)
 
@@ -354,4 +353,4 @@ class TestUnwrappedLiterals(unittest.TestCase):
         with open(os.path.join(self.dir, "AGENTS.md"), "w", encoding="utf-8") as fh:
             fh.write("# Project\n")
         install.update_agents_md(self.dir, detected)
-        self.assertEnglish(open(os.path.join(self.dir, "AGENTS.md"), encoding="utf-8").read())
+        self.assertEnglish(pathlib.Path(self.dir, "AGENTS.md").read_text(encoding="utf-8"))

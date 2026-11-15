@@ -13,6 +13,7 @@
 import io
 import json
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -88,7 +89,7 @@ class TestDataLoss(Fixture):
         page = self.write("content/p1/index.html", "<html><body><p>Моя страница</p></body></html>")
         with self.assertRaises(SourceError):
             cli.check_out_path(page)
-        self.assertIn("Моя страница", open(page, encoding="utf-8").read())
+        self.assertIn("Моя страница", pathlib.Path(page).read_text(encoding="utf-8"))
 
     def test_report_may_overwrite_its_own_output(self):
         from indexgap import report

@@ -13,6 +13,7 @@
 import gzip
 import io
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -299,7 +300,7 @@ class TestInitInAHostileRepo(Fixture):
             os.symlink(outside, os.path.join(root, name))
             with self.assertRaises(core.SourceError, msg=name):
                 install.run(root, site="https://example.com", agents=True, force=True)
-            self.assertEqual(open(outside, encoding="utf-8").read(), "чужой файл\n", name)
+            self.assertEqual(pathlib.Path(outside).read_text(encoding="utf-8"), "чужой файл\n", name)
             shutil.rmtree(root)
 
     def test_a_symlinked_skills_directory_is_refused_too(self):
@@ -357,7 +358,7 @@ class TestOutputIsNotAWeapon(Fixture):
         code, _ = self.run_cli(["check", root, "--site", SITE,
                                 "--out", os.path.join(self.dir, "package.html")])
         self.assertEqual(code, 2)
-        self.assertEqual(open(foreign, encoding="utf-8").read(), '{"name": "my-app"}')
+        self.assertEqual(pathlib.Path(foreign).read_text(encoding="utf-8"), '{"name": "my-app"}')
 
     def test_its_own_report_pair_is_rewritten(self):
         root = self.site()
@@ -381,10 +382,10 @@ class TestOutputIsNotAWeapon(Fixture):
         root = self.site()
         spec = self.write("pf.json", '{"projects": [{"name": "a", "root": "%s", '
                                      '"site": "https://example.com"}]}' % root.replace("\\", "/"))
-        before = open(spec, encoding="utf-8").read()
+        before = pathlib.Path(spec).read_text(encoding="utf-8")
         code, _ = self.run_cli(["portfolio", spec, "--out", os.path.join(self.dir, "pf.html")])
         self.assertEqual(code, 2)
-        self.assertEqual(open(spec, encoding="utf-8").read(), before)
+        self.assertEqual(pathlib.Path(spec).read_text(encoding="utf-8"), before)
 
 
 class TestKeysStayOutOfUrls(unittest.TestCase):

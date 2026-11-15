@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -43,7 +44,7 @@ class Binding(unittest.TestCase):
                              "--no-aeo", "--out", out])
         self.assertEqual(code, 0, buf.getvalue()[-500:])
         self.console = buf.getvalue()
-        return json.load(open(out, encoding="utf-8"))
+        return json.loads(pathlib.Path(out).read_text(encoding="utf-8"))
 
     def demo_rows(self, key_column, key, slug_column=None):
         import csv

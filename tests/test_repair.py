@@ -20,6 +20,7 @@
 
 import io
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -336,7 +337,7 @@ class TestCommand(Fixture):
         written = []
         for base, _dirs, files in os.walk(out):
             written += [os.path.join(base, f) for f in files]
-        text = "".join(open(p, encoding="utf-8").read() for p in written)
+        text = "".join(pathlib.Path(p).read_text(encoding="utf-8") for p in written)
 
         report_dir = self.outdir()
         self.run_cli(["check", root, "--site", SITE, "--lang", "ru",
