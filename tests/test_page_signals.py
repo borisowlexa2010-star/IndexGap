@@ -180,6 +180,56 @@ class StaleYear(Site):
         self.assertIn(str(YEAR - 2), found[0][3])
         self.assertIn("6", found[0][3])
 
+    def two_sections(self):
+        files = self.section("Best plumbers in {city} %d | Acme" % (YEAR - 2))
+        files.update({name.replace("plumbing/", "roofing/"): text
+                      for name, text in list(files.items())})
+        return files
+
+    def test_the_finding_is_addressed_to_its_section(self):
+        # Адрес был пустым у любого именованного раздела: его страницу искали
+        # среди страниц раздела, а она лежит в корневом.
+        self.assertEqual(sorted(i[1] for i in self.stale(self.two_sections())),
+                         ["/plumbing/", "/roofing/"])
+
+    def test_the_root_section_is_addressed_as_the_root(self):
+        files = {f"{c.lower()}.html": html(title=f"Best plumbers in {c} {YEAR - 2}",
+                                           h1=f"Best plumbers in {c} {YEAR - 2}")
+                 for c in self.CITIES}
+        self.assertEqual([i[1] for i in self.stale(files)], ["/"])
+        # Раньше у корневого раздела адресом была главная, если она есть. Теперь
+        # и он — раздел: находка не уходит в наряд на главную страницу.
+        files["index.html"] = html(title="Plumbers by city", h1="Plumbers by city")
+        self.assertEqual([i[1] for i in self.stale(files)], ["/"])
+
+    def test_two_sections_are_told_apart_by_the_baseline(self):
+        # С пустым адресом «один раздел починили, другой устарел» читалось как
+        # «ничего не изменилось»: у обеих находок был один ключ.
+        from indexgap import cli
+        found = {i[1]: i for i in self.stale(self.two_sections())}
+        old = [dict(zip(("level", "url", "code", "message"), found["/plumbing/"]))]
+        diff = cli.compare_baseline([found["/roofing/"]], old)
+        self.assertEqual([i["url"] for i in diff["new"]], ["/roofing/"])
+        self.assertEqual([i["url"] for i in diff["fixed"]], ["/plumbing/"])
+
+    def test_one_section_can_be_accepted_by_path(self):
+        kept, accepted = checks.apply_ignore(self.stale(self.two_sections()),
+                                             {"stale-year": ["/plumbing/*"]}, SITE)
+        self.assertEqual([i[1] for i in accepted], ["/plumbing/"])
+        self.assertEqual([i[1] for i in kept], ["/roofing/"])
+
+    def test_the_section_page_does_not_take_the_finding_with_it(self):
+        # Находка — про шаблон раздела, а не про его страницу. С адресом этой
+        # страницы она пропадала, стоило закрыть страницу от индекса: находки
+        # о закрытых страницах отбрасываются.
+        for head in ("", '<meta name="robots" content="noindex,follow">',
+                     f'<link rel="canonical" href="{SITE}/">'):
+            with self.subTest(head=head):
+                files = self.section("Best plumbers in {city} %d | Acme" % (YEAR - 2))
+                files["plumbing/index.html"] = html(title="Plumbers by city",
+                                                    h1="Plumbers by city", head=head)
+                self.assertEqual([i[1] for i in self.stale(files)], ["/plumbing/"])
+
     def test_old_publication_date_does_not_hide_a_stale_template(self):
         head = f'<meta property="article:published_time" content="{YEAR - 2}-03-01">'
         found = self.stale(self.section("Plumber prices in {city} %d" % (YEAR - 1), head=head))

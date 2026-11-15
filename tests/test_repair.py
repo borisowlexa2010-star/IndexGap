@@ -145,6 +145,18 @@ class TestPlacement(Fixture):
         self.assertEqual(self.kinds(briefs), ["site"])
         self.assertEqual(self.named(briefs, "_site.md")["count"], 2)
 
+    def test_a_stale_year_stays_in_the_site_brief(self):
+        """
+        У находки появился адрес раздела. Наряд на страницу по нему — наряд на
+        страницу, которой может не быть, а если она есть — чинить надо не её.
+        """
+        pages = self.pages({"plumbing/index.html": html("Раздел", "текст " * 50)})
+        issues = [("warning", "/plumbing/", "stale-year",
+                   "у 6 из 6 страниц раздела /plumbing/ в заголовке прошлый год")]
+        briefs = repair.build(pages, {"issues": issues})
+        self.assertEqual(self.kinds(briefs), ["site"])
+        self.assertEqual(self.named(briefs, "_site.md")["count"], 1)
+
     def test_a_weak_similarity_does_not_make_a_group(self):
         """Порог группы — тот же, по которому выписана находка."""
         pages = self.pages({f"p{i}/index.html": html("Виза", "текст " * 50)
