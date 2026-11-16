@@ -142,6 +142,12 @@ def _load(args):
     pages, problems = load_pages(args.root, site, jobs=default_jobs())
     for problem in problems:
         print(f"  ! {problem}")
+    # Отчёт и JSON тоже должны их знать: пропущенная страница с собственным
+    # адресом на живом сайте, а CI и --baseline читают только JSON.
+    try:
+        args._load_problems = list(problems)
+    except AttributeError:
+        pass
     if not pages:
         if not os.path.exists(args.root):
             raise SourceError(tr("Каталога {a0} нет. Проверь путь.", a0=args.root))
@@ -706,6 +712,9 @@ def cmd_check(args):
     got = _analyse(args)
     pages, analysis = got["pages"], got["analysis"]
     notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
+    # Замечания загрузки уже напечатаны, но в отчёт и JSON идут тоже.
+    loaded = list(getattr(args, "_load_problems", None) or [])
+    notes[:0] = loaded
 
     funnel_result = causes = cross = segments = None
     sitemap_urls = None
@@ -780,7 +789,7 @@ def cmd_check(args):
         **({"baseline": dict(path=args.baseline, **diff)} if baseline is not None else {}),
     })
 
-    for note in notes:
+    for note in notes[len(loaded):]:
         print(f"  ! {note}")
 
     crit = sum(1 for i in analysis["issues"] if i[0] == "critical")

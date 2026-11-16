@@ -1181,6 +1181,45 @@ def _opening(page) -> list:
     return words
 
 
+SLOT_MARK = "…"
+
+
+def _slot_skeletons(pages: list, skip: set) -> dict:
+    """Скелеты заголовков, где слова-подстановки из H1 заменены меткой."""
+    h1_words = {}
+    df = Counter()
+    for page in pages:
+        heads = page.headings or []
+        h1 = next((t for level, t in heads if level == 1), "")
+        own = {w.lower() for w in tokenize(h1) if len(w) >= 2 and not w.isdigit()}
+        h1_words[page.url] = own
+        df.update(own)
+    half = len(pages) / 2
+    out = defaultdict(list)
+    for page in pages:
+        if page.url in skip:
+            continue
+        slots = {w for w in h1_words[page.url] if df[w] < half}
+        if not slots:
+            continue
+        skeleton, masked = [], False
+        for level, text in page.headings or []:
+            if level < 2:
+                continue
+            tokens = [w.lower() for w in tokenize(text)]
+            kept = [SLOT_MARK if w in slots else w for w in tokens]
+            # Заголовок из одного значения («Alpha») — не шаблонная фраза:
+            # такой скелет совпал бы у любых страниц со списком городов.
+            if SLOT_MARK in kept and any(w != SLOT_MARK for w in kept):
+                masked = True
+                skeleton.append(" ".join(kept))
+            else:
+                skeleton.append(text.strip().lower())
+        if masked and len(skeleton) >= 2:
+            out[tuple(skeleton)].append(page.url)
+    return out
+
+
 def check_template_seams(pages: list, cfg: dict = None) -> dict:
     """
     Ищет общий скелет: одинаковую последовательность заголовков.
@@ -1203,7 +1242,22 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     # с двумя разными шаблонами проходил проверку молча.
     with_skeleton = sum(len(urls) for urls in skeletons.values())
     threshold = max(3, int(max(with_skeleton, 1) * cfg["template_share"]))
+    stamped = set()
     for skeleton, urls in sorted(skeletons.items()):
+        if len(urls) >= threshold:
+            repeated.append({"headings": list(skeleton), "count": len(urls)})
+            stamped.update(urls)
+            for url in sorted(urls):
+                issues.append((
+                    "warning", url, "template-skeleton",
+                    tr("те же {a0} заголовков в том же порядке ещё у {a1} страниц", a0=len(skeleton), a1=len(urls) - 1)))
+
+    # «Сколько стоит в Alpha», «Где искать в Alpha»: подставленное значение
+    # стоит и в подзаголовках, и скелеты по точному тексту не совпадали ни у
+    # одной пары. Слово из H1, которое есть меньше чем у половины страниц, —
+    # значение подстановки; оно заменяется меткой, и скелеты сравниваются
+    # ещё раз. Только для страниц, которых точное сравнение не нашло.
+    for skeleton, urls in sorted(_slot_skeletons(pages, stamped).items()):
         if len(urls) >= threshold:
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             for url in sorted(urls):

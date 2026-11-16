@@ -275,4 +275,10 @@ MESSAGES = {
         "a redirect.",
     'страница закрыта от индексации, но стоит в sitemap — противоречие: если закрытие не задумано, трафика не будет':
         'the page is closed from indexing but listed in the sitemap, which is a contradiction: if the closing is not intended, there will be no traffic',
+    "до страницы ведут только ссылки со страниц с meta robots nofollow, а по ним краулер не идёт":
+        "only pages with meta robots nofollow link here, and a crawler does not "
+        "follow their links",
+    "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. На живом сайте это 404 за редиректом":
+        "the redirect stub leads to a page that is not in the build: {a0}. "
+        "On the live site that is a 404 behind a redirect",
 }

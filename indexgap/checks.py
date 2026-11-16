@@ -208,6 +208,20 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
                 band = sig[b * rows:(b + 1) * rows]
                 key = (b, hashlib.blake2b(repr(band).encode(), digest_size=8).digest())
                 buckets[key].append(url)
+        # Клоны шаблона с подставленным городом совпадают по шинглам на 0,6:
+        # каждое вхождение города портит k соседних шинглов, и полосы ловили
+        # такую пару через раз — попарно находились все, а после 400 страниц
+        # треть пропадала. Словарь у них почти один и тот же, поэтому
+        # кандидатов дают и полосы по множеству слов — длинные, чтобы разные
+        # тексты на одну тему кандидатами не становились. Проверка пары та же.
+        word_rows = min(perms, max(rows * 2, 1))
+        for url in urls:
+            own = words.get(url, [])
+            sig = _minhash(_shingles(own, 1), perms)
+            for b in range(perms // word_rows):
+                band = sig[b * word_rows:(b + 1) * word_rows]
+                key = ("w", b, hashlib.blake2b(repr(band).encode(), digest_size=8).digest())
+                buckets[key].append(url)
 
         cap = 200
         candidate_set = set()
@@ -403,11 +417,7 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
     for p in pages:
         cohorts[_cohort(p)].append(p)
 
-    shares, small = {}, 0
-    for members in cohorts.values():
-        if len(members) < cfg["boilerplate_min_pages"]:
-            small += len(members)
-            continue
+    def measure(members):
         # Порог не может требовать «на всех страницах»: при девяти страницах
         # ceil(9*0.9) давал ровно 9, шаблон переставал находиться, и добавление
         # десятой страницы переворачивало вердикт с «всё чисто» на «10 критичных».
@@ -432,13 +442,35 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
                 df = Counter({g: c for g, c in df.items() if c + left >= threshold})
         common = {g for g, c in df.items() if c >= threshold}
         del df
+        out = {}
         for p in members:
             grams = bigrams(words.get(p.url, []))
             if not grams:
-                shares[p.url] = 0.0
+                out[p.url] = 0.0
                 continue
             unique = sum(1 for g in grams if g not in common)
-            shares[p.url] = round(unique / len(grams), 3)
+            out[p.url] = round(unique / len(grams), 3)
+        return out
+
+    shares, small = {}, 0
+    for members in cohorts.values():
+        if len(members) < cfg["boilerplate_min_pages"]:
+            small += len(members)
+            continue
+        shares.update(measure(members))
+        # Шаблон бывает и у раздела: двадцать карточек /items/ одного шаблона
+        # рядом с блогом не дотягивают до 90% страниц языка, и стоило добавить
+        # два поста, как шаблон переставал находиться вовсе. Раздел меряется
+        # так же, как язык, и у страницы остаётся меньшая доля.
+        sections = defaultdict(list)
+        for p in members:
+            rest = _locale_split(p.url)[2]
+            if "/" in rest:
+                sections[rest.split("/", 1)[0]].append(p)
+        for part in sections.values():
+            if cfg["boilerplate_min_pages"] <= len(part) < len(members):
+                for url, share in measure(part).items():
+                    shares[url] = min(shares[url], share)
     skipped = ""
     if small:
         skipped = tr("у {a0} страниц(ы) на языках, где страниц меньше {a1}, — "
@@ -546,6 +578,12 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     by_key = {p.key: p.url for p in pages}
     inbound = defaultdict(set)
     outbound = {}
+    # Ссылки страницы с `<meta name="robots" content="nofollow">` (или `none`)
+    # краулер не проходит, как и `rel="nofollow"` у одной ссылки. Входящими
+    # они остаются — ссылка есть, — но глубину и достижимость через них не
+    # считаем. Редирект заглушки — не ссылка, и он остаётся.
+    followed = {}
+    nofollow = set()
     by_hreflang = defaultdict(set)
     unresolved = set()
     unresolved_from = defaultdict(set)
@@ -567,11 +605,23 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         # Заглушка-редирект ведёт туда, куда перебрасывает, — хотя ссылки <a>
         # в ней нет. Алиасы Hugo так и устроены, и всё за ними считалось
         # недостижимым.
-        landing = redirect_target(p)
-        landing = by_key.get(url_key(landing)) if landing else None
+        raw_landing = redirect_target(p)
+        landing = by_key.get(url_key(raw_landing)) if raw_landing else None
         if landing and landing != p.url:
             targets.add(landing)
+        elif raw_landing and not landing:
+            # Заглушка ведёт на страницу, которой в сборке нет: на живом сайте
+            # это 404 за редиректом. Ссылкой <a> её могли и не продублировать.
+            key = url_key(raw_landing)
+            if key and urlsplit(key).netloc == urlsplit(url_key(p.url)).netloc:
+                unresolved.add(key)
+                unresolved_from[p.url].add(key)
         outbound[p.url] = targets
+        if getattr(p, "nofollow", False):
+            nofollow.add(p.url)
+            followed[p.url] = {landing} if landing and landing != p.url else set()
+        else:
+            followed[p.url] = targets
         for t in targets:
             inbound[t].add(p.url)
         # hreflang — объявленная связь между версиями страницы. В Astro
@@ -615,13 +665,18 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
                         queue.append(nxt)
         return found
 
-    by_links = walk(lambda u: () if u in blocked else outbound.get(u, ()))
+    by_links = walk(lambda u: () if u in blocked else followed.get(u, ()))
     depth = walk(lambda u: set() if u in blocked
-                 else set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+                 else set(followed.get(u, ())) | by_hreflang.get(u, set()))
     behind_robots = []
     if blocked and home:
-        anyway = walk(lambda u: set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+        anyway = walk(lambda u: set(followed.get(u, ())) | by_hreflang.get(u, set()))
         behind_robots = sorted(u for u in anyway if u not in depth)
+    behind_nofollow = []
+    if nofollow and home:
+        loose = walk(lambda u: set() if u in blocked
+                     else set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+        behind_nofollow = sorted(u for u in loose if u not in depth)
     # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
     only_hreflang = sorted(set(depth) - set(by_links))
     hreflang_inbound = defaultdict(set)
@@ -649,6 +704,7 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         "unreachable": sorted(u for u in urls if u not in depth
                               and u != redirected_from) if home else [],
         "behind_robots": behind_robots,
+        "behind_nofollow": behind_nofollow,
     }
 
 
@@ -1655,7 +1711,11 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     closed = {p.url for p in pages if not indexable(p)} - set(misdirected(pages))
     if not closed:
         return issues
-    return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED]
+    # Заглушка-редирект с canonical на цель тоже «закрыта», но редирект в
+    # пустоту — её единственная находка, и она остаётся.
+    stubs = {p.url for p in pages if p.url in closed and redirect_target(p)}
+    return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED
+            or (i[2] == "broken-link" and i[1] in stubs)]
 
 
 def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
@@ -1698,9 +1758,9 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
     base = urlsplit(site).path.rstrip("/") if site else ""
 
     def path_of(url):
-        if "://" not in (url or ""):
-            return url or ""
-        path = urlsplit(url).path or "/"
+        # Находка о разделе адресована путём (`/blog/rent/`), а не адресом:
+        # префикс сайта снимается и с него, как с адреса страницы.
+        path = (url or "") if "://" not in (url or "") else (urlsplit(url).path or "/")
         if base and path.startswith(base + "/"):
             path = path[len(base):]
         return path
@@ -1811,14 +1871,30 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         # и о ней уже сказано.
         base_path = urlsplit(home_url).path if home_url else ""
         twins = {}
+        redirects = {p.url: redirect_target(p) for p in pages if redirect_target(p)}
         for url, paths in sorted(broken_links(pages, graph, base_path, twins).items()):
+            if url in redirects:
+                # У заглушки в счёт идёт только цель редиректа: остальные её
+                # ссылки (шапка в редиректе Next.js) как страницу не проверяют.
+                aim = url_key(redirects[url]).split("?", 1)[0]
+                paths = [p for p in paths if p == aim]
+                if not paths:
+                    continue
             shown = ", ".join("/" + p.split("/", 3)[-1] if p.count("/") >= 3 else "/"
                               for p in paths[:3])
             more = tr(" и ещё {a0}", a0=len(paths) - 3) if len(paths) > 3 else ""
+            subjects = [url_key(p) for p in paths]
+            if url not in redirects:
+                issues.append(("warning", url, "broken-link", Said(tr(
+                    "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом "
+                    "сайте это 404, если сервер их не перенаправляет",
+                    a0=len(paths), a1=shown, a2=more), subjects)))
+                continue
+            # Заглушку как страницу не проверяют, но то, куда она ведёт, —
+            # её единственное содержание: эта находка у неё остаётся.
             issues.append(("warning", url, "broken-link", Said(tr(
-                "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом "
-                "сайте это 404, если сервер их не перенаправляет",
-                a0=len(paths), a1=shown, a2=more), (url_key(p) for p in paths))))
+                "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. "
+                "На живом сайте это 404 за редиректом", a0=shown), subjects)))
         issues += wrong_form_issues(pages, twins)
     if graph.get("home_redirected_from"):
         notes.append(tr(
@@ -1860,12 +1936,15 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # Закрытую в robots.txt страницу назовёт robots-blocks-page; дойти до неё
     # можно, прочитать — нет.
     behind = set(graph.get("behind_robots") or ())
+    unfollowed = set(graph.get("behind_nofollow") or ())
     graph["unreachable"] = [u for u in graph["unreachable"]
                             if not (u in behind and u in blocked)]
     for url in graph["unreachable"]:
         issues.append(("critical", url, "unreachable",
                        tr("до страницы ведут только ссылки со страниц, закрытых в robots.txt, "
                           "а их поисковик не читает") if url in behind else
+                       tr("до страницы ведут только ссылки со страниц с meta robots "
+                          "nofollow, а по ним краулер не идёт") if url in unfollowed else
                        tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
         if url in shells or url in closed:
@@ -1928,7 +2007,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # которые живой сайт отдаёт кодом 307.
     stubs = {p.url for p in pages if redirect_target(p)}
     if stubs:
-        issues = [i for i in issues if i[1] not in stubs]
+        issues = [i for i in issues if i[1] not in stubs or i[2] == "broken-link"]
         notes.append(tr(
             "заглушек-редиректов: {a0}. Как страницы они не проверялись — "
             "поисковик видит то, куда они ведут.", a0=len(stubs)))
@@ -1937,7 +2016,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     living = [p for p in pages if p.url not in shells]
     issues += signals.page_signals(living)
     issues += signals.lang_script(living)
-    issues += signals.stale_years([p for p in living if p.url not in spared])
+    issues += signals.stale_years([p for p in living if p.url not in spared],
+                                  base_path=urlsplit(home_url).path if home_url else "")
     # Двойник с canonical на другую страницу — не ребёнок, которого хаб забыл.
     from .publish import indexable as _indexable
     issues += signals.hub_links(pages, graph,
