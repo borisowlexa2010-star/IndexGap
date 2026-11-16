@@ -346,6 +346,12 @@ class Page:
         return "noindex" in directives or "none" in directives
 
     @property
+    def nofollow(self) -> bool:
+        """Ссылки страницы краулер не проходит: `nofollow` или `none` в robots."""
+        directives = re.split(r"[,\s]+", (self.robots or "").lower())
+        return "nofollow" in directives or "none" in directives
+
+    @property
     def nosnippet(self) -> bool:
         """Без права на сниппет страница не попадёт в ответы ИИ-поиска."""
         value = (self.robots or "").lower()

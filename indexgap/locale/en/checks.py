@@ -273,4 +273,10 @@ MESSAGES = {
         "same site (an old domain, github.io behind a CNAME), pass it as --site or "
         "fix the site address in the generator — live, every such link goes through "
         "a redirect.",
+    "до страницы ведут только ссылки со страниц с meta robots nofollow, а по ним краулер не идёт":
+        "only pages with meta robots nofollow link here, and a crawler does not "
+        "follow their links",
+    "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. На живом сайте это 404 за редиректом":
+        "the redirect stub leads to a page that is not in the build: {a0}. "
+        "On the live site that is a 404 behind a redirect",
 }

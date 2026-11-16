@@ -35,7 +35,9 @@ def _is_html(page) -> bool:
 
 # ── год в заголовке ──────────────────────────────────────────────────────────
 
-_YEAR = re.compile(r"(?<![\w.,])(20\d\d)(?![\d.,])")
+# Точка или запятая после года — конец фразы («in 2023, explained», «for
+# 2023.»), если за ней не цифра: «2023.5» и «2023,45» — числа, а не годы.
+_YEAR = re.compile(r"(?<![\w.,])(20\d\d)(?!\d|[.,]\d)")
 # Год в имени продукта — версия, а не дата: «SQL Server 2019», «Office 2016»,
 # «Windows 2000». «ES2017» отсекает уже граница слова.
 _PRODUCT = re.compile(
@@ -90,7 +92,7 @@ def _past_years(text: str, current: int) -> set:
     return out
 
 
-def stale_years(pages: list, today: datetime.date = None) -> list:
+def stale_years(pages: list, today: datetime.date = None, base_path: str = "") -> list:
     """
     Прошлый год в заголовках раздела: шаблон, который не обновили.
 
@@ -99,12 +101,18 @@ def stale_years(pages: list, today: datetime.date = None) -> list:
     Забытый шаблон виден по-другому: один и тот же прошлый год стоит в
     заголовках у пяти и больше страниц и не меньше чем у трети раздела.
     Страница, датированная тем же годом, — запись о нём и не считается.
-    Одна находка на раздел.
+    Одна находка на раздел. `base_path` — путь сайта под префиксом
+    (`--site https://example.com/blog`): раздел считается от него, иначе
+    весь сайт оказывался одним разделом `/blog/`.
     """
     current = (today or datetime.date.today()).year
+    base = base_path.strip("/")
     by_section = defaultdict(list)
     for page in pages:
-        parts = urlsplit(page.url).path.strip("/").split("/")
+        path = urlsplit(page.url).path.strip("/")
+        if base and (path == base or path.startswith(base + "/")):
+            path = path[len(base):].strip("/")
+        parts = path.split("/")
         by_section[parts[0] if len(parts) > 1 else ""].append(page)
     issues = []
     for section, members in sorted(by_section.items()):
@@ -129,11 +137,12 @@ def stale_years(pages: list, today: datetime.date = None) -> list:
             # одну. Путь, а не адрес страницы, — чтобы находка не пропадала,
             # когда страница раздела закрыта от индекса, и не уходила в наряд
             # на эту страницу.
-            address = f"/{section}/" if section else "/"
+            prefix = f"/{base}" if base else ""
+            address = f"{prefix}/{section}/" if section else f"{prefix}/"
             issues.append(("warning", address, "stale-year", tr(
                 "у {a0} из {a1} страниц раздела /{a2} в заголовке {a3} год, а сейчас {a4}: "
                 "шаблон заголовка не обновили. Например: {a5}",
-                a0=len(found), a1=len(members), a2=(section + "/") if section else "",
+                a0=len(found), a1=len(members), a2=address.lstrip("/"),
                 a3=year, a4=current, a5=examples)))
     return issues
 
