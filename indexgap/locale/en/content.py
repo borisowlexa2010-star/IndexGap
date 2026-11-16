@@ -96,4 +96,8 @@ MESSAGES = {
     "шаблон пути: {a0}": "path template: {a0}",
     "шаблон уводит файл за пределы --out-dir":
         "the template puts the file outside --out-dir",
+    'публикация запланирована на {a0} — до этого дня страница не публикуется и не проверялась как открытая':
+        'publication is scheduled for {a0}: until that day the page is not published and was not checked as an open page',
+    '{a0} — страница помечена как черновик и не будет опубликована':
+        '{a0}: the page is marked as a draft and will not be published',
 }

@@ -630,7 +630,8 @@ def cmd_check(args):
         if sm["urls"]:
             sitemap_urls = sm["urls"]
             analysis["issues"] = checks.sort_issues(
-                checks.closed_off_map(analysis["issues"], sitemap_urls))
+                checks.closed_off_map(analysis["issues"], sitemap_urls,
+                                      complete=not sm["errors"]))
             got["template_notes"] = checks.template_wide(analysis["issues"], len(pages),
                                                          pages=pages)
             got["templates"] = checks.template_risk(analysis["issues"], pages)

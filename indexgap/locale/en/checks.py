@@ -273,4 +273,6 @@ MESSAGES = {
         "same site (an old domain, github.io behind a CNAME), pass it as --site or "
         "fix the site address in the generator — live, every such link goes through "
         "a redirect.",
+    'страница закрыта от индексации, но стоит в sitemap — противоречие: если закрытие не задумано, трафика не будет':
+        'the page is closed from indexing but listed in the sitemap, which is a contradiction: if the closing is not intended, there will be no traffic',
 }

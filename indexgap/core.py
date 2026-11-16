@@ -1317,6 +1317,9 @@ NOT_PROSE = (("<script", "</script>"), ("<style", "</style>"), ("<pre", "</pre>"
 # Где разметка — не разметка: её показывают, выключили или держат про запас.
 NOT_LIVE = (("<!--", "-->"), ("<noscript", "</noscript>"), ("<pre", "</pre>"),
             ("<code", "</code>"), ("<textarea", "</textarea>"))
+# Мета-тег внутри скрипта (строка JavaScript) или инертного <template> браузер
+# не исполняет: для мета-переадресации это тоже не живая разметка.
+INERT = (("<script", "</script>"), ("<template", "</template>"))
 EMPTY_MOUNT = re.compile(
     r"<div[^<>]{0,300}\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?"
     r"[^<>]{0,300}>\s*</div>", re.I)
@@ -1445,7 +1448,8 @@ def essence(raw: str) -> str:
     if lowered_hint or "NEXT_REDIRECT" in raw:
         live = drop_spans(raw, NOT_LIVE)
         if lowered_hint:
-            parts += [m for m in _REFRESH_META.findall(live) if "equiv" in m.lower()]
+            parts += [m for m in _REFRESH_META.findall(drop_spans(live, INERT))
+                      if "equiv" in m.lower()]
         parts += [f"<script>{m}</script>" for m in _NEXT_SCRIPT.findall(live)]
     parts += _TIME_TAG.findall(raw)
     mount = EMPTY_MOUNT.search(raw)
@@ -1983,6 +1987,26 @@ def _closes(value: str) -> bool:
     return False
 
 
+def _hides_snippet(value: str) -> bool:
+    """`nosnippet` или `max-snippet: 0` в X-Robots-Tag — для всех или для Google."""
+    agent = ""
+    tokens = re.split(r"[,\s]+", (value or "").lower())
+    for i, token in enumerate(tokens):
+        if token.endswith(":") and len(token) > 1 and token != "max-snippet:":
+            agent = token[:-1]
+            continue
+        if token.startswith("max-snippet"):
+            number = token.partition(":")[2] or (tokens[i + 1] if i + 1 < len(tokens) else "")
+            if number.strip() == "0" and agent in ("", "googlebot"):
+                return True
+            continue
+        if ":" in token:
+            agent, _, token = token.partition(":")
+        if token == "nosnippet" and agent in ("", "googlebot"):
+            return True
+    return False
+
+
 def _same_host(a: str, b: str) -> bool:
     a, b = (a or "").lower().split(":")[0], (b or "").lower().split(":")[0]
     strip = lambda h: h[4:] if h.startswith("www.") else h
@@ -2010,7 +2034,7 @@ def _vercel_applies(entry: dict, host: str) -> bool:
     return True
 
 
-def header_noindex_rules(root: str, host: str = "") -> list:
+def header_noindex_rules(root: str, host: str = "", test=None) -> list:
     """
     Правила X-Robots-Tag: noindex из `_headers` (Netlify, Cloudflare Pages),
     `netlify.toml` и `vercel.json` — в сборке и уровнем выше.
@@ -2022,7 +2046,11 @@ def header_noindex_rules(root: str, host: str = "") -> list:
     хостом (`https://:project.pages.dev/*` — рецепт Cloudflare для превью)
     к сайту не относится; `! X-Robots-Tag` в `_headers` снимает заголовок —
     это правило «открывает».
+
+    `test` — какое значение заголовка считать срабатыванием (по умолчанию
+    noindex; `_hides_snippet` — запрет сниппета).
     """
+    test = test or _closes
     rules = []
     near = [root, os.path.dirname(os.path.abspath(root))]
     headers = os.path.join(root, "_headers")
@@ -2049,7 +2077,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
                     rules.append((_route_regex(path), "_headers", current, False))
                 continue
             name, _, value = stripped.partition(":")
-            if name.strip().lower() == "x-robots-tag" and _closes(value):
+            if name.strip().lower() == "x-robots-tag" and test(value):
                 rules.append((_route_regex(path), "_headers", current, True))
     for folder in near:
         toml = os.path.join(folder, "netlify.toml")
@@ -2063,7 +2091,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
         for block in text.split("[[headers]]")[1:]:
             block = block.split("[[", 1)[0]
             where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)
-            if where and tag and _closes(tag.group(1)):
+            if where and tag and test(tag.group(1)):
                 rules.append((_route_regex(where.group(1)), "netlify.toml",
                               where.group(1), True))
         break
@@ -2083,7 +2111,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
             for header in entry.get("headers") or []:
                 if (isinstance(header, dict)
                         and str(header.get("key", "")).lower() == "x-robots-tag"
-                        and _closes(str(header.get("value", "")))):
+                        and test(str(header.get("value", "")))):
                     rules.append((_route_regex(entry["source"]), "vercel.json",
                                   entry["source"], True))
         break
@@ -2091,6 +2119,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
 
 
 def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -> None:
+    _apply_snippet_rules(pages, root, base_url)
     rules = header_noindex_rules(root, urlsplit(base_url).netloc)
     for regex, source, pattern, closes in rules:
         if regex is None and closes:
@@ -2118,6 +2147,34 @@ def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -
     for (source, pattern), n in sorted(hits.items()):
         problems.append(tr("{a0} закрывает от индекса {a1} страниц(ы) заголовком "
                            "X-Robots-Tag: noindex — правило {a2}", a0=source, a1=n, a2=pattern))
+
+
+def _header_path(page, base: str) -> str:
+    path = urlsplit(page.url).path
+    if base and path.startswith(base + "/"):
+        path = path[len(base):]
+    return path
+
+
+def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
+    """
+    `X-Robots-Tag: nosnippet` (или `max-snippet:0`) из `_headers`, `netlify.toml`
+    и `vercel.json` действует так же, как мета-тег: раньше он не переносился
+    на страницы, и запрет сниппета, отданный заголовком, был невидим.
+    """
+    rules = [rule for rule in header_noindex_rules(root, urlsplit(base_url).netloc,
+                                                    _hides_snippet)
+             if rule[0] is not None]
+    if not any(on for *_, on in rules):
+        return
+    base = urlsplit(base_url).path.rstrip("/")
+    for page in pages:
+        path = _header_path(page, base)
+        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        reopened = {source for regex, source, _, on in rules if not on and matches(regex)}
+        if any(on and source not in reopened and matches(regex)
+               for regex, source, _, on in rules) and not page.nosnippet:
+            page.robots = (page.robots + ",nosnippet").strip(",")
 
 
 _TOML_FROM = re.compile(r"""^\s*from\s*=\s*["']([^"']+)["']""", re.M)
