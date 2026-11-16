@@ -614,4 +614,10 @@ MESSAGES = {
         'History: {a0} — chart {a1}',
     'папка истории: прогон сохраняется туда, сравнивается с прошлым из неё, а рядом рисуется trend.html':
         'a history folder: the run is saved there, compared with the previous one in it, and trend.html is drawn beside it',
+    'индекс':
+        'index',
+    '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':
+        '  ! only one of the runs has data for the "{a0}" step — that step and the sections are not compared',
+    '\nЦитируется страница другого хоста ({a0}) — к этой сборке она не относится:':
+        '\nCited pages on another host ({a0}) — they are not part of this build:',
 }

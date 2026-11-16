@@ -38,6 +38,7 @@ import urllib.request
 
 from . import sources
 from .core import url_key, SourceError
+from .crawlers import origin
 from .i18n import tr
 
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -520,7 +521,8 @@ def read_indexed(csv_path: str, site: str = "", index_status: bool = False) -> d
     # Статус читается только у панели вебмастера: `status: ok` в произвольном
     # списке — чьё угодно поле, а не слово поисковика.
     status_col = _status_column(rows, start) if index_status else None
-    base = (site or "").rstrip("/")
+    # Путь `/en/rent/` в выгрузке — от корня хоста, а не от --site с префиксом.
+    base = origin(site)
     out, seen, relative, skipped, excluded = [], set(), 0, 0, {}
     for row in rows[start:]:
         if col >= len(row):
@@ -601,18 +603,27 @@ def _url_column(rows: list) -> tuple:
 _STATUS_HEADERS = ("coverage state", "coverage", "verdict", "index status",
                    "indexing status", "indexing state", "status", "статус",
                    "состояние", "состояние индексации")
+# Фразы HTTP-ответа: столбец из одних таких — код сервера, а не индекс.
+_HTTP_REASONS = {"ok", "moved permanently", "found", "see other", "not modified",
+                 "temporary redirect", "permanent redirect", "forbidden", "not found",
+                 "gone", "internal server error", "bad gateway", "service unavailable",
+                 "gateway timeout", "no response"}
 _INDEXED = re.compile(
     r"(?<!not )(?<!не )\b(indexed|в поиске|в индексе|проиндексирован\w*|pass|valid)\b",
     re.I)
+# «Indexed: No», «Indexed? false», «Non-indexed», «De-indexed», «В поиске нет»:
+# слово indexed здесь есть, а смысл обратный.
+_NEGATED = (r"\bindexed[\s:?()=\-]*(?:no|false|нет)\b(?!\s+\w)|\b(?:non|de|un)-?indexed\b"
+            r"|(?:в поиске|в индексе)[\s:?()=\-]*(?:нет|no)\b(?!\s+\w)|\bнет в (?:поиске|индексе)")
 _NOT_INDEXED = re.compile(
-    r"not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
+    _NEGATED + r"|not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
     r"не в индексе|currently not|blocked|заблокир|duplicate|дубл|малоцен|"
     r"redirect|редирект|soft 404|not found|не найден|noindex|error|ошибк|fail",
     re.I)
 
 
 _SURELY_INDEXED = re.compile(
-    r"^\s*(?:submitted and )?indexed\b(?!\s*:?\s*no)|\burl is on google\b|\bpage is indexed\b"
+    r"^\s*(?:submitted and )?indexed\b(?![\s:?()=\-]*(?:no|false|нет)\b(?!\s+\w))|\burl is on google\b|\bpage is indexed\b"
     r"|^\s*(?:отправлена и )?проиндексирован", re.I)
 
 
@@ -620,14 +631,20 @@ def _status_column(rows: list, start: int):
     """Номер столбца со статусом индексации — или None, если такого нет."""
     if start == 0 or not rows:
         return None
+    found = []
     for i, cell in enumerate(rows[0]):
-        if str(cell or "").strip().lower() not in _STATUS_HEADERS:
+        header = str(cell or "").strip().lower()
+        if header not in _STATUS_HEADERS:
             continue
         values = [str(r[i]).strip() for r in rows[1:51] if i < len(r) and str(r[i]).strip()]
-        # «Status: 200» — код ответа сервера, а не слово поисковика.
-        if values and not all(v.isdigit() for v in values):
-            return i
-    return None
+        # «Status: 200» и «Status: OK» — ответ сервера, а не слово поисковика.
+        if not values or all(v.isdigit() or v.lower() in _HTTP_REASONS for v in values):
+            continue
+        # Порядок в _STATUS_HEADERS — от самого точного: у краулера рядом
+        # стоят «Status» (ответ сервера) и «Coverage» (вердикт поисковика),
+        # и выбор по порядку столбцов в файле брал не тот.
+        found.append((_STATUS_HEADERS.index(header), i))
+    return min(found)[1] if found else None
 
 
 def _is_indexed_status(status: str) -> bool:
@@ -648,6 +665,17 @@ def _is_indexed_status(status: str) -> bool:
     if _NOT_INDEXED.search(status):
         return False
     return bool(_INDEXED.search(status))
+
+
+def count_pages(urls) -> int:
+    """
+    Сколько страниц, а не написаний адреса: `/a/`, `/a`, `http://www…/a/index.html`
+    и `/a/?utm_source=x` (если `/a/` в списке тоже есть) — одна страница.
+    """
+    keys = {url_key(u) for u in urls or () if u}
+    keys.discard("")
+    plain = {k for k in keys if "?" not in k}
+    return len({k.split("?", 1)[0] if k.split("?", 1)[0] in plain else k for k in keys})
 
 
 def read_citations(csv_path: str, site: str = "") -> dict:
@@ -680,7 +708,7 @@ def read_citations(csv_path: str, site: str = "") -> dict:
             "{a0}: нужны столбцы с адресом и с числом цитирований. Заголовки файла: {a1}",
             a0=csv_path, a1=", ".join(str(c) for c in rows[0][:8])))
 
-    base = (site or "").rstrip("/")
+    base = origin(site)
     out = {}
     for row in rows[1:]:
         if max(url_col, count_col) >= len(row):
@@ -777,7 +805,10 @@ def read_sources(specs: list, site: str = "") -> dict:
         if kind == sources.INDEX:
             dropped = dict(result.get("excluded") or {})
             issue = sources.zip_issue(path)
-            if issue:
+            # «Indexed, though blocked by robots.txt» и «Page indexed without
+            # content» — тоже причины из «Индексирования страниц», но страницы
+            # в них в индексе.
+            if issue and not _is_indexed_status(issue):
                 # Архив одной причины из «Индексирования страниц»: всё, что
                 # в нём есть, поисковик индексировать отказался.
                 dropped.update({url: issue for url in urls})
@@ -1135,15 +1166,19 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     # индексе, если индекс известен; иначе всё пригодное.
     # Варианты одного адреса складываются: `/a/`, `/a` и `/a/index.html` —
     # одна страница, и раньше из трёх строк оставалась последняя.
-    cited_keys = {}
+    cited_keys, cited_urls = {}, {}
     for name, counts in (cited or {}).items():
         merged = {}
         for u, n in (counts or {}).items():
             for key in fold({url_key(u)}):
                 merged[key] = merged.get(key, 0) + n
+                # Печатается адрес, как его процитировали: ключ сравнения
+                # `//blog.demo.example/post` не откроешь.
+                cited_urls.setdefault(key, u)
         if merged:
             cited_keys[name] = merged
     cited_closed, cited_unknown, cited_top, cited_off_map = [], [], [], []
+    cited_other = []
     if cited_keys:
         # База — индексируемые страницы, а не «в sitemap»: цитирование
         # доказывает, что ИИ страницу нашёл, и sitemap тут ни при чём. Иначе
@@ -1166,14 +1201,25 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         # ИИ цитирует страницу, которую сайт закрыл от индекса: страница
         # продолжает работать как источник, хотя владелец её убрал.
         cited_closed = show(set(every) & blocked)
-        cited_unknown = sorted(k for k in every if k not in generated)
+        # Чужой хост (поддомен, который cite собирает вместе с доменом) — не
+        # «удалённая страница этой сборки», а другой сайт.
+        def bare_host(key):
+            host = key.lstrip("/").split("/", 1)[0].lower()
+            return host[4:] if host.startswith("www.") else host
+        own = {bare_host(k) for k in generated}
+
+        def shown_url(key):
+            return display.get(key) or cited_urls.get(key) or key
+        missing = [k for k in every if k not in generated]
+        cited_unknown = sorted(shown_url(k) for k in missing if bare_host(k) in own)
+        cited_other = sorted(shown_url(k) for k in missing if bare_host(k) not in own)
         if in_sitemap is not None:
             # Заглушка-редирект в sitemap не входит и не должна: её цитируют,
             # потому что люди ссылаются на домен, а не потому, что её забыли.
             from .checks import redirect_target
             stubs = {url_key(p.url) for p in pages if redirect_target(p)}
             cited_off_map = show((set(every) & publishable) - in_sitemap - stubs)
-        cited_top = sorted(((display.get(k, k), n) for k, n in every.items()),
+        cited_top = sorted(((shown_url(k), n) for k, n in every.items()),
                            key=lambda kv: -kv[1])
 
     foreign = []
@@ -1228,6 +1274,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "has_index": in_index is not None,
         "cited_closed": cited_closed,
         "cited_unknown": cited_unknown,
+        "cited_other_hosts": cited_other,
         "cited_top": cited_top,
         "cited_not_in_sitemap": cited_off_map,
         "impressions_only": impressions_only,
@@ -1505,6 +1552,12 @@ def section_gaps(publishable: dict, stats) -> dict:
             break
         if n < 0.8 * len(publishable):
             break
+        # Внутри одни отдельные страницы (/rent/city00/, /rent/city01/…) —
+        # спуск дал бы таблицу из разделов по одной странице.
+        inner = Counter(p[len(base) + 1] for p in under
+                        if len(p) > len(base) + 1 and p[len(base)] == child)
+        if not inner or max(inner.values()) < 2:
+            break
         base = base + [child]
 
     site = stats(set(publishable))
@@ -1513,6 +1566,11 @@ def section_gaps(publishable: dict, stats) -> dict:
     groups = {}
     for key, p in parts.items():
         if p[:len(base)] != base:
+            # Страницы вне раздела, куда спустились, — своей строкой на уровне,
+            # где они расходятся с ним: иначе /buy/ рядом с большим /rent/
+            # пропадал из таблицы целиком, хотя в итогах по сайту учтён.
+            cut = next(i for i in range(len(base)) if i >= len(p) or p[i] != base[i])
+            groups.setdefault(_prefix(p[:cut + 1] if cut < len(p) else p), set()).add(key)
             continue
         rest = p[len(base):]
         for depth in (1, 2):
@@ -1609,15 +1667,26 @@ def compare_runs(current: dict, previous: dict) -> dict:
                           "before": before.get("count") or 0,
                           "after": step.get("count") or 0, "delta": delta})
 
-    def moved(field):
+    # Шаг без входных данных в одном из прогонов — не «всё вернулось», а
+    # «сравнить нечем»: прогон без --indexed даёт пустой not_indexed.
+    def has(funnel, flag):
+        return bool(funnel.get(flag, True))
+
+    def moved(field, flag):
+        if not (has(cur_f, flag) and has(old_f, flag)):
+            return [], []
         now, was = _keys(cur_f.get(field) or ()), _keys(old_f.get(field) or ())
         shown = {url_key(u): u for u in list(old_f.get(field) or ()) + list(cur_f.get(field) or ())}
         return (sorted(shown[k] for k in now - was), sorted(shown[k] for k in was - now))
 
-    newly_lost, recovered = moved("not_indexed")
-    newly_off_map, back_on_map = moved("missing_from_sitemap")
+    newly_lost, recovered = moved("not_indexed", "has_index")
+    newly_off_map, back_on_map = moved("missing_from_sitemap", "has_sitemap")
+    same_inputs = all(has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap"))
 
     def sections(key):
+        if key == "segments" and not same_inputs:
+            # Потери раздела считаются по другим шагам — разница ничего не значит.
+            return {"rows": [], "new_gaps": [], "closed_gaps": []}
         cur = {r["segment"]: r for r in ((current.get(key) or {}).get("rows") or ())}
         old = {r["segment"]: r for r in ((previous.get(key) or {}).get("rows") or ())}
         hl_now = {h["segment"] for h in ((current.get(key) or {}).get("highlighted") or ())}
@@ -1648,5 +1717,8 @@ def compare_runs(current: dict, previous: dict) -> dict:
         "newly_off_sitemap": newly_off_map, "back_in_sitemap": back_on_map,
         "segments": sections("segments"), "ai_segments": sections("ai_segments"),
         "bots": bots,
+        # Шаги, которые были только в одном из прогонов: «индекс», «sitemap».
+        "not_compared": [f[4:] for f in ("has_index", "has_sitemap")
+                         if has(cur_f, f) != has(old_f, f)],
         "site_changed": (current.get("site") or "") != (previous.get("site") or ""),
     }
