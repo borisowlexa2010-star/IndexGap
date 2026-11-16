@@ -346,6 +346,12 @@ class Page:
         return "noindex" in directives or "none" in directives
 
     @property
+    def nofollow(self) -> bool:
+        """Ссылки страницы краулер не проходит: `nofollow` или `none` в robots."""
+        directives = re.split(r"[,\s]+", (self.robots or "").lower())
+        return "nofollow" in directives or "none" in directives
+
+    @property
     def nosnippet(self) -> bool:
         """Без права на сниппет страница не попадёт в ответы ИИ-поиска."""
         value = (self.robots or "").lower()
@@ -509,11 +515,27 @@ def check_site_url(site: str) -> str:
     site = (site or "").strip()
     if not site:
         raise SourceError(tr("Не указан адрес сайта. Добавь --site https://example.com"))
-    parts = urlsplit(site)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
+    try:
+        # Непарная «[» (`http://[::1`) — ValueError, не SourceError: команда
+        # падала трассировкой вместо понятной строки.
+        parts = urlsplit(site)
+        parts.port
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme not in ("http", "https") or not parts.netloc:
         guess = site.split("//")[-1].strip("/")
         raise SourceError(
             tr("--site {a0} — так не годится: нужен полный адрес со схемой.\n    Попробуй: --site https://{a1}", a0=site, a1=guess))
+    if parts.query or parts.fragment or "?" in site or "#" in site:
+        # `https://demo.example/?x=1` склеивался с путями страниц в
+        # `<loc>https://demo.example/?x=1/</loc>` — невалидный sitemap.
+        raise SourceError(
+            tr("--site {a0} — так не годится: в адресе сайта не бывает «?» и «#».\n    Попробуй: --site {a1}",
+               a0=site, a1=urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))))
+    # Пробел и кириллица в пути базы шли в <loc> как есть, а пути страниц
+    # уже кодируются. Готовые %-последовательности не трогаются.
+    path = quote(parts.path, safe="/%~-._!$&'()*+,;=:@")
+    site = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
     return site.rstrip("/") + "/"
 
 
@@ -552,7 +574,8 @@ _LABELS = {"iso-8859-1": "cp1252", "iso8859-1": "cp1252", "latin1": "cp1252",
            "shift_jis": "cp932", "sjis": "cp932", "windows-31j": "cp932",
            "windows-874": "cp874", "x-cp1251": "cp1251", "utf-16": "utf-8",
            "utf-16le": "utf-8", "utf-16be": "utf-8", "utf-16-le": "utf-8",
-           "utf-16-be": "utf-8"}
+           "utf-16-be": "utf-8", "x-mac-cyrillic": "mac_cyrillic",
+           "x-mac-ukrainian": "mac_cyrillic"}
 _META_TAG = re.compile(rb"<meta\b[^>]{0,500}>", re.I)
 _HIGH = re.compile(rb"[\x80-\xff]")
 _LETTER_RUN = re.compile(rb"[\xc0-\xff]+")
@@ -621,7 +644,16 @@ def _cyrillic_or_latin(data: bytes) -> str:
     paired = high - len(runs)
     if not high:
         return "cp1252"
-    return "cp1251" if paired / high > 0.4 else "cp1252"
+    if paired / high <= 0.4:
+        return "cp1252"
+    # KOI8-R тоже даёт сплошные «буквенные» байты, и читался как cp1251:
+    # «бТЕОДБ ЛЧБТФЙТЩ» вместо «Аренда квартиры». В cp1251 строчные — 0xE0–0xFF,
+    # в KOI8-R они в 0xC0–0xDF. Обычный текст почти весь из строчных, поэтому
+    # KOI8-R — только когда «строчных» по cp1251 явно меньшинство.
+    lower = sum(1 for r in runs for b in r if b >= 0xE0)
+    if high >= 20 and lower / high < 0.25:
+        return "koi8_r"
+    return "cp1251"
 
 
 
@@ -1317,6 +1349,9 @@ NOT_PROSE = (("<script", "</script>"), ("<style", "</style>"), ("<pre", "</pre>"
 # Где разметка — не разметка: её показывают, выключили или держат про запас.
 NOT_LIVE = (("<!--", "-->"), ("<noscript", "</noscript>"), ("<pre", "</pre>"),
             ("<code", "</code>"), ("<textarea", "</textarea>"))
+# Мета-тег внутри скрипта (строка JavaScript) или инертного <template> браузер
+# не исполняет: для мета-переадресации это тоже не живая разметка.
+INERT = (("<script", "</script>"), ("<template", "</template>"))
 EMPTY_MOUNT = re.compile(
     r"<div[^<>]{0,300}\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?"
     r"[^<>]{0,300}>\s*</div>", re.I)
@@ -1445,7 +1480,8 @@ def essence(raw: str) -> str:
     if lowered_hint or "NEXT_REDIRECT" in raw:
         live = drop_spans(raw, NOT_LIVE)
         if lowered_hint:
-            parts += [m for m in _REFRESH_META.findall(live) if "equiv" in m.lower()]
+            parts += [m for m in _REFRESH_META.findall(drop_spans(live, INERT))
+                      if "equiv" in m.lower()]
         parts += [f"<script>{m}</script>" for m in _NEXT_SCRIPT.findall(live)]
     parts += _TIME_TAG.findall(raw)
     mount = EMPTY_MOUNT.search(raw)
@@ -1983,6 +2019,26 @@ def _closes(value: str) -> bool:
     return False
 
 
+def _hides_snippet(value: str) -> bool:
+    """`nosnippet` или `max-snippet: 0` в X-Robots-Tag — для всех или для Google."""
+    agent = ""
+    tokens = re.split(r"[,\s]+", (value or "").lower())
+    for i, token in enumerate(tokens):
+        if token.endswith(":") and len(token) > 1 and token != "max-snippet:":
+            agent = token[:-1]
+            continue
+        if token.startswith("max-snippet"):
+            number = token.partition(":")[2] or (tokens[i + 1] if i + 1 < len(tokens) else "")
+            if number.strip() == "0" and agent in ("", "googlebot"):
+                return True
+            continue
+        if ":" in token:
+            agent, _, token = token.partition(":")
+        if token == "nosnippet" and agent in ("", "googlebot"):
+            return True
+    return False
+
+
 def _same_host(a: str, b: str) -> bool:
     a, b = (a or "").lower().split(":")[0], (b or "").lower().split(":")[0]
     strip = lambda h: h[4:] if h.startswith("www.") else h
@@ -2010,7 +2066,7 @@ def _vercel_applies(entry: dict, host: str) -> bool:
     return True
 
 
-def header_noindex_rules(root: str, host: str = "") -> list:
+def header_noindex_rules(root: str, host: str = "", test=None) -> list:
     """
     Правила X-Robots-Tag: noindex из `_headers` (Netlify, Cloudflare Pages),
     `netlify.toml` и `vercel.json` — в сборке и уровнем выше.
@@ -2022,7 +2078,11 @@ def header_noindex_rules(root: str, host: str = "") -> list:
     хостом (`https://:project.pages.dev/*` — рецепт Cloudflare для превью)
     к сайту не относится; `! X-Robots-Tag` в `_headers` снимает заголовок —
     это правило «открывает».
+
+    `test` — какое значение заголовка считать срабатыванием (по умолчанию
+    noindex; `_hides_snippet` — запрет сниппета).
     """
+    test = test or _closes
     rules = []
     near = [root, os.path.dirname(os.path.abspath(root))]
     headers = os.path.join(root, "_headers")
@@ -2049,7 +2109,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
                     rules.append((_route_regex(path), "_headers", current, False))
                 continue
             name, _, value = stripped.partition(":")
-            if name.strip().lower() == "x-robots-tag" and _closes(value):
+            if name.strip().lower() == "x-robots-tag" and test(value):
                 rules.append((_route_regex(path), "_headers", current, True))
     for folder in near:
         toml = os.path.join(folder, "netlify.toml")
@@ -2063,7 +2123,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
         for block in text.split("[[headers]]")[1:]:
             block = block.split("[[", 1)[0]
             where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)
-            if where and tag and _closes(tag.group(1)):
+            if where and tag and test(tag.group(1)):
                 rules.append((_route_regex(where.group(1)), "netlify.toml",
                               where.group(1), True))
         break
@@ -2083,7 +2143,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
             for header in entry.get("headers") or []:
                 if (isinstance(header, dict)
                         and str(header.get("key", "")).lower() == "x-robots-tag"
-                        and _closes(str(header.get("value", "")))):
+                        and test(str(header.get("value", "")))):
                     rules.append((_route_regex(entry["source"]), "vercel.json",
                                   entry["source"], True))
         break
@@ -2091,6 +2151,7 @@ def header_noindex_rules(root: str, host: str = "") -> list:
 
 
 def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -> None:
+    _apply_snippet_rules(pages, root, base_url)
     rules = header_noindex_rules(root, urlsplit(base_url).netloc)
     for regex, source, pattern, closes in rules:
         if regex is None and closes:
@@ -2118,6 +2179,34 @@ def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -
     for (source, pattern), n in sorted(hits.items()):
         problems.append(tr("{a0} закрывает от индекса {a1} страниц(ы) заголовком "
                            "X-Robots-Tag: noindex — правило {a2}", a0=source, a1=n, a2=pattern))
+
+
+def _header_path(page, base: str) -> str:
+    path = urlsplit(page.url).path
+    if base and path.startswith(base + "/"):
+        path = path[len(base):]
+    return path
+
+
+def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
+    """
+    `X-Robots-Tag: nosnippet` (или `max-snippet:0`) из `_headers`, `netlify.toml`
+    и `vercel.json` действует так же, как мета-тег: раньше он не переносился
+    на страницы, и запрет сниппета, отданный заголовком, был невидим.
+    """
+    rules = [rule for rule in header_noindex_rules(root, urlsplit(base_url).netloc,
+                                                    _hides_snippet)
+             if rule[0] is not None]
+    if not any(on for *_, on in rules):
+        return
+    base = urlsplit(base_url).path.rstrip("/")
+    for page in pages:
+        path = _header_path(page, base)
+        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        reopened = {source for regex, source, _, on in rules if not on and matches(regex)}
+        if any(on and source not in reopened and matches(regex)
+               for regex, source, _, on in rules) and not page.nosnippet:
+            page.robots = (page.robots + ",nosnippet").strip(",")
 
 
 _TOML_FROM = re.compile(r"""^\s*from\s*=\s*["']([^"']+)["']""", re.M)
@@ -2307,7 +2396,26 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                            a0=getattr(exc, "filename", "") or root,
                            a1=getattr(exc, "strerror", "") or exc))
 
-    for dirpath, dirnames, filenames in os.walk(root, onerror=unreadable):
+    # Каталог-симлинк сервер отдаёт как обычный, а обход его молча пропускал:
+    # страницы в нём не проверялись, ссылки на них считались битыми. Идём по
+    # ссылкам наружу; ссылку внутрь сборки (её страницы и так обойдены) и на
+    # каталог выше (петля) не трогаем.
+    real_root = os.path.realpath(root)
+    walked = {real_root}
+
+    def follow(dirpath, name):
+        path = os.path.join(dirpath, name)
+        if not os.path.islink(path):
+            return True
+        real = os.path.realpath(path)
+        if (real in walked or real.startswith(real_root + os.sep)
+                or real_root.startswith(real.rstrip(os.sep) + os.sep)):
+            return False
+        walked.add(real)
+        return True
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=unreadable, followlinks=True):
+        dirnames[:] = [d for d in dirnames if follow(dirpath, d)]
         skip = set(ALWAYS_SKIP)
         if dirpath == root and source_repo:
             skip |= BUILD_DIRS

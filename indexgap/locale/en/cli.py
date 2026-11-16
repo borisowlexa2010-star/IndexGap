@@ -6,6 +6,9 @@ MESSAGES = {
         "the page text contains “TODO” — if it is the author's note rather than "
         "the subject of the text, the page is unfinished",
     "{a0} — это каталог, а нужен файл.": "{a0} is a directory, a file is needed.",
+    "--no-content выключает сверку фактов: датасет прочитан, но с ним ничего не сверялось. Молчание здесь — не «всё хорошо»":
+        "--no-content turns off fact-checking: the dataset was read, but nothing "
+        "was checked against it. Silence here does not mean all good",
     "{a0} уже существует и это не данные отчёта indexgap.\n    Перезаписывать чужой файл я не буду — укажи другое имя через --out.":
         "{a0} already exists and is not indexgap report data.\n    I will not "
         "overwrite someone else's file — choose another name with --out.",
@@ -614,4 +617,16 @@ MESSAGES = {
         'History: {a0} — chart {a1}',
     'папка истории: прогон сохраняется туда, сравнивается с прошлым из неё, а рядом рисуется trend.html':
         'a history folder: the run is saved there, compared with the previous one in it, and trend.html is drawn beside it',
+    "в датасете {a0} нет ни одной строки — числа страниц не сверялись":
+        "the dataset {a0} has no rows — the numbers on the pages were not checked",
+    '  находок базы, принятых с тех пор через ignore: {a0} — они на сайте и в «исчезло» не входят':
+        '  baseline findings accepted since then through ignore: {a0} — they are still on the site and are not counted as gone',
+    '  ! база снята со сверкой фактов по датасету, этот прогон — без неё: {a0} находок сверки не проверены и в «исчезло» не входят, а новые числа не сверялись. Передай тот же --dataset':
+        '  ! the baseline was made with fact-checking against a dataset, this run without it: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Pass the same --dataset',
+    'индекс':
+        'index',
+    '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':
+        '  ! only one of the runs has data for the "{a0}" step — that step and the sections are not compared',
+    '\nЦитируется страница другого хоста ({a0}) — к этой сборке она не относится:':
+        '\nCited pages on another host ({a0}) — they are not part of this build:',
 }

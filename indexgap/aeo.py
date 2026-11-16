@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import Counter
 
 from .checks import is_shell
 from .i18n import N_, tr
@@ -95,10 +96,17 @@ _Q_INSIDE = (
     "چه|چگونه|کجا|چرا|چند"
 )
 _Q_CJK = "什么|甚麼|哪里|哪裡|哪儿|哪个|怎么|怎样|如何|为什么|為什麼|多少|几|是否|吗|嗎|呢|何|どう|なぜ|いつ|どこ|だれ|誰|ですか|무엇|어떻게|언제|어디|왜|누구|얼마|나요"
+# Тайский вопрос пишется без знака: вопросительное слово или частица внутри
+# фразы, слова не разделены пробелами («ค่าวีซ่าเท่าไหร่»).
+_Q_THAI = ("อะไร|เท่าไหร่|เท่าไร|ไหม|มั้ย|อย่างไร|ยังไง|แค่ไหน|ที่ไหน|เมื่อไหร่|เมื่อไร|"
+           "ทำไม|ใคร|หรือไม่|หรือเปล่า")
 QUESTION = re.compile(
     "^(?:" + _Q_START + ")(?![\\w" + _INDIC + "])"
     "|(?<![\\w" + _INDIC + "])(?:" + _Q_INSIDE + ")(?![\\w" + _INDIC + "])"
-    "|(?:" + _Q_CJK + ")"
+    "|(?:" + _Q_CJK + "|" + _Q_THAI + ")"
+    # Греческий вопросительный знак — `;` (U+037E при нормализации становится
+    # им же); армянский `՞` стоит над словом, эфиопский — `፧`.
+    "|[\u0370-\u03ff\u1f00-\u1fff]\\s?[;\u037e]\\s*$|\u055e|\u1367"
     "|[?？؟]\\s*$", re.I | re.U)
 
 # Кто ходит за содержимым для ИИ-ответов и что теряется при блокировке.
@@ -289,9 +297,11 @@ def check_blocked_pages(pages: list, robots: dict) -> list:
     """
     from urllib.parse import urlsplit
     from .publish import indexable
-    if not robots.get("found") or _blocks_everything(_robots_group(robots)):
+    if not robots.get("found"):
         return []
-    issues = []
+    issues = _search_agents_partly_blocked(pages, robots)
+    if _blocks_everything(_robots_group(robots)):
+        return issues
     for page in sorted(pages, key=lambda p: p.url):
         if not indexable(page):
             continue
@@ -303,6 +313,45 @@ def check_blocked_pages(pages: list, robots: dict) -> list:
                            tr("robots.txt не пускает поисковик на страницу (правило "
                               "«Disallow: {a0}») — текст он не прочитает, ссылки и sitemap "
                               "ведут сюда зря", a0=verdict)))
+    return issues
+
+
+def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
+    """
+    Своя группа ИИ-поиска или Bingbot с частичным запретом (`Disallow: /rent/`).
+
+    Полный запрет такого бота — находка `check_robots`; частичный не замечался
+    вовсе, хотя раздел каталога так же пропадает из ответов ChatGPT или Bing.
+    Считаются открытые страницы сборки, которые Googlebot обходит, а этот бот
+    — нет. Одна находка на бота: правило одно, а страниц может быть тысячи.
+    Закрыта половина открытых страниц и больше — критично, меньше —
+    предупреждение: служебный раздел часто закрывают намеренно.
+    """
+    from urllib.parse import urlsplit
+    from .publish import indexable
+    rules = robots.get("rules") or {}
+    open_pages = [p for p in pages if indexable(p)]
+    issues = []
+    for agent in sorted(AI_SEARCH_AGENTS):
+        entry = rules.get(agent)
+        if not entry or _blocks_everything(entry):
+            continue
+        blocked = Counter()
+        for page in open_pages:
+            parts = urlsplit(page.url)
+            path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+            rule = blocking_rule(robots, path, agent)
+            if rule and not blocking_rule(robots, path):
+                blocked[rule] += 1
+        n = sum(blocked.values())
+        if not n:
+            continue
+        rule = blocked.most_common(1)[0][0]
+        level = "critical" if 2 * n >= len(open_pages) else "warning"
+        issues.append((level, "robots.txt", "ai-crawler-blocked",
+                       tr("{a0} не пускают на {a1} из {a2} открытых страниц (правило "
+                          "«Disallow: {a3}»): {a4}", a0=agent, a1=n, a2=len(open_pages),
+                          a3=rule, a4=tr(AI_AGENTS[agent]))))
     return issues
 
 
@@ -332,6 +381,13 @@ def check_robots(robots: dict) -> list:
         else:
             issues.append(("critical", "robots.txt", "robots-blocks-all",
                            tr("Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком")))
+    elif "googlebot" in rules and _blocks_everything(rules["googlebot"]):
+        # Своя группа Googlebot с `Disallow: /` закрывает сайт от Google, даже
+        # если под звёздочкой всё открыто. Раньше об этом молчали все три
+        # проверки: постраничные оставляли полный запрет этой, а эта смотрела
+        # только на `*`.
+        issues.append(("critical", "robots.txt", "robots-blocks-all",
+                       tr("Disallow: / для Googlebot — Google не обходит сайт целиком")))
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
         if entry and _blocks_everything(entry):

@@ -34,6 +34,7 @@ from . import (aeo, checks, cite, content, crawlers, doctor, engines, fetch, fre
 from . import diff as diffs
 from . import i18n
 from .i18n import tr
+from .subject import subject_of
 from .core import (SourceError, check_site_url, default_jobs, load_manifest, load_pages,
                    save_manifest, url_key)
 
@@ -141,6 +142,12 @@ def _load(args):
     pages, problems = load_pages(args.root, site, jobs=default_jobs())
     for problem in problems:
         print(f"  ! {problem}")
+    # Отчёт и JSON тоже должны их знать: пропущенная страница с собственным
+    # адресом на живом сайте, а CI и --baseline читают только JSON.
+    try:
+        args._load_problems = list(problems)
+    except AttributeError:
+        pass
     if not pages:
         if not os.path.exists(args.root):
             raise SourceError(tr("Каталога {a0} нет. Проверь путь.", a0=args.root))
@@ -190,7 +197,14 @@ def check_out_path(path: str) -> str:
 
 
 def _serialize_issues(issues):
-    return [{"level": l, "url": u, "code": c, "message": m} for l, u, c, m in issues]
+    out = []
+    for l, u, c, m in issues:
+        item = {"level": l, "url": u, "code": c, "message": m}
+        if subject_of(m) is not None:
+            # Полный предмет: в тексте он укорочен до трёх адресов.
+            item["subject"] = list(subject_of(m))
+        out.append(item)
+    return out
 
 
 def resolve_keyword_field(args, fields: list, path: str) -> str:
@@ -238,11 +252,11 @@ def _collect_indexed(args) -> tuple:
     for note in result["notes"]:
         print(f"  ! {note}")
     if by_engine:
-        summary = ", ".join(f"{n}: {len(u)}" for n, u in sorted(by_engine.items()))
+        summary = ", ".join(f"{n}: {doctor.count_pages(u)}" for n, u in sorted(by_engine.items()))
         print(tr("Индексация — {a0}", a0=summary))
     if by_source:
         summary = ", ".join(
-            f"{n} ({tr(sources.KIND_TITLE[sources.kind_of(n)])}): {len(u)}"
+            f"{n} ({tr(sources.KIND_TITLE[sources.kind_of(n)])}): {doctor.count_pages(u)}"
             for n, u in sorted(by_source.items()))
         print(tr("Прочие источники — {a0}", a0=summary))
     for name, counts in sorted(cited.items()):
@@ -278,6 +292,9 @@ def _read_rows(args):
     data = generate.read_dataset(args.dataset)
     for problem in data["problems"]:
         print(f"  ! {problem}")
+    if not data["rows"]:
+        # Пустой датасет — не «всё сходится»: сверка фактов просто не шла.
+        print("  ! " + tr("в датасете {a0} нет ни одной строки — числа страниц не сверялись", a0=args.dataset))
     resolve_keyword_field(args, data["fields"], args.dataset)
     return data["rows"]
 
@@ -388,8 +405,15 @@ _SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-m
 _SUBJECT = re.compile(r"https?://[^\s,;«»\"']+|(?<![\w/])/[^\s,;«»\"'()]*|«[^»]*»")
 
 
-def _subject(code: str, message: str) -> tuple:
-    """Предмет находки без чисел и без языка: адреса, пути, «цитаты», имя бота."""
+def _subject(code: str, message: str, given=None) -> tuple:
+    """
+    Предмет находки без чисел и без языка: адреса, пути, «цитаты», имя бота.
+
+    `given` — полный предмет, записанный рядом с сообщением (поле `subject`
+    в JSON с 1.25). Он сильнее текста: в тексте показаны три адреса из N.
+    """
+    if given is not None:
+        return tuple(given)
     if code not in _SUBJECT_CODES or not message:
         return ()
     if code == "ai-crawler-blocked":
@@ -397,7 +421,30 @@ def _subject(code: str, message: str) -> tuple:
     return tuple(sorted({m.group(0).rstrip(".:—") for m in _SUBJECT.finditer(message)}))
 
 
-def compare_baseline(issues: list, old: list) -> dict:
+# Находки сверки с датасетом: без датасета их не бывает, и их пропажа в
+# прогоне без --dataset — не исправление, а выключенная проверка.
+FACT_CODES = frozenset({"unsupported-number", "check-by-eye", "dataset-unbound"})
+
+
+def baseline_coverage(path: str, old: list) -> dict:
+    """
+    Какие проверки шли в прогоне базовой линии. Читается до работы, как и
+    сама база. В базе до 1.25 поля `coverage` нет: сверка фактов тогда была,
+    если среди находок есть её коды.
+    """
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            got = json.load(fh).get("coverage")
+    except (OSError, ValueError, AttributeError):
+        got = None
+    got = dict(got) if isinstance(got, dict) else {}
+    if not isinstance(got.get("facts"), bool):
+        got["facts"] = any(i.get("code") in FACT_CODES for i in old)
+    return got
+
+
+def compare_baseline(issues: list, old: list, accepted: list = None,
+                     unchecked=()) -> dict:
     """
     Что появилось и что исчезло с прошлого прогона.
 
@@ -408,44 +455,84 @@ def compare_baseline(issues: list, old: list) -> dict:
 
     У находок с предметом (бот, цель ссылки, страница-близнец) сравнивается
     и он: новая — та, у которой появился предмет, которого раньше не было.
-    Битых ссылок стало меньше — не новая находка; ссылка ведёт в другое
-    место — новая.
+    Битых ссылок стало меньше — не новая находка и не исчезнувшая; ссылка
+    ведёт в другое место — новая. Полный предмет берётся из поля `subject`,
+    а не из укороченного текста.
+
+    Находка, которую с тех пор приняли через ignore (`accepted`), — не
+    исчезнувшая: она на сайте, её только перестали считать. Находки проверок,
+    которые в этот раз не шли (`unchecked` — их коды), тоже не исчезли:
+    их не искали.
     """
     def key(level, url, code):
         return level, code, url_key(url or "")
 
+    # База до 1.25 не хранит полный предмет: тогда обе стороны сравниваются
+    # по тексту, иначе полный предмет новой стороны против укороченного
+    # старого дал бы «новые» находки на ровном месте.
+    full = any(isinstance(i.get("subject"), list) for i in old)
+
+    def subject(code, message, given):
+        if full and given is not None:
+            return _subject(code, message or "", given)
+        return _subject(code, message or "")
+
     def subjects(items):
         out = defaultdict(set)
-        for level, url, code, message in items:
-            if code in _SUBJECT_CODES:
-                out[key(level, url, code)].update(_subject(code, message or ""))
+        for level, url, code, message, given in items:
+            got = subject(code, message, given)
+            if got or code in _SUBJECT_CODES:
+                out[key(level, url, code)].update(got)
         return out
 
-    old_items = [(i.get("level"), i.get("url"), i.get("code"), i.get("message"))
+    old_items = [(i.get("level"), i.get("url"), i.get("code"), i.get("message"),
+                  i.get("subject") if isinstance(i.get("subject"), list) else None)
                  for i in old]
-    had, has = subjects(old_items), subjects(issues)
+    new_items = [(level, url, code, message, subject_of(message))
+                 for level, url, code, message in issues]
+    had, has = subjects(old_items), subjects(new_items)
 
     def changed(item, other):
-        level, url, code, message = item
+        level, url, code, message, given = item
         k = key(level, url, code)
-        mine = set(_subject(code, message or ""))
+        mine = set(subject(code, message, given))
         return k in other and bool(mine - other[k])
 
-    before = Counter(key(l, u, c) for l, u, c, _ in old_items)
-    now = Counter(key(l, u, c) for l, u, c, _ in issues)
+    def moved(item, other):
+        level, url, code, message, given = item
+        k = key(level, url, code)
+        mine = set(subject(code, message, given))
+        return k in other and bool(mine) and not (mine & other[k])
+
+    before = Counter(key(l, u, c) for l, u, c, _, _ in old_items)
+    now = Counter(key(l, u, c) for l, u, c, _, _ in new_items)
     new, seen = [], Counter()
-    for level, url, code, message in issues:
+    for item in new_items:
+        level, url, code, message, _ = item
         k = key(level, url, code)
         seen[k] += 1
-        if seen[k] > before[k] or changed((level, url, code, message), had):
+        if seen[k] > before[k] or changed(item, had):
             new.append({"level": level, "url": url, "code": code, "message": message})
-    fixed, gone = [], Counter()
+    kept_items = [(level, url, code, message, subject_of(message))
+                  for level, url, code, message in accepted or []]
+    kept = Counter(key(l, u, c) for l, u, c, _, _ in kept_items)
+    has_kept = subjects(new_items + kept_items)
+    fixed, still, skipped, gone = [], [], [], Counter()
     for item, raw in zip(old_items, old):
         k = key(*item[:3])
         gone[k] += 1
-        if gone[k] > now[k] or changed(item, has):
+        # Исчезла — когда не осталось ни одного её предмета. Из трёх
+        # битых ссылок починили одну, из группы трёх дублей переписали одну
+        # страницу — находка на месте, а не «исчезла».
+        if not (gone[k] > now[k] or moved(item, has)):
+            continue
+        if item[2] in unchecked:
+            skipped.append(raw)
+        elif kept[k] and not (gone[k] > now[k] + kept[k] or moved(item, has_kept)):
+            still.append(raw)
+        else:
             fixed.append(raw)
-    return {"new": new, "fixed": fixed}
+    return {"new": new, "fixed": fixed, "accepted": still, "unchecked": skipped}
 
 
 def _print_baseline(path: str, diff: dict) -> None:
@@ -457,6 +544,14 @@ def _print_baseline(path: str, diff: dict) -> None:
         print(f"  + {item['level']:<8} {item['code']:<22} {item['url']}")
     if len(crit or new) > 5:
         print(tr("  … и ещё {a0}", a0=len(crit or new) - 5))
+    if diff.get("accepted"):
+        print(tr("  находок базы, принятых с тех пор через ignore: {a0} — они на "
+                 "сайте и в «исчезло» не входят", a0=len(diff["accepted"])))
+    if diff.get("facts_off"):
+        print(tr("  ! база снята со сверкой фактов по датасету, этот прогон — без "
+                 "неё: {a0} находок сверки не проверены и в «исчезло» не входят, "
+                 "а новые числа не сверялись. Передай тот же --dataset",
+                 a0=len(diff.get("unchecked") or [])))
 
 
 # ── команды ───────────────────────────────────────────────────────────────────
@@ -537,7 +632,12 @@ def _analyse(args, pages=None):
     content_result = None
     if project["_skip_facts"]:
         notes.append(tr("сверка фактов и швов шаблона выключена профилем «{a0}»: страницы не порождаются датасетом, сверять не с чем. Молчание здесь — не «всё хорошо»", a0=project['_profile']))
-    elif not args.no_content:
+    elif args.no_content:
+        if rows:
+            # Датасет прочитан, единицы из него выведены и напечатаны, а
+            # сверки нет — без заметки это выглядело как «факты в порядке».
+            notes.append(tr("--no-content выключает сверку фактов: датасет прочитан, но с ним ничего не сверялось. Молчание здесь — не «всё хорошо»"))
+    else:
         cfg = dict(project.get("content") or {})
         cfg["vague_anchors"] = project.get("vague_anchors", [])
         content_result = content.run(pages, rows, args.keyword, args.root,
@@ -612,9 +712,14 @@ def cmd_check(args):
     _check_report_pair(args.out)
     # База читается до работы: тот же файл может быть и базой, и результатом.
     baseline = load_baseline(args.baseline) if args.baseline else None
+    coverage_before = (baseline_coverage(args.baseline, baseline)
+                       if baseline is not None else {})
     got = _analyse(args)
     pages, analysis = got["pages"], got["analysis"]
     notes, content_result, aeo_result = got["notes"], got["content"], got["aeo"]
+    # Замечания загрузки уже напечатаны, но в отчёт и JSON идут тоже.
+    loaded = list(getattr(args, "_load_problems", None) or [])
+    notes[:0] = loaded
 
     funnel_result = causes = cross = segments = None
     sitemap_urls = None
@@ -630,7 +735,8 @@ def cmd_check(args):
         if sm["urls"]:
             sitemap_urls = sm["urls"]
             analysis["issues"] = checks.sort_issues(
-                checks.closed_off_map(analysis["issues"], sitemap_urls))
+                checks.closed_off_map(analysis["issues"], sitemap_urls,
+                                      complete=not sm["errors"]))
             got["template_notes"] = checks.template_wide(analysis["issues"], len(pages),
                                                          pages=pages)
             got["templates"] = checks.template_risk(analysis["issues"], pages)
@@ -653,13 +759,22 @@ def cmd_check(args):
                              title=tr("Проверка перед публикацией"),
                              templates=got["templates"], segments=segments)
     json_path = report_pair(args.out)[1]
-    diff = compare_baseline(analysis["issues"], baseline) if baseline is not None else None
+    coverage = {"facts": bool(content_result and content_result.get("facts_checked"))}
+    diff = None
+    if baseline is not None:
+        unchecked = FACT_CODES if coverage_before.get("facts") and not coverage["facts"] else ()
+        diff = compare_baseline(analysis["issues"], baseline,
+                                accepted=analysis.get("accepted"), unchecked=unchecked)
+        diff["facts_off"] = bool(unchecked)
     _write_json(json_path, {
         "site": args.site,
         "pages": len(pages),
         "notes": notes,
         "issues": _serialize_issues(analysis["issues"]),
         "accepted": _serialize_issues(analysis.get("accepted") or []),
+        # Какие проверки шли: следующий --baseline отличит выключенную
+        # проверку от исправленных находок.
+        "coverage": coverage,
         "orphans": analysis["graph"]["orphans"],
         "unreachable": analysis["graph"]["unreachable"],
         "duplicates": [{"a": a.url, "b": b.url, "jaccard": j}
@@ -679,7 +794,7 @@ def cmd_check(args):
         **({"baseline": dict(path=args.baseline, **diff)} if baseline is not None else {}),
     })
 
-    for note in notes:
+    for note in notes[len(loaded):]:
         print(f"  ! {note}")
 
     crit = sum(1 for i in analysis["issues"] if i[0] == "critical")
@@ -1218,6 +1333,11 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
     if trend.get("site_changed"):
         print(tr("  ! прогоны для разных сайтов — сравнение почти ничего не значит"))
     quiet = True
+    names = {"index": tr("индекс"), "sitemap": "sitemap"}
+    for step in trend.get("not_compared") or ():
+        quiet = False
+        print(tr("  ! данные для шага «{a0}» есть только в одном из прогонов — "
+                 "этот шаг и разделы не сравниваются", a0=names.get(step, step)))
     for step in trend["steps"]:
         quiet = False
         print(tr("  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})",
@@ -1456,6 +1576,12 @@ def _print_citations(funnel_result: dict, limit: int = 10) -> None:
             print(f"         {key}")
         print(tr("         → удалена, переименована или не попала в сборку. "
                  "Ответы ИИ ведут людей на неё до сих пор."))
+    other = funnel_result.get("cited_other_hosts") or []
+    if other:
+        print(tr("\nЦитируется страница другого хоста ({a0}) — к этой сборке она не "
+                 "относится:", a0=len(other)))
+        for url in sorted(other, key=lambda u: -counts.get(u, 0))[:limit]:
+            print(f"  {counts.get(url, 0):>6}  {url}")
     off_map = funnel_result.get("cited_not_in_sitemap") or []
     if off_map:
         print(tr("\nЦитируется, но в sitemap нет ({a0}):", a0=len(off_map)))

@@ -276,9 +276,20 @@ def _first_things(issues: list, graph: dict, dupes: list) -> str:
     """Три числа и порядок действий — то, с чего начинают."""
     counts = Counter(item[2] for item in issues
                      if len(item) >= 3 and item[0] == "critical")
+    # Тот же порядок, что в консоли (`Чинить в этом порядке`): находка уровня
+    # сайта — одна правка с самым большим радиусом, а по числу всегда единица.
+    # robots.txt, закрывший весь сайт, уступал двум дублям и сюда не попадал.
+    from .repair import SITE_LEVEL
+    site = sorted((c for c in counts if c in SITE_LEVEL),
+                  key=lambda c: CODE_WEIGHT.get(c, 99))
+    rest = [c for c, _ in counts.most_common() if c not in SITE_LEVEL]
     lines = []
-    for code, count in counts.most_common(3):
-        lines.append(tr("<li><strong>{a0}</strong> — {a1} стр.: {a2}</li>", a0=_esc(code), a1=count, a2=_esc(_help(code, ''))))
+    for code in (site + rest)[:3]:
+        if code in SITE_LEVEL:
+            lines.append(tr("<li><strong>{a0}</strong> — весь сайт: {a1}</li>",
+                            a0=_esc(code), a1=_esc(_help(code, ''))))
+            continue
+        lines.append(tr("<li><strong>{a0}</strong> — {a1} стр.: {a2}</li>", a0=_esc(code), a1=counts[code], a2=_esc(_help(code, ''))))
     if not lines:
         return (tr("<div class=\"first\"><strong>Критичных находок нет.</strong> Дальше смотри в Search Console и Вебмастере: локальные проверки своё сказали.</div>"))
     return (tr("<div class=\"first\"><strong>Начни с этого</strong><ol>") + "".join(lines) + '</ol></div>')

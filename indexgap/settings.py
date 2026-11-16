@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from collections import Counter
 from .core import SourceError
 from .i18n import tr
@@ -59,6 +60,10 @@ DENSE_SCRIPT = re.compile(
     "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
     "\uac00-\ud7af\u0e00-\u0e7f\u1780-\u17ff\u0e80-\u0eff\u1000-\u109f]")
 
+# Письменности, где знак вдвое шире латинского: иероглифы, кана, хангыль.
+_WIDE_SCRIPT = re.compile(
+    "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+
 # Сколько символов такого языка примерно соответствует одному «слову»
 # в языках с пробелами. Грубо, но лучше, чем считать всю страницу
 # за одно слово и объявлять её тонкой.
@@ -92,6 +97,14 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
         raise SourceError(tr("Не удалось прочитать {a0}: {a1}", a0=path, a1=exc))
     if not isinstance(user, dict):
         raise SourceError(tr("{a0}: ожидался объект верхнего уровня.", a0=path))
+    # Строка вместо списка (`"fact_units": "minutes"`) разбиралась по буквам:
+    # единицами становились «m», «i», «n»…, и сверка фактов молча выключалась.
+    for key in ("fact_units", "extra_fact_units", "vague_anchors"):
+        value = user.get(key)
+        if value is not None and not (isinstance(value, list)
+                                      and all(isinstance(v, str) for v in value)):
+            raise SourceError(tr("{a0}: значение `{a1}` должно быть списком строк, а там {a2}.",
+                                 a0=path, a1=key, a2=json.dumps(value, ensure_ascii=False)[:40]))
     config.update(user)
     config["_path"] = path
     return config
@@ -199,8 +212,13 @@ def display_width(text: str) -> int:
     """
     if not text:
         return 0
-    dense = len(DENSE_SCRIPT.findall(text))
-    return len(text) + dense
+    # Широки только иероглифы, кана и хангыль. Тайское, лаосское, кхмерское и
+    # бирманское письмо — обычной ширины, а их надстрочные гласные и тоны
+    # (и любые комбинируемые знаки) места в строке не занимают: тайский
+    # заголовок из 35 видимых знаков считался шириной 90.
+    wide = len(_WIDE_SCRIPT.findall(text))
+    marks = sum(1 for ch in text if unicodedata.category(ch) in ("Mn", "Me", "Cf"))
+    return len(text) + wide - marks
 
 
 def resolve(root: str, pages: list = None, rows: list = None,

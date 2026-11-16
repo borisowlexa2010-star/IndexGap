@@ -139,6 +139,11 @@ def parse_line(line: str) -> dict:
             inner = record.get(nest)
             if isinstance(inner, dict):
                 record = {**record, **inner}
+        # `response.status` — ответ лежит отдельно от запроса; его поля только
+        # дополняют запись, адрес и User-Agent из запроса они не перебивают.
+        inner = record.get("response")
+        if isinstance(inner, dict):
+            record = {**inner, **record}
         target = _first(record, _JSON_TARGET)
         ua = _first(record, _JSON_UA)
         if isinstance(ua, list):
@@ -167,9 +172,34 @@ def _open(path: str):
 
 
 def _is_page(path: str) -> bool:
-    last = path.rstrip("/").rsplit("/", 1)[-1]
+    # `/rent/st.louis/` — страница: точка в имени раздела не расширение файла.
+    if path.endswith("/"):
+        return True
+    last = path.rsplit("/", 1)[-1]
     ext = last.rsplit(".", 1)[-1].lower() if "." in last else ""
     return ext in _PAGE_EXT
+
+
+def origin(site: str) -> str:
+    """`https://demo.example/en/` → `https://demo.example`: корень хоста."""
+    parts = urlsplit(site or "")
+    if not parts.scheme or not parts.netloc:
+        return (site or "").rstrip("/")
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _bare_host(host: str) -> str:
+    host = (host or "").lower().split(":")[0].rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _public_host(host: str) -> str:
+    """Хост из записи лога, если это имя сайта, а не адрес бэкенда или localhost."""
+    host = str(host or "").strip().lower()
+    name = host.split(":")[0].rstrip(".")
+    if "." not in name or name.endswith(".local") or name.replace(".", "").isdigit():
+        return ""
+    return host
 
 
 def read_logs(paths: list, site: str = "") -> dict:
@@ -181,7 +211,11 @@ def read_logs(paths: list, site: str = "") -> dict:
     """
     if not paths:
         return {}
-    base = site.rstrip("/") if site else ""
+    # Путь из лога отсчитывается от корня хоста, а не от --site: при
+    # `--site https://demo.example/en` запрос `/en/rent/` — это
+    # `https://demo.example/en/rent/`, а не `…/en/en/rent/`.
+    base = origin(site)
+    home = _bare_host(urlsplit(base).netloc) if base else ""
     events = []
     lines = matched = 0
     for path in paths:
@@ -198,20 +232,30 @@ def read_logs(paths: list, site: str = "") -> dict:
                 who = identify(hit["ua"])
                 if not who:
                     continue
+                target = hit["target"]
+                try:
+                    # Лог пишет кто угодно: сканер шлёт `GET //[evil`, и
+                    # urlsplit бросал ValueError — весь doctor падал.
+                    parts = urlsplit(target)
+                except ValueError:
+                    continue
                 matched += 1
                 name, operator, purpose = who
-                target = hit["target"]
-                parts = urlsplit(target)
                 if parts.scheme:
                     url = target.split("#")[0]
                     path_only = parts.path or "/"
                 else:
                     path_only = unquote(target.split("?")[0].split("#")[0]) or "/"
-                    host = hit["host"]
-                    root = f"https://{host}" if host and not base else base
+                    host = _public_host(hit["host"])
+                    # Хост из записи сильнее --site: запрос к staging.demo.example —
+                    # не обход боевого сайта. Свой хост (с www или без) — это --site.
+                    if host and (not home or _bare_host(host) != home):
+                        root = f"https://{host}"
+                    else:
+                        root = base
                     url = (root or "") + (target.split("#")[0] if target.startswith("/") else "/" + target)
                 events.append((name, operator, purpose, hit["status"], hit.get("ip", ""),
-                               path_only, url))
+                               path_only, url, hit["method"]))
     if not matched:
         raise SourceError(tr(
             "В логах ({a0} строк) нет ни одного известного бота. Либо это не "
@@ -224,7 +268,9 @@ def read_logs(paths: list, site: str = "") -> dict:
 def _aggregate(events: list) -> dict:
     """Сводка по ботам из отдельных запросов: страницы, ответы, robots.txt, адреса."""
     bots = {}
-    for name, operator, purpose, status, ip, path_only, url in events:
+    for event in events:
+        name, operator, purpose, status, ip, path_only, url = event[:7]
+        method = event[7] if len(event) > 7 else "GET"
         bot = bots.setdefault(name, {
             "name": name, "operator": operator, "purpose": purpose,
             "hits": 0, "statuses": Counter(), "pages": {}, "robots_txt": 0, "ips": Counter()})
@@ -241,10 +287,19 @@ def _aggregate(events: list) -> dict:
         page = bot["pages"].setdefault(key, {"url": url.split("?")[0], "hits": 0,
                                              "ok": 0, "errors": Counter()})
         page["hits"] += 1
-        if 200 <= status < 400:
-            page["ok"] += 1
+        if 300 <= status < 400 and status != 304:
+            # Редирект — бот страницу не получил. Если он дошёл по нему до
+            # той же страницы (`/rent/x` → `/rent/x/`), это засчитает следующий
+            # запрос; если нет — страница не открыта, и это видно.
+            page["errors"][status] += 1
+        elif 200 <= status < 400:
+            # HEAD проверяет, жив ли адрес, но тела страницы не получает.
+            if method != "HEAD":
+                page["ok"] += 1
         elif status:
             page["errors"][status] += 1
+        else:
+            bot["no_status"] = bot.get("no_status", 0) + 1
     return bots
 
 
@@ -264,7 +319,10 @@ def coverage(pages: list, logs: dict, verified: dict = None) -> dict:
     for name, bot in sorted(logs["bots"].items(), key=lambda kv: -kv[1]["hits"]):
         fetched = {k for k, v in bot["pages"].items() if v["ok"]} & publishable
         by_purpose[bot["purpose"]] |= fetched
-        failed = {k: v for k, v in bot["pages"].items() if v["errors"] and k in display}
+        # Редирект на странице, которую бот потом всё же получил, — не ошибка.
+        failed = {k: v for k, v in bot["pages"].items()
+                  if k in display and v["errors"]
+                  and not (v["ok"] and all(300 <= s < 400 for s in v["errors"]))}
         statuses = bot["statuses"]
         rows.append({
             "name": name, "operator": bot["operator"], "purpose": bot["purpose"],
@@ -290,6 +348,12 @@ def coverage(pages: list, logs: dict, verified: dict = None) -> dict:
                 "защита CDN или WAF, а не robots.txt (Cloudflare блокирует ИИ-ботов "
                 "по умолчанию) — страницы для этого ИИ-поиска закрыты, хотя robots.txt "
                 "их разрешает", a0=row["name"], a1=row["forbidden"], a2=row["hits"]))
+    unread = sum(bot.get("no_status", 0) for bot in logs["bots"].values())
+    if unread:
+        notes.append(tr(
+            "в {a0} запрос(ах) ботов к страницам не нашёлся код ответа — открыл ли "
+            "бот эти страницы, по логу не понять, и в шаг «открыто» они не "
+            "засчитаны. Проверь, в каком поле лог пишет статус", a0=unread))
     if not any(r["purpose"] in AI_PURPOSES for r in rows):
         notes.append(tr(
             "в логах нет ни одного бота ИИ-поиска (OAI-SearchBot, Claude-SearchBot, "

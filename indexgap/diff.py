@@ -50,15 +50,38 @@ def _rule(source: str):
     source = source.strip()
     if "://" in source:
         source = urlsplit(source).path or "/"
-    out = []
+    out, names = [], set()
+
+    def group(name, body):
+        # Имя группы — для подстановки в цель (`:splat`, `:slug`). Повтор
+        # имени регулярное выражение не примет: тогда группа без имени.
+        if name and name not in names:
+            names.add(name)
+            return f"(?P<{name}>{body})"
+        return f"({body})"
+
     for token in re.split(r"(\*|:[A-Za-z_]\w*\*?|\(\.\*\))", source.rstrip("/") or "/"):
-        if token in ("*", "(.*)") or (token.startswith(":") and token.endswith("*")):
-            out.append(".*")
+        if token == "*":
+            out.append(group("splat", ".*"))
+        elif token == "(.*)":
+            out.append("(.*)")
+        elif token.startswith(":") and token.endswith("*"):
+            out.append(group(token[1:-1], ".*"))
         elif token.startswith(":") and len(token) > 1:
-            out.append("[^/]+")
+            out.append(group(token[1:], "[^/]+"))
         else:
             out.append(re.escape(token))
     return re.compile("^" + "".join(out) + "/?$")
+
+
+def _spa_fallback(pattern) -> bool:
+    """
+    Правило ловит любой адрес сайта (`/*`, `/(.*)`, `/:path*`). Перезапись 200
+    на всё подряд — запасной вход SPA (`/* /index.html 200`),
+    а не редирект: сервер отдаёт по удалённому адресу главную с кодом 200.
+    Это мягкий 404, и удалённая страница остаётся критичной находкой.
+    """
+    return bool(pattern.match("/indexgap-probe/any/depth"))
 
 
 def _netlify_lines(text: str, origin: str) -> list:
@@ -72,7 +95,10 @@ def _netlify_lines(text: str, origin: str) -> list:
         status = next((p for p in parts[1:] if re.match(r"^\d{3}!?$", p)), "301")
         if not target or status.startswith("404"):
             continue
-        rules.append((_rule(parts[0]), target, origin))
+        rule = _rule(parts[0])
+        if status.startswith("200") and _spa_fallback(rule):
+            continue
+        rules.append((rule, target, origin))
     return rules
 
 
@@ -90,7 +116,10 @@ def _netlify_toml(text: str, origin: str) -> list:
         block = block[:nxt.start()] if nxt else block
         keys = {k: v.strip() for k, v in _TOML_KEY.findall(block)}
         if keys.get("from") and keys.get("to") and not keys.get("status", "").startswith("404"):
-            rules.append((_rule(keys["from"]), keys["to"], origin))
+            rule = _rule(keys["from"])
+            if keys.get("status", "").startswith("200") and _spa_fallback(rule):
+                continue
+            rules.append((rule, keys["to"], origin))
     return rules
 
 
@@ -106,7 +135,10 @@ def _vercel(text: str, origin: str) -> list:
         for item in data.get(section) or []:
             if isinstance(item, dict) and isinstance(item.get("source"), str) \
                     and isinstance(item.get("destination"), str):
-                rules.append((_rule(item["source"]), item["destination"], origin))
+                rule = _rule(item["source"])
+                if section == "rewrites" and _spa_fallback(rule):
+                    continue
+                rules.append((rule, item["destination"], origin))
     return rules
 
 
@@ -143,13 +175,61 @@ def read_redirects(root: str) -> tuple:
     return rules, found
 
 
-def redirect_for(rules: list, url: str) -> str:
-    """Куда правила переводят адрес; пусто — никуда, на живом сайте будет 404."""
+def _match(rules: list, url: str):
     path = urlsplit(url).path or "/"
     for pattern, target, _ in rules:
-        if pattern.match(path.rstrip("/") or "/") or pattern.match(path):
-            return target
-    return ""
+        found = pattern.match(path.rstrip("/") or "/") or pattern.match(path)
+        if found:
+            return found, target
+    return None, ""
+
+
+def redirect_for(rules: list, url: str) -> str:
+    """Куда правила переводят адрес; пусто — никуда, на живом сайте будет 404."""
+    return _match(rules, url)[1]
+
+
+def destination(rules: list, url: str) -> str:
+    """
+    Полный адрес, куда редирект ведёт этот адрес, с подставленными `:splat`,
+    `:name`, `:name*` и `$1`. Пусто — если цель на другом хосте или
+    подставить нечего: такую цель проверить по сборке нельзя.
+    """
+    found, target = _match(rules, url)
+    if not found:
+        return ""
+    groups = found.groupdict()
+    numbered = found.groups()
+    unknown = []
+
+    def named(m):
+        value = groups.get(m.group(1))
+        if value is None:
+            unknown.append(m.group(0))
+            return ""
+        return value
+
+    def indexed(m):
+        n = int(m.group(1))
+        if not 1 <= n <= len(numbered) or numbered[n - 1] is None:
+            unknown.append(m.group(0))
+            return ""
+        return numbered[n - 1]
+
+    target = target.split("?")[0].split("#")[0]
+    site = urlsplit(url)
+    if "://" in target:
+        parts = urlsplit(target)
+        if parts.netloc.lower() != site.netloc.lower():
+            return ""
+        target = parts.path or "/"
+    if not target.startswith("/"):
+        return ""
+    target = re.sub(r":([A-Za-z_]\w*)\*?", named, target)
+    target = re.sub(r"\$(\d+)", indexed, target)
+    if unknown or "*" in target:
+        return ""
+    return f"{site.scheme}://{site.netloc}{target}"
 
 
 # ── сравнение ─────────────────────────────────────────────────────────────────
@@ -209,11 +289,11 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
         target = redirect_for(rules, page.url)
         level = "critical" if was_open and not target else "info"
         missing_target = ""
-        if target and was_open and target.startswith("/") and not re.search(r"[:*]", target):
-            site = urlsplit(page.url)
-            full = f"{site.scheme}://{site.netloc}{target.split('?')[0].split('#')[0]}"
-            if url_key(full) not in new_keys:
-                level, missing_target = "warning", full
+        # Цель с `:splat` проверяется так же, как простая: `/rent/* /flat/:splat`
+        # при разделе /flats/ ведёт каждую страницу в 404.
+        full = destination(rules, page.url) if target and was_open else ""
+        if full and url_key(full) not in new_keys:
+            level, missing_target = "warning", full
         removed.append({"url": page.url, "level": level, "indexable_before": was_open,
                         "redirect": target or None,
                         "redirect_missing": missing_target or None})

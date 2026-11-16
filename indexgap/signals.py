@@ -35,7 +35,9 @@ def _is_html(page) -> bool:
 
 # ── год в заголовке ──────────────────────────────────────────────────────────
 
-_YEAR = re.compile(r"(?<![\w.,])(20\d\d)(?![\d.,])")
+# Точка или запятая после года — конец фразы («in 2023, explained», «for
+# 2023.»), если за ней не цифра: «2023.5» и «2023,45» — числа, а не годы.
+_YEAR = re.compile(r"(?<![\w.,])(20\d\d)(?!\d|[.,]\d)")
 # Год в имени продукта — версия, а не дата: «SQL Server 2019», «Office 2016»,
 # «Windows 2000». «ES2017» отсекает уже граница слова.
 _PRODUCT = re.compile(
@@ -90,7 +92,7 @@ def _past_years(text: str, current: int) -> set:
     return out
 
 
-def stale_years(pages: list, today: datetime.date = None) -> list:
+def stale_years(pages: list, today: datetime.date = None, base_path: str = "") -> list:
     """
     Прошлый год в заголовках раздела: шаблон, который не обновили.
 
@@ -99,12 +101,18 @@ def stale_years(pages: list, today: datetime.date = None) -> list:
     Забытый шаблон виден по-другому: один и тот же прошлый год стоит в
     заголовках у пяти и больше страниц и не меньше чем у трети раздела.
     Страница, датированная тем же годом, — запись о нём и не считается.
-    Одна находка на раздел.
+    Одна находка на раздел. `base_path` — путь сайта под префиксом
+    (`--site https://example.com/blog`): раздел считается от него, иначе
+    весь сайт оказывался одним разделом `/blog/`.
     """
     current = (today or datetime.date.today()).year
+    base = base_path.strip("/")
     by_section = defaultdict(list)
     for page in pages:
-        parts = urlsplit(page.url).path.strip("/").split("/")
+        path = urlsplit(page.url).path.strip("/")
+        if base and (path == base or path.startswith(base + "/")):
+            path = path[len(base):].strip("/")
+        parts = path.split("/")
         by_section[parts[0] if len(parts) > 1 else ""].append(page)
     issues = []
     for section, members in sorted(by_section.items()):
@@ -129,11 +137,12 @@ def stale_years(pages: list, today: datetime.date = None) -> list:
             # одну. Путь, а не адрес страницы, — чтобы находка не пропадала,
             # когда страница раздела закрыта от индекса, и не уходила в наряд
             # на эту страницу.
-            address = f"/{section}/" if section else "/"
+            prefix = f"/{base}" if base else ""
+            address = f"{prefix}/{section}/" if section else f"{prefix}/"
             issues.append(("warning", address, "stale-year", tr(
                 "у {a0} из {a1} страниц раздела /{a2} в заголовке {a3} год, а сейчас {a4}: "
                 "шаблон заголовка не обновили. Например: {a5}",
-                a0=len(found), a1=len(members), a2=(section + "/") if section else "",
+                a0=len(found), a1=len(members), a2=address.lstrip("/"),
                 a3=year, a4=current, a5=examples)))
     return issues
 
@@ -316,6 +325,56 @@ def text_script(text: str, expected: set = frozenset()) -> tuple:
     return script, counts[script] / len(letters), len(letters)
 
 
+# Языки с иероглифами различаются второй письменностью: японский текст без
+# каны и корейский без хангыля — китайский, а кана под lang="zh" — японский.
+# Японская проза — это кана в каждом предложении (частицы), корейская — хангыль.
+CJK_SECOND_MIN = 0.03
+CJK_KANA_IN_ZH = 0.25
+
+
+def cjk_swap(text: str, expected: set) -> tuple:
+    """(письмо, доля) — когда иероглифический текст написан не на объявленном языке; иначе ("", 0)."""
+    if "han" not in expected:
+        return "", 0.0
+    text = text or ""
+    if len(text) > 2 * LANG_SCRIPT_SAMPLE:
+        text = text[:LANG_SCRIPT_SAMPLE] + "\n" + text[-LANG_SCRIPT_SAMPLE:]
+    letters = "".join(_LETTERS.findall(text))
+    if len(letters) < LANG_SCRIPT_MIN_LETTERS:
+        return "", 0.0
+    share = {name: _count(_SCRIPT_RE[name], letters) / len(letters)
+             for name in ("han", "kana", "hangul")}
+    if expected == {"han"} and share["kana"] >= CJK_KANA_IN_ZH:
+        return "kana", share["kana"]
+    second = ({"kana"} & expected) or ({"hangul"} & expected)
+    if (len(expected) == 2 and second and share[next(iter(second))] < CJK_SECOND_MIN
+            and share["han"] >= LANG_SCRIPT_SHARE):
+        return "han", share["han"]
+    return "", 0.0
+
+
+# Страница документации, где код — заметная часть текста: английские
+# идентификаторы и примеры не значат, что тело не переведено. Один `<code>`
+# с номером формы на странице прозы — не документация.
+CODE_SHARE = 0.2
+_CODE_SPAN = re.compile(r"<(pre|code)\b[^<>]*>(.*?)</\1\s*>", re.I | re.S)
+_TAG = re.compile(r"<[^<>]*>")
+
+
+def _much_code(raw: str, prose: str) -> bool:
+    """Код в `<pre>`/`<code>` — не меньше пятой части букв прозы."""
+    raw = (raw or "")[:400_000]
+    if not _CODE_TAG.search(raw):
+        return False
+    code = sum(len("".join(_LETTERS.findall(_TAG.sub(" ", m.group(2)))))
+               for m in _CODE_SPAN.finditer(raw))
+    if code == 0 and not _CODE_SPAN.search(raw):
+        # Незакрытый `<pre>`: размер не измерить — как раньше, молчим.
+        return True
+    prose_letters = len("".join(_LETTERS.findall(prose or "")))
+    return code >= CODE_SHARE * prose_letters
+
+
 def lang_script(pages: list) -> list:
     """
     `lang` против письма текста. Текст — абзацы основного блока, как у проверок
@@ -330,23 +389,26 @@ def lang_script(pages: list) -> list:
             continue
         prose = "\n".join(page.paragraphs or ())
         script, share, letters = text_script(prose, expected)
-        if letters >= LANG_SCRIPT_MIN_LETTERS and script in expected:
+        swapped, swapped_share = cjk_swap(prose, expected)
+        if swapped:
+            script, share = swapped, swapped_share
+        elif letters >= LANG_SCRIPT_MIN_LETTERS and script in expected:
             # Письмо то, но язык может быть другим: английский под lang="de",
             # индонезийский под lang="ms", арабский под lang="fa". Письменность
             # этого не видит, служебные слова — видят.
             from . import langid
             other = langid.mismatch(page.lang, prose)
-            if other and not (other == "en" and _CODE_TAG.search(page.raw or "", 0, 400_000)):
+            if other and not (other == "en" and _much_code(page.raw, prose)):
                 issues.append(("warning", page.url, "lang-text-mismatch", tr(
                     "страница объявляет lang=«{a0}», а текст написан на другом языке "
                     "({a1}) — похоже, тело страницы не переведено", a0=page.lang.strip(),
                     a1=other)))
             continue
-        if (letters < LANG_SCRIPT_MIN_LETTERS or share < LANG_SCRIPT_SHARE
-                or script in expected):
+        if not swapped and (letters < LANG_SCRIPT_MIN_LETTERS or share < LANG_SCRIPT_SHARE
+                            or script in expected):
             continue
         # Без прозы абзацами становятся код и таблицы, а код — латиница.
-        if script == "latin" and _CODE_TAG.search(page.raw or "", 0, 400_000):
+        if script == "latin" and _much_code(page.raw, prose):
             continue
         issues.append(("warning", page.url, "lang-script-mismatch", tr(
             "страница объявляет lang=«{a0}», а {a1:.0%} букв её текста — {a2}. "

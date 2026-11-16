@@ -96,4 +96,11 @@ MESSAGES = {
     "шаблон пути: {a0}": "path template: {a0}",
     "шаблон уводит файл за пределы --out-dir":
         "the template puts the file outside --out-dir",
+    "{a0}: JSON читается только как массив объектов — одна строка датасета на объект. Или сохрани датасет в CSV или XLSX.":
+        "{a0}: JSON is read only as an array of objects, one dataset row per object. "
+        "Or save the dataset as CSV or XLSX.",
+    'публикация запланирована на {a0} — до этого дня страница не публикуется и не проверялась как открытая':
+        'publication is scheduled for {a0}: until that day the page is not published and was not checked as an open page',
+    '{a0} — страница помечена как черновик и не будет опубликована':
+        '{a0}: the page is marked as a draft and will not be published',
 }
