@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .core import url_key
 from .i18n import tr
 
@@ -35,7 +37,7 @@ _CURRENCY = {
     "฿": "THB", "thb": "THB", "baht": "THB", "บาท": "THB",
     "ريال": "SAR", "sar": "SAR", "درهم": "AED", "aed": "AED", "دراهم": "AED",
     "sgd": "SGD", "myr": "MYR", "idr": "IDR", "aud": "AUD", "cad": "CAD",
-    "chf": "CHF", "try": "TRY", "₺": "TRY", "lira": "TRY", "ليرة": "TRY",
+    "chf": "CHF", "try": "TRY", "tl": "TRY", "₺": "TRY", "lira": "TRY", "ليرة": "TRY",
     "kzt": "KZT", "тенге": "KZT", "uah": "UAH", "грн": "UAH", "₴": "UAH",
     "гривень": "UAH",
     # Доллары по-персидски, на урду, бенгали, хинди, тайском, иврите, украинском,
@@ -99,7 +101,7 @@ def facts_of(page) -> dict:
 
 
 def _clusters(pages: list) -> list:
-    """Связные группы страниц по hreflang (в любую сторону)."""
+    """Связные группы страниц по hreflang языков (в любую сторону), без x-default."""
     from .hreflang import read_alternates
     by_key = {p.key: p for p in pages}
     parent = {k: k for k in by_key}
@@ -111,7 +113,11 @@ def _clusters(pages: list) -> list:
         return k
 
     for page in pages:
-        for _code, href in read_alternates(page):
+        for code, href in read_alternates(page):
+            # x-default часто ведёт на общую страницу выбора языка: через неё
+            # все кластеры сайта слились бы в один с оригиналом без фактов.
+            if (code or "").lower() == "x-default":
+                continue
             other = url_key(href) if href else ""
             if other in by_key and other != page.key:
                 parent[find(page.key)] = find(other)
@@ -140,6 +146,34 @@ def _value(number: str) -> float:
         return float(number)
     except ValueError:
         return 0.0
+
+
+# Единицы, у которых одна валюта: код ISO (`USD`, `EUR`), доллар с буквой
+# страны (`US$`, `S$`) и знаки и слова одной валюты (`€`, `₹`, «евро»).
+# Пересчёт «под тем же знаком» возможен только у `$`, `¥`, «долларов» и
+# «песо»; у процента и у явной валюты 85% → 42% или €35 → €70 — расхождение.
+_EXPLICIT_SIGNS = set("€£₽₹₩₪฿₺₴₸₱₫₦৳円元")
+_EXPLICIT_WORDS = {"euro", "euros", "евро", "یورو", "यूरो", "ยูโร", "יורו", "ユーロ",
+                   "欧元", "유로", "us$", "s$", "a$", "au$", "c$", "ca$", "hk$", "nz$",
+                   "nt$", "r$", "mx$", "col$", "cl$"}
+
+
+def _explicit(shown: str) -> bool:
+    """Цена записана так, что валюту нельзя прочесть иначе."""
+    from .content import CURRENCY_CODES
+    codes = {c.lower() for c in CURRENCY_CODES.split("|")}
+    tokens = re.sub(r"[\d.,'\s\u202f\u00a0]+", " ", shown or "").lower().split()
+    for token in tokens:
+        if token in codes or token in _EXPLICIT_WORDS or any(ch in _EXPLICIT_SIGNS for ch in token):
+            return True
+    return False
+
+
+def _may_convert(kind: str, added: list, missing: list) -> bool:
+    """Может ли разница быть пересчётом: не процент и не явная валюта с обеих сторон."""
+    if kind == "%":
+        return False
+    return not all(_explicit(shown) for shown in added + missing)
 
 
 def _converted(added: list, missing: list) -> bool:
@@ -189,7 +223,9 @@ def drift(pages: list) -> list:
                     continue
                 added = sorted(set(ours) - set(theirs))
                 missing = sorted(set(theirs) - set(ours))
-                if added and missing and not _converted(added, missing):
+                if added and missing and not (
+                        _may_convert(kind, [ours[n] for n in added], [theirs[n] for n in missing])
+                        and _converted(added, missing)):
                     issues.append(("warning", page.url, "fact-drift", tr(
                         "в переводе {a0}, а в оригинале ({a1}) {a2} — цифра разошлась при "
                         "переводе или осталась старой",
