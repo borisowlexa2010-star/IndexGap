@@ -31,7 +31,7 @@ import re
 from collections import Counter, defaultdict, deque
 
 from . import hreflang
-from .core import EMPTY_MOUNT, NOT_LIVE, SourceError, drop_spans, is_dense
+from .core import EMPTY_MOUNT, INERT, NOT_LIVE, SourceError, drop_spans, is_dense
 from .core import ALWAYS_SKIP, tokenize, url_key
 from urllib.parse import urlsplit
 from .publish import indexable
@@ -510,12 +510,16 @@ def _redirect_target(page) -> str:
         return ""
     live = drop_spans(raw, NOT_LIVE)
     if by_meta:
-        for tag in _META_TAG.findall(live):
+        for tag in _META_TAG.findall(drop_spans(live, INERT)):
             if not _REFRESH.search(tag):
                 continue
             found = _REFRESH_CONTENT.search(tag)
             if found and float(found.group(1)) <= 1:
-                return urljoin(page.url, found.group(2).strip())
+                target = urljoin(page.url, found.group(2).strip())
+                # Переадресация на себя — не заглушка, а страница, которая
+                # перезагружается: её содержимое и есть то, что видит поисковик.
+                if url_key(target) != url_key(page.url):
+                    return target
     if by_script:
         for script in _SCRIPT.findall(live):
             found = _NEXT_REDIRECT.search(script)
@@ -1005,9 +1009,21 @@ def _a_variant_of(page, target) -> bool:
     страницу с другим именем и другим текстом — это не вариант.
     """
     path, home = urlsplit(page.url).path, urlsplit(target.url).path
-    if _slug(page.url) == _slug(target.url) or path.startswith(home.rstrip("/") + "/"):
+    if _slug(page.url) == _slug(target.url):
+        return True
+    # Вариантом считается только служебная копия под страницей: `/x/print/`,
+    # `/x/amp/`, `/x/page/2/`. Раньше подходил любой адрес под целью, и для
+    # canonical на главную или на хаб раздела вариантом становился весь сайт:
+    # ошибка шаблона пряталась вместе со всеми находками о страницах.
+    prefix = home.rstrip("/") + "/"
+    if path.startswith(prefix) and _VARIANT_TAIL.match(path[len(prefix):].strip("/")):
         return True
     return _text_overlap(page, target) >= CONFIG["near_duplicate"]
+
+
+_VARIANT_TAIL = re.compile(
+    r"^(?:(?:index[.-])?(?:print|printable|print-version|printer-friendly|amp|pdf|embed|"
+    r"preview|mobile|m)(?:\.html?)?|(?:page/|p/)?\d+(?:/)?|page-\d+(?:\.html?)?)$", re.I)
 
 
 def misdirected(pages: list) -> dict:
@@ -1585,24 +1601,40 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
             and inside(i[1]) else i for i in issues]
 
 
-def closed_off_map(issues: list, sitemap_urls) -> list:
+def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
     """
     noindex на странице, которой нет и в sitemap, — два согласованных решения
     владельца, а не ошибка шаблона: служебные страницы, юридические, закрытые
     по стране. На живом многоязычном каталоге все 136 критичных noindex были такими и
     вытесняли настоящие беды из «чинить в этом порядке». Закрытая страница,
     которая стоит в sitemap, — противоречие и остаётся критичной.
+
+    `complete=False` — часть sitemap не прочитана: «нет в списке» тогда не
+    значит «убрана из sitemap», и критичные noindex не понижаются.
     """
     if not sitemap_urls:
         return issues
-    listed = {url_key(u) for u in sitemap_urls}
+    listed = set()
+    for u in sitemap_urls:
+        key = url_key(u)
+        # `/a/?utm_source=feed` в sitemap — это страница `/a/`, как и в воронке.
+        listed |= {key, key.split("?", 1)[0]}
     out = []
     for item in issues:
-        if (item[0] == "critical" and item[2] == "noindex" and item[1]
-                and url_key(item[1]) not in listed):
+        key = url_key(item[1]) if item[1] else ""
+        if (complete and item[0] == "critical" and item[2] == "noindex" and key
+                and key not in listed):
             item = ("info", item[1], item[2], tr(
                 "страница закрыта от индексации и убрана из sitemap — похоже на "
                 "решение, а не на ошибку шаблона"), *item[4:])
+        elif (item[0] == "info" and item[2] == "noindex" and key in listed
+              and _slug(item[1]) not in _CLOSED_BY_DESIGN):
+            # Закрытый раздел понижен до сведений ещё при разборе сборки, когда
+            # sitemap не было видно. Раздел, который всё ещё отдан в sitemap,
+            # — то же противоречие, что и одна такая страница.
+            item = ("critical", item[1], item[2], tr(
+                "страница закрыта от индексации, но стоит в sitemap — противоречие: "
+                "если закрытие не задумано, трафика не будет"), *item[4:])
         out.append(item)
     return out
 

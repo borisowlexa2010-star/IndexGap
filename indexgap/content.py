@@ -1405,6 +1405,37 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
     return issues
 
 
+def _other_draft(page) -> list:
+    """
+    Остальные пометки черновика, которые понимает `publish.is_draft`: `draft:
+    true` (Hugo), `published: false` (Jekyll), `status: wip`, дата публикации в
+    будущем. Такую страницу пакет не берёт в sitemap и IndexNow, а её находки
+    о содержимом снимает. Раньше об этом не говорилось ничего: страница просто
+    исчезала из отчёта.
+    """
+    from datetime import date
+    from .publish import is_draft
+    if not is_draft(page):
+        return []
+    meta = {str(k).lower().replace("-", "_"): v for k, v in (page.meta or {}).items()}
+    for key in ("publishdate", "publish_date"):
+        value = str(meta.get(key, "")).strip().strip("'\"")[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", value) and value > date.today().isoformat():
+            return [("info", page.url, "still-draft",
+                     tr("публикация запланирована на {a0} — до этого дня страница не "
+                        "публикуется и не проверялась как открытая", a0=value))]
+    label = "draft"
+    for key, values in (("status", ("wip", "unpublished")), ("draft", ("true", "yes", "1")),
+                        ("published", ("false", "no", "0"))):
+        value = str(meta.get(key, "")).strip().lower()
+        if value in values:
+            label = f"{key}: {value}"
+            break
+    return [("critical", page.url, "still-draft",
+             tr("{a0} — страница помечена как черновик и не будет опубликована",
+                a0=label))]
+
+
 def check_brief(pages: list, cfg: dict = None) -> list:
     """Выполнен ли бриф: не остались ли следы заготовки и вменяемы ли анкоры."""
     cfg = {**CONFIG, **(cfg or {})}
@@ -1424,6 +1455,8 @@ def check_brief(pages: list, cfg: dict = None) -> list:
         if status in ("draft", "черновик", "todo"):
             issues.append(("critical", page.url, "still-draft",
                            tr("status: {a0} — страница помечена как незаконченная", a0=status)))
+        else:
+            issues += _other_draft(page)
 
         vague_list = {v.lower() for v in cfg.get("vague_anchors", ())}
         # Названия городов — «Омск», «Сочи», «Тула» — короткие и совершенно
