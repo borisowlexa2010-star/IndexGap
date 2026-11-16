@@ -964,8 +964,9 @@ class TestFunnelArithmetic(unittest.TestCase):
     def test_cited_pages_outside_the_site_are_unknown(self):
         result = doctor.funnel(site_pages("a"), cited={"copilot": {f"{SITE}/a/": 2,
                                                                   f"{SITE}/x/": 1}})
-        self.assertEqual(result["cited_unknown"], ["//example.com/x"])
-        self.assertEqual(result["cited_top"], [(f"{SITE}/a/", 2), ("//example.com/x", 1)])
+        # Печатается адрес, как его процитировали, а не ключ сравнения.
+        self.assertEqual(result["cited_unknown"], [f"{SITE}/x/"])
+        self.assertEqual(result["cited_top"], [(f"{SITE}/a/", 2), (f"{SITE}/x/", 1)])
 
 
 class TestCrossEngine(unittest.TestCase):

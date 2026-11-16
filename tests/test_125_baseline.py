@@ -188,19 +188,19 @@ class TestDoctorWithoutIndex(unittest.TestCase):
         self.assertEqual(trend["recovered"], [])
         self.assertEqual(trend["newly_not_indexed"], [])
         self.assertEqual(trend["segments"]["rows"], [])
-        self.assertEqual(trend["unmeasured"], ["index"])
+        self.assertEqual(trend["not_compared"], ["index"])
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             cli._print_trend(trend, "old.json")
         self.assertNotIn("вернулись в индекс", out.getvalue())
-        self.assertIn("индекс мерил только один", out.getvalue())
+        self.assertIn("только в одном из прогонов", out.getvalue())
 
     def test_both_runs_with_an_index_still_compare(self):
         f = {"has_index": True, "has_sitemap": True, "missing_from_sitemap": [], "steps": []}
         trend = doctor.compare_runs({"funnel": dict(f, not_indexed=[])},
                                     {"funnel": dict(f, not_indexed=[SITE + "/a/"])})
         self.assertEqual(trend["recovered"], [SITE + "/a/"])
-        self.assertEqual(trend["unmeasured"], [])
+        self.assertEqual(trend["not_compared"], [])
 
 
 class TestHistory(unittest.TestCase):

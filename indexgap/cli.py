@@ -246,11 +246,11 @@ def _collect_indexed(args) -> tuple:
     for note in result["notes"]:
         print(f"  ! {note}")
     if by_engine:
-        summary = ", ".join(f"{n}: {len(u)}" for n, u in sorted(by_engine.items()))
+        summary = ", ".join(f"{n}: {doctor.count_pages(u)}" for n, u in sorted(by_engine.items()))
         print(tr("Индексация — {a0}", a0=summary))
     if by_source:
         summary = ", ".join(
-            f"{n} ({tr(sources.KIND_TITLE[sources.kind_of(n)])}): {len(u)}"
+            f"{n} ({tr(sources.KIND_TITLE[sources.kind_of(n)])}): {doctor.count_pages(u)}"
             for n, u in sorted(by_source.items()))
         print(tr("Прочие источники — {a0}", a0=summary))
     for name, counts in sorted(cited.items()):
@@ -1319,13 +1319,11 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
     if trend.get("site_changed"):
         print(tr("  ! прогоны для разных сайтов — сравнение почти ничего не значит"))
     quiet = True
-    for name in trend.get("unmeasured") or ():
+    names = {"index": tr("индекс"), "sitemap": "sitemap"}
+    for step in trend.get("not_compared") or ():
         quiet = False
-        print(tr("  ! индекс мерил только один из прогонов (--indexed) — выпавшие и "
-                 "вернувшиеся в индекс и разрывы по разделам не сравниваются")
-              if name == "index" else
-              tr("  ! sitemap сверял только один из прогонов — выпавшие из sitemap "
-                 "и разрывы по разделам не сравниваются"))
+        print(tr("  ! данные для шага «{a0}» есть только в одном из прогонов — "
+                 "этот шаг и разделы не сравниваются", a0=names.get(step, step)))
     for step in trend["steps"]:
         quiet = False
         print(tr("  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})",
@@ -1564,6 +1562,12 @@ def _print_citations(funnel_result: dict, limit: int = 10) -> None:
             print(f"         {key}")
         print(tr("         → удалена, переименована или не попала в сборку. "
                  "Ответы ИИ ведут людей на неё до сих пор."))
+    other = funnel_result.get("cited_other_hosts") or []
+    if other:
+        print(tr("\nЦитируется страница другого хоста ({a0}) — к этой сборке она не "
+                 "относится:", a0=len(other)))
+        for url in sorted(other, key=lambda u: -counts.get(u, 0))[:limit]:
+            print(f"  {counts.get(url, 0):>6}  {url}")
     off_map = funnel_result.get("cited_not_in_sitemap") or []
     if off_map:
         print(tr("\nЦитируется, но в sitemap нет ({a0}):", a0=len(off_map)))

@@ -624,4 +624,10 @@ MESSAGES = {
         '  ! only one of the runs measured the index (--indexed) — pages that dropped out of or came back to the index and section gaps are not compared',
     '  ! sitemap сверял только один из прогонов — выпавшие из sitemap и разрывы по разделам не сравниваются':
         '  ! only one of the runs checked the sitemap — pages that dropped out of the sitemap and section gaps are not compared',
+    'индекс':
+        'index',
+    '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':
+        '  ! only one of the runs has data for the "{a0}" step — that step and the sections are not compared',
+    '\nЦитируется страница другого хоста ({a0}) — к этой сборке она не относится:':
+        '\nCited pages on another host ({a0}) — they are not part of this build:',
 }
