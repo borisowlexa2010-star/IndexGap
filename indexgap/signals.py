@@ -316,6 +316,56 @@ def text_script(text: str, expected: set = frozenset()) -> tuple:
     return script, counts[script] / len(letters), len(letters)
 
 
+# Языки с иероглифами различаются второй письменностью: японский текст без
+# каны и корейский без хангыля — китайский, а кана под lang="zh" — японский.
+# Японская проза — это кана в каждом предложении (частицы), корейская — хангыль.
+CJK_SECOND_MIN = 0.03
+CJK_KANA_IN_ZH = 0.25
+
+
+def cjk_swap(text: str, expected: set) -> tuple:
+    """(письмо, доля) — когда иероглифический текст написан не на объявленном языке; иначе ("", 0)."""
+    if "han" not in expected:
+        return "", 0.0
+    text = text or ""
+    if len(text) > 2 * LANG_SCRIPT_SAMPLE:
+        text = text[:LANG_SCRIPT_SAMPLE] + "\n" + text[-LANG_SCRIPT_SAMPLE:]
+    letters = "".join(_LETTERS.findall(text))
+    if len(letters) < LANG_SCRIPT_MIN_LETTERS:
+        return "", 0.0
+    share = {name: _count(_SCRIPT_RE[name], letters) / len(letters)
+             for name in ("han", "kana", "hangul")}
+    if expected == {"han"} and share["kana"] >= CJK_KANA_IN_ZH:
+        return "kana", share["kana"]
+    second = ({"kana"} & expected) or ({"hangul"} & expected)
+    if (len(expected) == 2 and second and share[next(iter(second))] < CJK_SECOND_MIN
+            and share["han"] >= LANG_SCRIPT_SHARE):
+        return "han", share["han"]
+    return "", 0.0
+
+
+# Страница документации, где код — заметная часть текста: английские
+# идентификаторы и примеры не значат, что тело не переведено. Один `<code>`
+# с номером формы на странице прозы — не документация.
+CODE_SHARE = 0.2
+_CODE_SPAN = re.compile(r"<(pre|code)\b[^<>]*>(.*?)</\1\s*>", re.I | re.S)
+_TAG = re.compile(r"<[^<>]*>")
+
+
+def _much_code(raw: str, prose: str) -> bool:
+    """Код в `<pre>`/`<code>` — не меньше пятой части букв прозы."""
+    raw = (raw or "")[:400_000]
+    if not _CODE_TAG.search(raw):
+        return False
+    code = sum(len("".join(_LETTERS.findall(_TAG.sub(" ", m.group(2)))))
+               for m in _CODE_SPAN.finditer(raw))
+    if code == 0 and not _CODE_SPAN.search(raw):
+        # Незакрытый `<pre>`: размер не измерить — как раньше, молчим.
+        return True
+    prose_letters = len("".join(_LETTERS.findall(prose or "")))
+    return code >= CODE_SHARE * prose_letters
+
+
 def lang_script(pages: list) -> list:
     """
     `lang` против письма текста. Текст — абзацы основного блока, как у проверок
@@ -330,23 +380,26 @@ def lang_script(pages: list) -> list:
             continue
         prose = "\n".join(page.paragraphs or ())
         script, share, letters = text_script(prose, expected)
-        if letters >= LANG_SCRIPT_MIN_LETTERS and script in expected:
+        swapped, swapped_share = cjk_swap(prose, expected)
+        if swapped:
+            script, share = swapped, swapped_share
+        elif letters >= LANG_SCRIPT_MIN_LETTERS and script in expected:
             # Письмо то, но язык может быть другим: английский под lang="de",
             # индонезийский под lang="ms", арабский под lang="fa". Письменность
             # этого не видит, служебные слова — видят.
             from . import langid
             other = langid.mismatch(page.lang, prose)
-            if other and not (other == "en" and _CODE_TAG.search(page.raw or "", 0, 400_000)):
+            if other and not (other == "en" and _much_code(page.raw, prose)):
                 issues.append(("warning", page.url, "lang-text-mismatch", tr(
                     "страница объявляет lang=«{a0}», а текст написан на другом языке "
                     "({a1}) — похоже, тело страницы не переведено", a0=page.lang.strip(),
                     a1=other)))
             continue
-        if (letters < LANG_SCRIPT_MIN_LETTERS or share < LANG_SCRIPT_SHARE
-                or script in expected):
+        if not swapped and (letters < LANG_SCRIPT_MIN_LETTERS or share < LANG_SCRIPT_SHARE
+                            or script in expected):
             continue
         # Без прозы абзацами становятся код и таблицы, а код — латиница.
-        if script == "latin" and _CODE_TAG.search(page.raw or "", 0, 400_000):
+        if script == "latin" and _much_code(page.raw, prose):
             continue
         issues.append(("warning", page.url, "lang-script-mismatch", tr(
             "страница объявляет lang=«{a0}», а {a1:.0%} букв её текста — {a2}. "

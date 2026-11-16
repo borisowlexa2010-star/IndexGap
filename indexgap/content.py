@@ -75,7 +75,14 @@ _SP = r"[   ]"
 # не считалось процентом вовсе — выдуманная доля проходила молча.
 _SAME_SIGNS = str.maketrans({"٫": ".", "٬": ",", "٪": "%",
                              "％": "%", "﹪": "%", "’": "'",
-                             "ʼ": "'", "，": ",", "．": "."})
+                             "ʼ": "'", "，": ",", "．": ".",
+                             # Невидимые знаки направления письма: RTL-редакторы
+                             # ставят `&rlm;` рядом с числом, и «35‏ دولارا» не
+                             # читалось как цена.
+                             "\u200e": None, "\u200f": None, "\u061c": None,
+                             "\u2066": None, "\u2067": None, "\u2068": None,
+                             "\u2069": None, "\u202a": None, "\u202b": None,
+                             "\u202c": None, "\u202d": None, "\u202e": None})
 
 
 def _same_signs(text: str) -> str:
@@ -124,6 +131,11 @@ PERCENT_WORDS = (
     "pour\\s?cent|per\\s?cento|por\\s?cento|procent|persen|peratus|phần\\s?trăm|"
     "درصد|بالمائة|بالمئة|في\\s?المائة|प्रतिशत|শতাংশ|فیصد|เปอร์เซ็นต์|אחוז(?:ים)?"
 )
+# Знак процента перед числом: так пишут по-турецки («%85'i»), по-курдски и
+# по-баскски. Перед знаком — начало, пробел или скобка, а не буква, цифра или
+# `=`/`/`: `a%20b` и `?q=%20` в адресе — не проценты.
+PERCENT_BEFORE = re.compile(r"(?:(?<=^)|(?<=[\s(«\"“„]))%(" + NUMBER + r")(?![\d%$]|[^\W\d_])", re.U)
+
 PERCENT_WORD = re.compile(
     NOT_INSIDE + r"(" + NUMBER + r")" + _SP + r"?(?:" + PERCENT_WORDS + r")(?![^\W\d_])",
     re.I | re.U)
@@ -155,7 +167,7 @@ CURRENCY_WORDS = (
     "रुपये|रुपया|रुपए|บาท|đồng|"
     "دلار|یورو|تومن|ڈالر|روپے|روپیہ|ডলার|টাকা|রুপি|डॉलर|डालर|यूरो|"
     "ดอลลาร์|ยูโร|דולר|דולרים|יורו|долар(?:ів|а|и)?|гривень|"
-    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|"
+    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|TL|"
     "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로|엔"
 )
 # Валютные слова CJK пишутся вплотную к следующему слову («35ドルです»), поэтому
@@ -316,6 +328,10 @@ def _numbers_in(text: str, fact_pattern) -> dict:
         if number:
             found.setdefault(number, "%")
     for match in PERCENT_WORD.finditer(text or ""):
+        number = _norm_number(match.group(1))
+        if number:
+            found.setdefault(number, "%")
+    for match in PERCENT_BEFORE.finditer(text or ""):
         number = _norm_number(match.group(1))
         if number:
             found.setdefault(number, "%")
