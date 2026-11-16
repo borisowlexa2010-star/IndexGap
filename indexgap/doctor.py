@@ -1609,15 +1609,30 @@ def compare_runs(current: dict, previous: dict) -> dict:
                           "before": before.get("count") or 0,
                           "after": step.get("count") or 0, "delta": delta})
 
-    def moved(field):
+    # Прогон без выгрузки индекса (или без sitemap) этот этап не мерил: его
+    # пустой список — «не знаем», а не «все вернулись». Сравнивать можно
+    # только то, что мерили оба прогона.
+    def measured(flag):
+        return bool(cur_f.get(flag)) and bool(old_f.get(flag))
+
+    unmeasured = [name for name, flag in (("index", "has_index"), ("sitemap", "has_sitemap"))
+                  if bool(cur_f.get(flag)) != bool(old_f.get(flag))]
+
+    def moved(field, flag):
+        if not measured(flag):
+            return [], []
         now, was = _keys(cur_f.get(field) or ()), _keys(old_f.get(field) or ())
         shown = {url_key(u): u for u in list(old_f.get(field) or ()) + list(cur_f.get(field) or ())}
         return (sorted(shown[k] for k in now - was), sorted(shown[k] for k in was - now))
 
-    newly_lost, recovered = moved("not_indexed")
-    newly_off_map, back_on_map = moved("missing_from_sitemap")
+    newly_lost, recovered = moved("not_indexed", "has_index")
+    newly_off_map, back_on_map = moved("missing_from_sitemap", "has_sitemap")
 
     def sections(key):
+        if key == "segments" and unmeasured:
+            # «Потеряно» в разделе считается по индексу, а без него — по
+            # sitemap: числа разных прогонов значат разное.
+            return {"rows": [], "new_gaps": [], "closed_gaps": []}
         cur = {r["segment"]: r for r in ((current.get(key) or {}).get("rows") or ())}
         old = {r["segment"]: r for r in ((previous.get(key) or {}).get("rows") or ())}
         hl_now = {h["segment"] for h in ((current.get(key) or {}).get("highlighted") or ())}
@@ -1649,4 +1664,5 @@ def compare_runs(current: dict, previous: dict) -> dict:
         "segments": sections("segments"), "ai_segments": sections("ai_segments"),
         "bots": bots,
         "site_changed": (current.get("site") or "") != (previous.get("site") or ""),
+        "unmeasured": unmeasured,
     }

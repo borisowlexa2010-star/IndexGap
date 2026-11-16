@@ -36,6 +36,7 @@ import json
 import os
 import re
 from collections import Counter, defaultdict
+from .subject import Said
 from .core import (BRIEF_MARKERS, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, brief_prose,
                    find_slots, tokenize, visible_text)
 from .i18n import tr
@@ -911,10 +912,11 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         if unknown_strong:
             issues.append((
                 "critical", page.url, "unsupported-number",
-                tr("в тексте есть числа, которых нет в данных: ")
-                + ", ".join(_shown(n, u) for n, u in
-                            sorted(unknown_strong.items())[:6])
-                + (tr(" и ещё") if len(unknown_strong) > 6 else "")))
+                Said(tr("в тексте есть числа, которых нет в данных: ")
+                     + ", ".join(_shown(n, u) for n, u in
+                                 sorted(unknown_strong.items())[:6])
+                     + (tr(" и ещё") if len(unknown_strong) > 6 else ""),
+                     unknown_strong)))
         if unknown_weak:
             # Одна строка на страницу и уровень «мелочь»: это список
             # для просмотра глазами, а не приговор. Раньше каждое такое
@@ -927,10 +929,11 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                                            -len(kv[0]), kv[0]))[:8]
             issues.append((
                 "info", page.url, "check-by-eye",
-                tr("числа, которых нет в данных — просмотри глазами: ")
-                + ", ".join(shown(n, u) for n, u in listed)
-                + (tr(" и ещё {a0}", a0=len(unknown_weak) - len(listed))
-                   if len(unknown_weak) > len(listed) else "")))
+                Said(tr("числа, которых нет в данных — просмотри глазами: ")
+                     + ", ".join(shown(n, u) for n, u in listed)
+                     + (tr(" и ещё {a0}", a0=len(unknown_weak) - len(listed))
+                        if len(unknown_weak) > len(listed) else ""),
+                     unknown_weak)))
     return issues
 
 

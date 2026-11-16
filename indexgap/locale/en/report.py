@@ -365,4 +365,6 @@ MESSAGES = {
         "The page's text is in a different language than its lang: the page body was not translated.",
     'Цена или процент в переводе не совпадает с оригиналом: читатель этой версии видит другую цифру.':
         'A price or percentage in the translation differs from the original: readers of this version see another number.',
+    '<li><strong>{a0}</strong> — весь сайт: {a1}</li>':
+        '<li><strong>{a0}</strong> — whole site: {a1}</li>',
 }

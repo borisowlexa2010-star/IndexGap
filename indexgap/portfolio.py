@@ -134,9 +134,21 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         result["pages"] = len(pages)
         result["notes"] += problems
 
+        # indexgap.json проекта действует и здесь, как в `check`: профиль и
+        # датасет оттуда, если портфель их не назвал. Иначе один и тот же
+        # проект получал в портфеле другой вердикт — без сверки фактов и
+        # без проверки дат.
+        own = settings.load_config(spec["root"], spec.get("config", ""))
+        dataset = spec.get("dataset")
+        if not dataset and isinstance(own.get("dataset"), str) and own["dataset"]:
+            dataset = os.path.join(os.path.dirname(own.get("_path") or spec["root"]),
+                                   own["dataset"])
+        if not spec.get("profile") and isinstance(own.get("profile"), str) and own["profile"]:
+            result["profile"] = own["profile"]
+
         rows = []
-        if spec.get("dataset"):
-            data = generate.read_dataset(spec["dataset"])
+        if dataset:
+            data = generate.read_dataset(dataset)
             rows = data["rows"]
             result["notes"] += data["problems"]
 
