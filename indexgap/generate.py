@@ -158,9 +158,67 @@ def _single_column_delimiter(text: str) -> str:
     return _SINGLE_COLUMN_SEPARATORS[0]
 
 
+_JSON_EXT = (".json", ".jsonl", ".ndjson")
+
+
+def _json_rows(text: str, path: str):
+    """
+    Строки из JSON: массив объектов, `{"rows": [...]}` или JSON Lines.
+
+    Раньше JSON читался как CSV: массив превращался в шапку без строк, сверка
+    фактов молча не делалась, и `--strict` проходил с выдуманной ценой.
+    Возвращает (строки, колонки) или None, если это не JSON.
+    """
+    import json
+
+    body = (text or "").lstrip("\ufeff \t\r\n")
+    by_name = path.lower().endswith(_JSON_EXT)
+    if not by_name and not re.match(r"\[\s*\{", body):
+        return None
+    try:
+        data = json.loads(body)
+    except ValueError:
+        try:
+            data = [json.loads(line) for line in body.splitlines() if line.strip()]
+        except ValueError:
+            data = None
+    if isinstance(data, dict):
+        lists = [v for v in data.values() if isinstance(v, list)]
+        data = lists[0] if len(lists) == 1 else None
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        if by_name:
+            raise SourceError(tr("{a0}: JSON читается только как массив объектов — одна строка датасета на объект. Или сохрани датасет в CSV или XLSX.", a0=path))
+        return None
+
+    def cell(value):
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (list, tuple)):
+            return ", ".join(cell(v) for v in value)
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value).strip()
+
+    fields, rows = [], []
+    for item in data:
+        row = {}
+        for key, value in item.items():
+            name = str(key).strip()
+            if name not in fields:
+                fields.append(name)
+            row[name] = cell(value)
+        if any(v for v in row.values()):
+            rows.append(row)
+    if not fields:
+        raise SourceError(tr("{a0}: не удалось прочитать шапку — файл пустой?", a0=path))
+    return rows, fields
+
+
 def read_dataset(path: str) -> dict:
     """
-    Читает семантику: CSV или XLSX.
+    Читает семантику: CSV, XLSX или JSON (массив объектов).
 
     Кодировка определяется, а не предполагается: русский Excel сохраняет CSV
     в cp1251 с точкой с запятой, и раньше такой файл — самый частый вход —
@@ -193,6 +251,11 @@ def read_dataset(path: str) -> dict:
                 "delimiter": "", "problems": []}
 
     text, encoding = read_text(path)
+    as_json = _json_rows(text, path)
+    if as_json is not None:
+        rows, fields = as_json
+        return {"rows": rows, "fields": fields, "encoding": encoding,
+                "delimiter": "", "problems": []}
     # NUL внутри ячейки: Python до 3.11 бросал `_csv.Error: line contains NUL`.
     text = text.replace("\x00", "")
     first_line = text.splitlines()[0] if text.strip() else ""

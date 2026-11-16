@@ -278,6 +278,9 @@ def _read_rows(args):
     data = generate.read_dataset(args.dataset)
     for problem in data["problems"]:
         print(f"  ! {problem}")
+    if not data["rows"]:
+        # Пустой датасет — не «всё сходится»: сверка фактов просто не шла.
+        print("  ! " + tr("в датасете {a0} нет ни одной строки — числа страниц не сверялись", a0=args.dataset))
     resolve_keyword_field(args, data["fields"], args.dataset)
     return data["rows"]
 

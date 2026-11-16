@@ -614,4 +614,6 @@ MESSAGES = {
         'History: {a0} — chart {a1}',
     'папка истории: прогон сохраняется туда, сравнивается с прошлым из неё, а рядом рисуется trend.html':
         'a history folder: the run is saved there, compared with the previous one in it, and trend.html is drawn beside it',
+    "в датасете {a0} нет ни одной строки — числа страниц не сверялись":
+        "the dataset {a0} has no rows — the numbers on the pages were not checked",
 }
