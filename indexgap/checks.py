@@ -37,6 +37,7 @@ from urllib.parse import urlsplit
 from .publish import indexable
 from .settings import display_width, text_volume
 from .i18n import tr
+from .subject import Said
 
 # ── настройки, которые имеет смысл крутить под свой проект ────────────────────
 CONFIG = {
@@ -1814,10 +1815,10 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             shown = ", ".join("/" + p.split("/", 3)[-1] if p.count("/") >= 3 else "/"
                               for p in paths[:3])
             more = tr(" и ещё {a0}", a0=len(paths) - 3) if len(paths) > 3 else ""
-            issues.append(("warning", url, "broken-link", tr(
+            issues.append(("warning", url, "broken-link", Said(tr(
                 "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом "
                 "сайте это 404, если сервер их не перенаправляет",
-                a0=len(paths), a1=shown, a2=more)))
+                a0=len(paths), a1=shown, a2=more), (url_key(p) for p in paths))))
         issues += wrong_form_issues(pages, twins)
     if graph.get("home_redirected_from"):
         notes.append(tr(
@@ -1894,12 +1895,13 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         found = sorted(partners[url], reverse=True)
         best, other = found[0]
         more = tr(" и ещё {a0}", a0=len(found) - 1) if len(found) > 1 else ""
+        twins = [url_key(u) for _, u in found]
         if best >= cfg["near_duplicate"]:
             issues.append(("critical", url, "near-duplicate",
-                           tr("совпадает на {a0:.0%} со страницей {a1}{a2} — поисковик оставит в индексе одну", a0=best, a1=other, a2=more)))
+                           Said(tr("совпадает на {a0:.0%} со страницей {a1}{a2} — поисковик оставит в индексе одну", a0=best, a1=other, a2=more), twins)))
         else:
             issues.append(("info", url, "similar",
-                           tr("похожа на {a0:.0%} на {a1}{a2}", a0=best, a1=other, a2=more)))
+                           Said(tr("похожа на {a0:.0%} на {a1}{a2}", a0=best, a1=other, a2=more), twins)))
 
     # Дубли живут группами, а не парами. На живом каталоге виз 588 страниц
     # с кодом `near-duplicate` оказались 62 группами одинаковых по смыслу

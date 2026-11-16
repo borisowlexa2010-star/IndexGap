@@ -32,7 +32,24 @@ def runs(root: str) -> list:
     folder = _runs_dir(root)
     if not os.path.isdir(folder):
         return []
-    return [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.endswith(".json")]
+    names = [n for n in os.listdir(folder) if n.endswith(".json")]
+    return [os.path.join(folder, n) for n in sorted(names, key=_order)]
+
+
+def _order(name: str) -> tuple:
+    """
+    Порядок прогонов: время, затем номер прогона в ту же секунду.
+
+    Строкой «T10-00-00-2.json» стоит раньше «T10-00-00.json» («-» меньше
+    «.»), а «-10» раньше «-2»: следующий прогон сравнивался не с последним.
+    """
+    stem = name[:-5]
+    head, tail = stem[:19], stem[19:]
+    if not tail:
+        return (head, 1, name)
+    if tail.startswith("-") and tail[1:].isdigit():
+        return (head, int(tail[1:]), name)
+    return (head, 0, name)
 
 
 def latest(root: str) -> dict:
@@ -83,15 +100,21 @@ def series(root: str) -> dict:
         for step in (data.get("funnel") or {}).get("steps") or ():
             if step.get("id") == "in-source":
                 continue                  # строки «из них в …» загромождают график
-            name = (step.get("name") or step.get("id") or "").strip()
-            out.setdefault(name, []).append((len(dates) - 1, step.get("count") or 0))
+            # Линия — по id шага, а не по подписи: подпись переведена, и
+            # прогон на en и прогон на ru раздваивали каждый шаг.
+            key = (step.get("id") or step.get("name") or "", step.get("engine") or "")
+            line = out.setdefault(key, {"name": "", "points": []})
+            line["name"] = (step.get("name") or step.get("id") or "").strip()
+            line["points"].append((len(dates) - 1, step.get("count") or 0))
     # Дата — если все прогоны в разные дни; если нет, со временем.
     if len({d[:10] for d in dates}) == len(dates):
         dates = [d[:10] for d in dates]
-    return {"dates": dates, "lines": out}
+    # Подпись — из последнего прогона, где шаг был.
+    return {"dates": dates, "lines": {line["name"]: line["points"] for line in out.values()}}
 
 
-_COLORS = ("#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#4b5563")
+_COLORS = ("#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#4b5563",
+           "#db2777", "#65a30d", "#92400e")
 
 
 def render(root: str, site: str = "") -> str:

@@ -453,6 +453,36 @@ def build(pages: list, analysis: dict, cfg: dict = None,
                        "title": tr("Починка страницы"), "body": "\n".join(body),
                        "count": len(found),
                        "worst": min(order.get(l, 3) for l, _c, _m in found)})
+    return _unique_names(briefs)
+
+
+def _unique_names(briefs: list) -> list:
+    """
+    У каждого наряда свой файл. `/rent/new.york/` и `/rent/new-york/` дают
+    одно имя `rent/new-york.md`, и второй наряд затирал первый: критичная
+    находка оставалась без наряда, а счётчик файлов врал. Имя без регистра —
+    на macOS и Windows `Rent.md` и `rent.md` тоже один файл. Простое имя
+    достаётся первому по адресу, остальным — `-2`, `-3`, стабильно между
+    прогонами.
+    """
+    groups = defaultdict(list)
+    for brief in briefs:
+        groups[brief["name"].lower()].append(brief)
+    taken = set(groups)
+    for same in groups.values():
+        if len(same) < 2:
+            continue
+        same.sort(key=lambda b: (b.get("url") or "", b.get("body") or ""))
+        stem = same[0]["name"][:-3]
+        n = 1
+        for brief in same[1:]:
+            while True:
+                n += 1
+                name = f"{stem}-{n}.md"
+                if name.lower() not in taken:
+                    break
+            taken.add(name.lower())
+            brief["name"] = name
     return briefs
 
 
