@@ -10,6 +10,7 @@
 
 import json
 import os
+import pathlib
 import re
 import shutil
 import tempfile
@@ -106,14 +107,14 @@ class TestPackaging(unittest.TestCase):
         """Версия пишется в одном месте. Раньше поднять её только в `__init__`
         значило пройти все проверки и собрать колесо со старым номером."""
         from indexgap import __version__
-        text = open(os.path.join(REPO, "pyproject.toml"), encoding="utf-8").read()
+        text = pathlib.Path(REPO, "pyproject.toml").read_text(encoding="utf-8")
         self.assertNotRegex(text, r'(?m)^version\s*=\s*"')
         self.assertIn('dynamic = ["version"]', text)
         self.assertRegex(text, r'version\s*=\s*\{\s*attr\s*=\s*"indexgap\.__version__"')
         self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
 
     def test_the_test_helpers_ship_with_the_tests(self):
-        manifest = open(os.path.join(REPO, "MANIFEST.in"), encoding="utf-8").read()
+        manifest = pathlib.Path(REPO, "MANIFEST.in").read_text(encoding="utf-8")
         self.assertIn("tests", manifest)
         self.assertIn("examples", manifest)
 

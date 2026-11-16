@@ -118,9 +118,19 @@ def stale_years(pages: list, today: datetime.date = None) -> list:
             if len(found) < STALE_MIN_PAGES or len(found) < STALE_SHARE * len(members):
                 continue
             examples = "; ".join(f"«{p.title[:60]}»" for p in sorted(found, key=lambda p: p.url)[:2])
-            hub = next((p.url for p in members
-                        if urlsplit(p.url).path.strip("/") == section), "")
-            issues.append(("warning", hub, "stale-year", tr(
+            # Адрес находки — раздел, а не страница: `/plumbing/`. Находка про
+            # шаблон заголовка, и у страницы раздела года в заголовке может не
+            # быть вовсе. Раньше здесь искали страницу раздела среди `members`,
+            # а она состоит из одного сегмента и лежит в корневом разделе: у
+            # любого именованного раздела её не находили никогда, и адрес был
+            # пустым (у корневого находилась главная). Две такие находки в разных
+            # разделах базовая линия не различала (один раздел починили, другой
+            # устарел — «без изменений»), а `ignore` по пути не мог принять ни
+            # одну. Путь, а не адрес страницы, — чтобы находка не пропадала,
+            # когда страница раздела закрыта от индекса, и не уходила в наряд
+            # на эту страницу.
+            address = f"/{section}/" if section else "/"
+            issues.append(("warning", address, "stale-year", tr(
                 "у {a0} из {a1} страниц раздела /{a2} в заголовке {a3} год, а сейчас {a4}: "
                 "шаблон заголовка не обновили. Например: {a5}",
                 a0=len(found), a1=len(members), a2=(section + "/") if section else "",

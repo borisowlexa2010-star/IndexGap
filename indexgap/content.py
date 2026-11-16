@@ -403,6 +403,158 @@ def _generic_numbers_in(text: str) -> dict:
     return found
 
 
+# ── числа прописью ────────────────────────────────────────────────────────────
+#
+# «Гарантия — двенадцать месяцев» при `6 месяцев` в строке — та же выдумка, что
+# «12 месяцев», только цифрой её не поймать: сроки и количества модель пишет
+# словами охотнее, чем цены. Страница с таким текстом проходила сверку молча.
+#
+# Уровень — «просмотри глазами», а не критичная находка. Прописью пишут и
+# общие слова о предмете: на демо-сайте пакета «usually within three to six
+# months» стоит в обычном абзаце при `3 months` в строке, и критичная находка
+# там была бы ложной. Отличить такой абзац от выдуманного срока по тексту
+# нельзя, поэтому число показывается человеку, а `--strict` не роняет.
+#
+# Читается только то, в чём нельзя ошибиться:
+#
+#   * числительное от 2 до 99, и сразу за ним единица проекта. «Два слова»,
+#     «three reasons» — речь, а не факт строки, и сюда не попадают;
+#   * «один месяц», «one day» не читаются вовсе: это почти всегда оборот;
+#   * хвост большего числа — «сто двадцать минут», «one hundred and twenty
+#     minutes» — не читается как 20: сотни здесь не разбираются, а неверно
+#     прочитанное число хуже непрочитанного;
+#   * русский и английский, и только на странице этого языка или без `lang`.
+#     Французское `six mois` при `lang="fr"` — не наш словарь.
+#
+# Русские формы — именительный с винительным и родительный: именно они стоят
+# перед единицей в том виде, в каком она записана в датасете («двенадцать
+# месяцев», «в течение двенадцати месяцев»), и собирательные «двое», «трое»,
+# «четверо» — обычная форма перед «суток».
+_SPELLED = {
+    "ru": {
+        "ones": {"один": 1, "одна": 1, "одно": 1, "одного": 1, "одной": 1, "одну": 1,
+                 "два": 2, "две": 2, "двух": 2, "двое": 2, "три": 3, "трёх": 3,
+                 "трех": 3, "трое": 3, "четыре": 4, "четырёх": 4, "четырех": 4,
+                 "четверо": 4, "пять": 5, "пяти": 5,
+                 "шесть": 6, "шести": 6, "семь": 7, "семи": 7, "восемь": 8,
+                 "восьми": 8, "девять": 9, "девяти": 9},
+        "teens": {"десять": 10, "десяти": 10, "одиннадцать": 11, "одиннадцати": 11,
+                  "двенадцать": 12, "двенадцати": 12, "тринадцать": 13,
+                  "тринадцати": 13, "четырнадцать": 14, "четырнадцати": 14,
+                  "пятнадцать": 15, "пятнадцати": 15, "шестнадцать": 16,
+                  "шестнадцати": 16, "семнадцать": 17, "семнадцати": 17,
+                  "восемнадцать": 18, "восемнадцати": 18, "девятнадцать": 19,
+                  "девятнадцати": 19},
+        "tens": {"двадцать": 20, "двадцати": 20, "тридцать": 30, "тридцати": 30,
+                 "сорок": 40, "сорока": 40, "пятьдесят": 50, "пятидесяти": 50,
+                 "шестьдесят": 60, "шестидесяти": 60, "семьдесят": 70,
+                 "семидесяти": 70, "восемьдесят": 80, "восьмидесяти": 80,
+                 "девяносто": 90, "девяноста": 90},
+        "bigger": {"сто", "ста", "двести", "двухсот", "триста", "трёхсот", "трехсот",
+                   "четыреста", "четырёхсот", "четырехсот", "пятьсот", "пятисот",
+                   "шестьсот", "шестисот", "семьсот", "семисот", "восемьсот",
+                   "восьмисот", "девятьсот", "девятисот", "тысяча", "тысячи",
+                   "тысяч", "тысячу", "миллион", "миллиона", "миллионов",
+                   "миллиард", "миллиарда", "миллиардов"},
+    },
+    "en": {
+        "ones": {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "eight": 8, "nine": 9},
+        "teens": {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+                  "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+                  "eighteen": 18, "nineteen": 19},
+        "tens": {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+                 "seventy": 70, "eighty": 80, "ninety": 90},
+        "bigger": {"hundred", "thousand", "million", "billion"},
+    },
+}
+# Десятки с единицами соединяют пробелом или одним дефисом — любым из тех, что
+# ставит вёрстка: неразрывным, тире. С одним ASCII-дефисом «twenty‑six months»
+# читалось как «six months» — при 6 в строке выдуманные 26 сходили за данные.
+# Тире в пробелах — уже не одно число: «twenty — five minutes after your call».
+_HYPHENS = r"\-\u2010\u2011"
+_JOIN = r"(?:\s+|[" + _HYPHENS + r"\u2013\u2014])"
+# Слово перед числительным — через любые знаки: «one thousand, twenty minutes».
+_WORD_BEFORE = re.compile(r"([^\W\d_]+)\W+$")
+
+
+def build_spelled_patterns(units: list) -> dict:
+    """Выражения «числительное + единица проекта» по языкам — или пусто без единиц."""
+    # Единица в одну букву или служебное слово — «16 A», «220 В», `in` — после
+    # числительного оказывается обычной речью: «two a day», «три в ряд».
+    units = sorted({u.strip() for u in (units or [])
+                    if u and len(u.strip()) > 1 and u.strip().lower() not in NON_UNITS},
+                   key=len, reverse=True)
+    if not units:
+        return {}
+    unit = "|".join(re.escape(u) for u in units)
+
+    def any_of(words):
+        return "|".join(sorted(words, key=len, reverse=True))
+
+    patterns = {}
+    for lang, table in _SPELLED.items():
+        single = [w for w, n in table["ones"].items() if n > 1] + list(table["teens"])
+        patterns[lang] = re.compile(
+            # Не внутри слова и не после слова с дефисом: «top-six months»,
+            # «fourty-six months» — не «six months».
+            r"(?<![^\W\d_])(?<![^\W\d_][" + _HYPHENS + r"])"
+            r"(?:(?P<tens>" + any_of(table["tens"]) + r")"
+            r"(?:" + _JOIN + r"(?P<ones>" + any_of(table["ones"]) + r"))?"
+            r"|(?P<single>" + any_of(single) + r"))"
+            + _SP + r"+(?P<unit>" + unit + r")(?![^\W\d_])", re.I | re.U)
+    return patterns
+
+
+def _tail_of_bigger(text: str, start: int, bigger: set) -> bool:
+    """Стоит ли перед числительным сотня или тысяча: «сто двадцать», «hundred and twenty»."""
+    match = _WORD_BEFORE.search(text, max(0, start - 40), start)
+    if match and match.group(1).lower() == "and":
+        match = _WORD_BEFORE.search(text, max(0, match.start() - 40), match.start())
+    return bool(match) and match.group(1).lower() in bigger
+
+
+def _spelled_numbers_in(text: str, patterns: dict, lang: str = "") -> dict:
+    """
+    Числа прописью с единицей проекта: {число: (единица, как написано)}.
+
+    Написание нужно отчёту: находка показывает число так, как оно стоит на
+    странице, иначе «12 месяцев» на ней не найти.
+    """
+    found = {}
+    code = (lang or "").strip().lower()[:2]
+    # Мягкий перенос стоит внутри слова и на странице не виден: «twen­ty-six».
+    text = (text or "").replace("\u00ad", "")
+    for name, pattern in patterns.items():
+        if code and code != name:
+            continue
+        table = _SPELLED[name]
+        for match in pattern.finditer(text):
+            if _tail_of_bigger(text, match.start(), table["bigger"]):
+                continue
+            # Без учёта регистра `i` совпадает и с турецкими `İ`, `ı`, а `s` — с
+            # `ſ`; в словаре таких написаний нет. Слово, которого нет в словаре,
+            # не читается: падение на «SİX MONTHS» останавливало весь прогон.
+            if match.group("single"):
+                word = match.group("single").lower()
+                value = table["ones"].get(word) or table["teens"].get(word)
+            else:
+                tens, ones = match.group("tens"), match.group("ones")
+                value = table["tens"].get(tens.lower())
+                if value and ones:
+                    more = table["ones"].get(ones.lower())
+                    # Границы блоков в тексте страницы — пробел: «…a crew of
+                    # twenty» и «Five minutes from…» из соседних пунктов списка
+                    # — не двадцать пять.
+                    apart = ones[0].isupper() and not tens[0].isupper()
+                    value = value + more if more and not apart else None
+            if not value:
+                continue
+            found.setdefault(str(value), (match.group("unit"),
+                                          " ".join(match.group(0).split())))
+    return found
+
+
 # Число в данных строки: не приклеенное к буквам, чтобы артикул «A-90-15»
 # не выдавал индульгенцию выдуманной цифре 90.
 #
@@ -651,6 +803,56 @@ def _supported(number: str, unit: str, allowed: set) -> bool:
     return False
 
 
+# Число, которое страница посчитала из своей строки: «три месяца аренды
+# вперёд — $4,350» при `rent: $1,450` и `deposit: 3 months`. В данных его нет,
+# но и выдумкой оно не является — итог, годовая цена, скидка. Критичной
+# находкой оно роняло `--strict` на верных страницах. Теперь оно уходит в
+# «просмотри глазами» с подсказкой, как его можно было получить: человек
+# проверит, а совпадение не пройдёт незамеченным. Лучшее решение — отдельная
+# колонка с посчитанным значением: тогда генератор и проверка читают одно.
+DERIVED_MIN = 100         # меньше — слишком легко получить случайно
+DERIVED_MAX_INPUTS = 12   # в строке длиннее совпадение пар становится правилом
+
+
+def _derivation(number: str, row_numbers: set) -> str:
+    """Как число получается из двух чисел строки — или пусто."""
+    try:
+        target = float(number)
+    except ValueError:
+        return ""
+    if abs(target) < DERIVED_MIN:
+        return ""
+    values = []
+    for raw in row_numbers:
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value not in (0.0, 1.0):
+            values.append((value, raw))
+    if len(values) > DERIVED_MAX_INPUTS:
+        return ""
+    values.sort()
+
+    def same(x):
+        return abs(x - target) < 0.005 or (target == round(target) and abs(x - target) < 0.5
+                                            and x != round(x))
+
+    for i, (a, ra) in enumerate(values):
+        for b, rb in values[i:]:
+            # Только произведение и доля: суммы и разности пар объясняют
+            # почти любое число, и выдумка уходила бы в «мелочи».
+            if same(a * b):
+                return f"{ra} × {rb}"
+            for big, rbig, pct, rpct in ((b, rb, a, ra), (a, ra, b, rb)):
+                if 0 < pct < 100:
+                    if same(big * pct / 100):
+                        return f"{rpct}% × {rbig}"
+                    if same(big * (100 - pct) / 100):
+                        return f"{rbig} − {rpct}%"
+    return ""
+
+
 def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                 fact_units: list = None) -> list:
     """
@@ -666,6 +868,7 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
     if not matched:
         return []
     fact_pattern = build_fact_pattern(fact_units)
+    spelled_patterns = build_spelled_patterns(fact_units)
     constants = _site_constants(rows)
 
     issues = []
@@ -677,8 +880,31 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
 
         strong = _numbers_in(page.text, fact_pattern)
         weak = _generic_numbers_in(page.text)
+        # Прописью — во второй эшелон. Если то же число стоит на странице и
+        # цифрой при случайном слове, показываются оба написания: «twelve
+        # months» не должно прятаться за «12 reviewers», а «6 awards» — за «six
+        # months». Число, уже ставшее критичной находкой, ниже отсеивается само.
+        generic = set(weak)
+        written = {}
+        for number, (unit, phrase) in _spelled_numbers_in(
+                page.text, spelled_patterns, getattr(page, "lang", "")).items():
+            weak.setdefault(number, unit)
+            written[number] = phrase
+
+        def shown(number, unit):
+            if number not in written:
+                text = _shown(number, unit)
+            else:
+                text = written[number] + (", " + _shown(number, unit) if number in generic else "")
+            if number in derived:
+                text += tr(" (= {a0} из строки?)", a0=derived[number])
+            return text
 
         unknown_strong = {n: u for n, u in strong.items() if not _supported(n, u, allowed)}
+        own = _row_numbers(row)
+        derived = {n: how for n in unknown_strong for how in [_derivation(n, own)] if how}
+        for number in derived:
+            weak[number] = unknown_strong.pop(number)
         unknown_weak = {n: u for n, u in weak.items()
                         if not _supported(n, u, allowed) and n not in unknown_strong}
 
@@ -694,12 +920,15 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             # для просмотра глазами, а не приговор. Раньше каждое такое
             # число становилось отдельным предупреждением, и 62% отчёта
             # занимал шум вроде «3 шага» и «5 звёзд».
+            # Числа прописью — первыми: у них единица проекта, и за «и ещё N»
+            # им не место.
             listed = sorted(unknown_weak.items(),
-                            key=lambda kv: (-len(kv[0]), kv[0]))[:8]
+                            key=lambda kv: (kv[0] not in written and kv[0] not in derived,
+                                           -len(kv[0]), kv[0]))[:8]
             issues.append((
                 "info", page.url, "check-by-eye",
                 tr("числа, которых нет в данных — просмотри глазами: ")
-                + ", ".join(_shown(n, u) for n, u in listed)
+                + ", ".join(shown(n, u) for n, u in listed)
                 + (tr(" и ещё {a0}", a0=len(unknown_weak) - len(listed))
                    if len(unknown_weak) > len(listed) else "")))
     return issues

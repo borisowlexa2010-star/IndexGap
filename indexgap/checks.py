@@ -983,6 +983,52 @@ def _consolidated(page, target) -> bool:
     return not (a != b and (_is_locale(a) or _is_locale(b)))
 
 
+def _slug(url: str) -> str:
+    return urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1].lower()
+
+
+def _text_overlap(a, b, k: int = None) -> float:
+    """Доля общих словесных n-грамм двух страниц (Jaccard)."""
+    k = k or CONFIG["shingle_size"]
+    sa, sb = _shingles(list(a.words or ()), k), _shingles(list(b.words or ()), k)
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
+def _a_variant_of(page, target) -> bool:
+    """
+    Похожа ли страница на вариант той, на которую ведёт её canonical: печатная
+    копия `/x/print/` под `/x/`, старая версия документации с тем же именем
+    `/v1/install/` → `/install/`, или просто тот же текст. Шаблон, собравший
+    canonical из чужой переменной (`/rent/hamburg/` → `/rent/berlin/`), даёт
+    страницу с другим именем и другим текстом — это не вариант.
+    """
+    path, home = urlsplit(page.url).path, urlsplit(target.url).path
+    if _slug(page.url) == _slug(target.url) or path.startswith(home.rstrip("/") + "/"):
+        return True
+    return _text_overlap(page, target) >= CONFIG["near_duplicate"]
+
+
+def misdirected(pages: list) -> dict:
+    """
+    {url: цель} — страницы, чей canonical ведёт на открытую страницу того же
+    языка, которая на них не похожа. Раньше такие страницы считались
+    «намеренно закрытыми копиями»: находка была справкой, а всё остальное о
+    странице — выдуманная цена, сирота, дубль — пропадало из отчёта. Ошибка
+    шаблона делала отчёт зеленее.
+    """
+    by_key = {p.key: p for p in pages}
+    out = {}
+    for p in pages:
+        if not p.canonical or p.noindex or url_key(p.canonical) == p.key:
+            continue
+        target = by_key.get(url_key(p.canonical))
+        if target is not None and _consolidated(p, target) and not _a_variant_of(p, target):
+            out[p.url] = target.url
+    return out
+
+
 _CLOSED_BY_DESIGN = {"print", "print.html", "toc", "toc.html", "search", "search.html",
                      "404", "404.html", "search-results"}
 
@@ -995,6 +1041,12 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
     bounds = _length_bounds(cfg)
     shells = shells or set()
     issues = []
+    wrong = misdirected(pages)
+    # Одна цель у нескольких страниц — canonical собран шаблоном из чужой
+    # переменной: это одна ошибка на весь шаблон, и она критична.
+    collected = defaultdict(int)
+    for target_url in wrong.values():
+        collected[target_url] += 1
 
     titles = defaultdict(list)
     descriptions = defaultdict(list)
@@ -1057,7 +1109,16 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         # а не две. Старые версии документации давали восемь тысяч критичных.
         if p.canonical and url_key(p.canonical) != p.key and not p.noindex:
             target = by_key.get(url_key(p.canonical))
-            if target is not None and _consolidated(p, target):
+            if p.url in wrong:
+                many = collected[wrong[p.url]]
+                issues.append(("critical" if many > 1 else "warning", p.url, "canonical-elsewhere",
+                               tr("canonical указывает на {a0}, а это другая страница: другое имя "
+                                  "и почти нет общего текста. Так бывает, когда шаблон берёт "
+                                  "адрес из чужой переменной; страница просит убрать её из "
+                                  "индекса", a0=target.url)
+                               + (tr(" (на эту же страницу ведут canonical ещё {a0} стр.)",
+                                     a0=many - 1) if many > 1 else "")))
+            elif target is not None and _consolidated(p, target):
                 issues.append(("info", p.url, "canonical-elsewhere",
                                tr("копия страницы {a0}: canonical указывает на неё, и та в сборке "
                                   "открыта — так и должно быть, если это вариант (печатная версия, "
@@ -1557,7 +1618,8 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     """
     # Закрыта и страница с canonical на другую: печатная копия Hugo
     # получала «тонкая», «нет описания» и «глубоко» — 800 находок на сайте.
-    closed = {p.url for p in pages if not indexable(p)}
+    # Страница с ошибочным canonical закрыта не намеренно: о ней важно всё.
+    closed = {p.url for p in pages if not indexable(p)} - set(misdirected(pages))
     if not closed:
         return issues
     return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED]

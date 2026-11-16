@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.24.0 — 2026-11-15
+
+Four reports from the community — two pull requests by kirvahe merged as they
+were, two issues fixed here. Thank you.
+
+* **`stale-year` has an address** (#29). The finding is addressed to its
+  section — `/plumbing/`, or `/` for the root — instead of an empty URL, so a
+  baseline tells two sections apart and `ignore` can accept one of them. It
+  stays in the site brief. A baseline taken with 1.23 shows each `stale-year`
+  once as new and once as gone on the first run.
+* **Numbers written as words** (#30). `check-by-eye` lists a number written out
+  before one of the project's units — `twelve months`, `двенадцать месяцев` —
+  in English and Russian, 2 to 99, shown as written. It is `info`, so `--strict`
+  is not affected; a page with no written-out numbers gets the same output.
+* **A canonical to a sibling page is not a copy** (#31). A canonical that
+  points at an open page with another name and almost no common text — what a
+  template does when it takes the address from the wrong variable — was a note,
+  and the page's other findings disappeared with it: one template mistake took
+  a demo run from 6 critical findings to 2. Now one such page is a warning,
+  several pointed at the same page are critical, and they keep their other
+  findings. Print copies, older versions with the same name and the same text
+  at another address are still notes.
+* **A number computed from the row** (#32). A product of two numbers of the
+  page's own row, or a percentage of one (`$4,350` with `$1,450` and
+  `3 months`), at least 100 and on a row of at most 12 numbers, goes from
+  `unsupported-number` to `check-by-eye` with the arithmetic shown. Sums are not
+  read: on a long row they explain almost any number. A column with the computed
+  value is still the surest way.
+* Tests close the files they read; CONTRIBUTING and the README scenario count
+  are up to date.
+
 ## 1.23.0 — 2026-11-05
 
 * **Prices and percentages in every script.** Currency words are read in

@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -465,7 +466,7 @@ class TestGenerate(Fixture):
         written = []
         for dirpath, _, names in os.walk(out):
             written += [os.path.join(dirpath, n) for n in names]
-        text = open(written[0], encoding="utf-8").read()
+        text = pathlib.Path(written[0]).read_text(encoding="utf-8")
         line = [l for l in text.splitlines() if l.startswith("keyword:")][0]
         self.assertEqual(line.count('"') % 2, 0)
 
@@ -475,7 +476,7 @@ class TestGenerate(Fixture):
         audit = generate.audit_dataset(data["rows"], data["fields"], "keyword")
         out = os.path.join(self.dir, "out")
         result = generate.write_tasks(audit, out, "keyword")
-        text = open(result["written"][0], encoding="utf-8").read()
+        text = pathlib.Path(result["written"][0]).read_text(encoding="utf-8")
         self.assertEqual(text.count("-->"), 1)
 
     def test_long_keys_do_not_collapse_into_one_slug(self):
@@ -586,7 +587,7 @@ class TestGenerate(Fixture):
         out = os.path.join(self.dir, "plan.json")
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["plan", os.path.join(self.dir, "k.csv"), "--json", out]), 0)
-        rejected = json.load(open(out, encoding="utf-8"))["rejected"]
+        rejected = json.loads(pathlib.Path(out).read_text(encoding="utf-8"))["rejected"]
         self.assertEqual([(r["code"], r["reason"]) for r in rejected],
                          [("exact-duplicate", "точный дубль ключа")])
 
@@ -639,7 +640,7 @@ class TestPublish(Fixture):
         try:
             out = os.path.join(self.dir, "public", "sitemaps")
             publish.build_sitemap(pages, out, SITE, public_prefix="sitemaps")
-            index = open(os.path.join(out, "sitemap.xml"), encoding="utf-8").read()
+            index = pathlib.Path(out, "sitemap.xml").read_text(encoding="utf-8")
             self.assertIn("https://example.com/sitemaps/sitemap-1.xml", index)
         finally:
             publish.MAX_URLS_PER_FILE = saved
@@ -647,7 +648,7 @@ class TestPublish(Fixture):
     def test_manifest_is_written_atomically(self):
         path = os.path.join(self.dir, "m.json")
         core.save_manifest(path, {"a": {"hash": "1"}, "_broken": True})
-        data = json.load(open(path, encoding="utf-8"))
+        data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
         self.assertNotIn("_broken", data)
 
     def test_broken_manifest_is_flagged_not_silently_empty(self):
@@ -777,7 +778,7 @@ class TestReport(Fixture):
         analysis = {"pages": [], "issues": issues, "graph": {"orphans": []},
                     "duplicates": [], "config": checks.CONFIG}
         path = report.build(analysis, out_path=os.path.join(self.dir, "r.html"))
-        html = open(path, encoding="utf-8").read()
+        html = pathlib.Path(path).read_text(encoding="utf-8")
         self.assertIn("unsupported-number", html)
         self.assertIn("orphan", html)
 
@@ -786,7 +787,7 @@ class TestReport(Fixture):
         analysis = {"pages": [], "issues": issues, "graph": {}, "duplicates": [],
                     "config": checks.CONFIG}
         path = report.build(analysis, out_path=os.path.join(self.dir, "r.html"))
-        html = open(path, encoding="utf-8").read()
+        html = pathlib.Path(path).read_text(encoding="utf-8")
         self.assertNotIn("<script>alert(1)</script>", html)
 
     def test_empty_analysis_does_not_crash(self):

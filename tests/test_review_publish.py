@@ -9,6 +9,7 @@
 """
 
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -46,7 +47,7 @@ class Fixture(unittest.TestCase):
         out = tempfile.mkdtemp(prefix="indexgap-out-")
         self.addCleanup(shutil.rmtree, out, True)
         publish.build_sitemap(pages, out, SITE, today="2026-10-01")
-        text = open(os.path.join(out, "sitemap.xml"), encoding="utf-8").read()
+        text = pathlib.Path(out, "sitemap.xml").read_text(encoding="utf-8")
         return sorted(u.replace(SITE, "") for u in
                       __import__("re").findall(r"<loc>([^<]+)</loc>", text))
 
@@ -124,11 +125,11 @@ class TestSitemapCommand(Cli):
             fh.write("<urlset><url><loc>https://example.com/hand-written.html</loc></url></urlset>")
         code, out = self.run_cli(["sitemap"], cwd=root)
         self.assertEqual(code, 2)
-        self.assertIn("hand-written", open(mine, encoding="utf-8").read())
+        self.assertIn("hand-written", pathlib.Path(mine).read_text(encoding="utf-8"))
         self.assertIn("--force", out)
         code, _ = self.run_cli(["sitemap", "--force"], cwd=root)
         self.assertEqual(code, 0)
-        self.assertNotIn("hand-written", open(mine, encoding="utf-8").read())
+        self.assertNotIn("hand-written", pathlib.Path(mine).read_text(encoding="utf-8"))
         # Свой файл переписывается без вопросов.
         self.assertEqual(self.run_cli(["sitemap"], cwd=root)[0], 0)
 
@@ -235,7 +236,7 @@ class TestManifestSurvivesAnAddressForm(Fixture):
         out = tempfile.mkdtemp(prefix="indexgap-out-")
         self.addCleanup(shutil.rmtree, out, True)
         result = publish.build_sitemap(pages, out, SITE, manifest=old, today="2026-10-01")
-        text = open(os.path.join(out, "sitemap.xml"), encoding="utf-8").read()
+        text = pathlib.Path(out, "sitemap.xml").read_text(encoding="utf-8")
         self.assertIn("<loc>https://example.com/a</loc><lastmod>2026-01-15</lastmod>", text)
         self.assertNotIn(SITE + "/a/", result["manifest"])
         diff = publish.diff_changed(pages, old)

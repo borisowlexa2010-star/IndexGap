@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import unittest
@@ -123,7 +124,7 @@ class Intent(unittest.TestCase):
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(["plan", path, "--json", out]), 0)
         self.assertIn("покупка 1", buf.getvalue())
-        data = json.load(open(out, encoding="utf-8"))
+        data = json.loads(pathlib.Path(out).read_text(encoding="utf-8"))
         self.assertEqual({k["keyword"]: k["intent"] for k in data["keep"]},
                          {"buy pipes austin": "transactional", "best plumbers dallas": "commercial",
                           "how to fix a tap boston": "informational", "plumbing denver": ""})

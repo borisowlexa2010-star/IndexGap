@@ -35,18 +35,7 @@ python3 -m unittest discover -s tests
 A pull request that changes behaviour and adds no test will be asked for one.
 Write the test so it fails before your change.
 
-### 4. Calibrate on real sites, publish only what is general
-
-Checks get better on live projects — that is where every false positive in
-`CHANGELOG.md` was found. What lands in this repository is the general part:
-the rule, the test and an anonymised example. A real site's name, domain, URL
-paths, niche-specific terms and exact page counts stay out of code, tests,
-docs, issues and release notes: write "a live multilingual catalogue", use
-`example.com`, and move a fixture to another niche with the same structure.
-`tests/test_no_private_names.py` fails if a known project name slips in; it
-stores only SHA-256 hashes, so it does not publish the names itself.
-
-# 3. Never answer confidently when you don't know
+## 3. Never answer confidently when you don't know
 
 This is the rule the package was rebuilt around, and it is worth stating
 plainly because it is easy to violate while writing correct code.
@@ -64,6 +53,17 @@ plainly because it is easy to violate while writing correct code.
 Silence is a finding too: when a check could not run, the report states why
 rather than leaving an empty section that reads like a clean bill of health.
 
+## 4. Calibrate on real sites, publish only what is general
+
+Checks get better on live projects — that is where every false positive in
+`CHANGELOG.md` was found. What lands in this repository is the general part:
+the rule, the test and an anonymised example. A real site's name, domain, URL
+paths, niche-specific terms and exact page counts stay out of code, tests,
+docs, issues and release notes: write "a live multilingual catalogue", use
+`example.com`, and move a fixture to another niche with the same structure.
+`tests/test_no_private_names.py` fails if a known project name slips in; it
+stores only SHA-256 hashes, so it does not publish the names itself.
+
 ## Style
 
 Russian docstrings and comments, matching the existing files — they explain
@@ -78,4 +78,5 @@ python3 -m unittest discover -s tests
 python3 -m indexgap --help
 ```
 
-CI runs the same on Python 3.9, 3.11 and 3.13.
+CI runs the same on Python 3.9, 3.11, 3.14 and 3.15 on Linux, and on 3.12 on
+macOS and Windows.

@@ -268,7 +268,7 @@ artifact:
 
 ```yaml
 - run: npm run build
-- uses: borisowlexa2010-star/IndexGap@v1.23.0
+- uses: borisowlexa2010-star/IndexGap@v1.24.0
   with:
     root: out
     site: https://example.com
@@ -292,7 +292,7 @@ that depends on how you deploy. The simplest source is the previous commit:
     git worktree add ../prev HEAD~1
     (cd ../prev && npm ci && npm run build)
     mv ../prev/out old
-- uses: borisowlexa2010-star/IndexGap@v1.23.0
+- uses: borisowlexa2010-star/IndexGap@v1.24.0
   with:
     root: out
     site: https://example.com
@@ -322,7 +322,7 @@ that bring customers can be generated first.
 
 | Check | Why it matters |
 |---|---|
-| **Numbers absent from your data** | prices, terms and counts are verified against the source row. A price, or a number with one of your project's units, that is not in the data is a critical finding; a number with any other word ("12 years", "3,500 orders") is listed for you to check by eye. Neither is forgiven for being repeated on many pages |
+| **Numbers absent from your data** | prices, terms and counts are verified against the source row. A price, or a number with one of your project's units, that is not in the data is a critical finding; a number with any other word ("12 years", "3,500 orders") is listed for you to check by eye — and so is a number written out before one of your units ("twelve months" when the row says 6; English and Russian, 2 to 99). Neither is forgiven for being repeated on many pages |
 | Identical heading skeletons | different words, same structure — a stamping tell |
 | Identical opening sentences | the second tell |
 | Unfilled template slots | `{{city}}`, `%CITY%`, `undefined`, `NaN`, `Plumbers in , TX`, lorem ipsum, a model's "Certainly! Here is…" left in the text |
@@ -692,7 +692,7 @@ one thing and Search Console says another, Search Console is right.
 python3 -m unittest discover -s tests
 ```
 
-941 scenarios. Each one is a reproduced defect: from four waves of adversarial
+More than 1,300 scenarios. Each one is a reproduced defect: from four waves of adversarial
 review (the latest by eight reviewers at once — new generators, a seeded
 catalogue measuring what is missed, messy input, scale, the truth of these
 docs, an agent following the skills, the competition), from runs against live
