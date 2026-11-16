@@ -537,7 +537,12 @@ def _analyse(args, pages=None):
     content_result = None
     if project["_skip_facts"]:
         notes.append(tr("сверка фактов и швов шаблона выключена профилем «{a0}»: страницы не порождаются датасетом, сверять не с чем. Молчание здесь — не «всё хорошо»", a0=project['_profile']))
-    elif not args.no_content:
+    elif args.no_content:
+        if rows:
+            # Датасет прочитан, единицы из него выведены и напечатаны, а
+            # сверки нет — без заметки это выглядело как «факты в порядке».
+            notes.append(tr("--no-content выключает сверку фактов: датасет прочитан, но с ним ничего не сверялось. Молчание здесь — не «всё хорошо»"))
+    else:
         cfg = dict(project.get("content") or {})
         cfg["vague_anchors"] = project.get("vague_anchors", [])
         content_result = content.run(pages, rows, args.keyword, args.root,

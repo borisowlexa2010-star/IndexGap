@@ -12,6 +12,11 @@ MESSAGES = {
     "--site {a0} — так не годится: нужен полный адрес со схемой.\n    Попробуй: --site https://{a1}":
         "--site {a0} won't do: a full address with the scheme is required.\n"
         "    Try: --site https://{a1}",
+    "--site {a0} — так не годится: в адресе сайта не бывает «?» и «#».\n    Попробуй: --site {a1}":
+        "--site {a0} won't do: a site address has no “?” or “#”.\n"
+        "    Try: --site {a1}",
+    "{a0}: значение `{a1}` должно быть списком строк, а там {a2}.":
+        "{a0}: the value of `{a1}` must be a list of strings, but it is {a2}.",
     "{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен":
         "{a0} and {a1} produce the same URL {a2} — kept {a3}, skipped the other",
     "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт как есть, а не страницы; не проверялись: {a1}":

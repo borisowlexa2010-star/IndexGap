@@ -198,10 +198,15 @@ def read_logs(paths: list, site: str = "") -> dict:
                 who = identify(hit["ua"])
                 if not who:
                     continue
+                target = hit["target"]
+                try:
+                    # Лог пишет кто угодно: сканер шлёт `GET //[evil`, и
+                    # urlsplit бросал ValueError — весь doctor падал.
+                    parts = urlsplit(target)
+                except ValueError:
+                    continue
                 matched += 1
                 name, operator, purpose = who
-                target = hit["target"]
-                parts = urlsplit(target)
                 if parts.scheme:
                     url = target.split("#")[0]
                     path_only = parts.path or "/"
