@@ -1,5 +1,146 @@
 # Changelog
 
+## 1.25.0 — 2026-11-16
+
+An adversarial release: eight independent testers built sites designed to fool
+IndexGap 1.24 and reported 76 reproduced cases where the report was wrong.
+73 are fixed here, each with a regression test (about 110 new tests). The
+other 3 are minor and wait for a later release. Expect **more findings** after
+the upgrade: most fixes are about problems the report used to miss. A run on a
+large real multilingual site found 4 new critical template clones and dropped
+31 false title and description warnings. Its total went from 1876 findings to
+1870.
+
+### Pages closed from the index
+
+* A canonical to the **home page or a section hub** is no longer taken for a
+  print copy. Such pages get `canonical-elsewhere` and keep their other
+  findings. Only print, AMP, PDF, embed, preview, mobile and pagination copies
+  still count as variants.
+* **robots.txt** has two new findings:
+  * a `User-agent: Googlebot` group with `Disallow: /` is critical
+    `robots-blocks-all`;
+  * a partial block of an AI-search crawler or Bingbot (`Disallow: /rent/` for
+    OAI-SearchBot) is `ai-crawler-blocked`.
+* **noindex findings stay critical** in more cases:
+  * a closed section still listed in `sitemap.xml` is no longer lowered to info
+    as "looks like a decision";
+  * pages listed in the sitemap with `?utm_…` are no longer lowered either;
+  * neither are pages in a sitemap index whose child file could not be read.
+* A `meta refresh` inside a `<script>` string or a `<template>` no longer turns
+  a page into a redirect stub.
+* `X-Robots-Tag: nosnippet` and `max-snippet:0` from `_headers`,
+  `netlify.toml` or `vercel.json` are applied.
+* Every draft marker gets a `still-draft` finding. A future publish date is
+  info.
+
+### Fact check against the dataset
+
+* **When two values split a column evenly** (a deposit of 2 or 3 months),
+  neither is a site-wide constant any more, so swapped values are reported.
+* **Dataset cells with a glued unit** support the page: `34min`, `1450EUR`,
+  `45m²`, `145000円`, `34分`.
+* **Number spellings now read correctly:**
+  * hyphenated compounds: `a 55-minute commute`, `a six-month deposit`;
+  * singular and short units: `4 month`, `44 min`, `hrs`;
+  * a space after the currency sign: `$ 2,900`;
+  * both ends of a range: `$1,600–2,400`, `4 to 6 months`;
+  * every item of a list: `3, 4 or 5 months`;
+  * the `k` suffix: `$1.6k`;
+  * CJK compounds: `14万5000円`.
+* **"Computed from the row"** no longer accepts squares or calculations whose
+  units do not match.
+* **`<title>` and meta description** are fact-checked too.
+* **Datasets:**
+  * JSON (an array of objects, `{"rows": [...]}`, JSON Lines) is read, not
+    misread as CSV;
+  * an empty dataset is reported;
+  * `--no-content --dataset` says that fact-checking was off.
+
+### Languages
+
+* **`fact-drift`:**
+  * a changed percentage or a price in an explicit currency (€35 → €70) is no
+    longer excused as a currency conversion;
+  * an `x-default` that points at a shared language selector no longer switches
+    the check off for the whole site;
+  * bidi marks (`&rlm;`) next to a number no longer hide it;
+  * Turkish `%85` and `TL` are read.
+* **`lang-script-mismatch`** tells Chinese, Japanese and Korean apart. One
+  inline `<code>` no longer turns language checks off.
+* Thai, Lao, Khmer and Burmese titles are measured at their real width.
+* Greek and Thai question headings count as questions.
+
+### Templates and structure
+
+* **Detection is wider:**
+  * near-duplicate detection on sites over 400 pages no longer loses
+    slot-substituted clones;
+  * `low-uniqueness` is also measured per section;
+  * `template-skeleton` catches headings that repeat the page's subject.
+* **Redirect stubs** that point at a page missing from the build are a
+  `broken-link`.
+* **Pages reachable only through a `nofollow` hub** are `unreachable`.
+* **`stale-year`:**
+  * works under a path prefix (`--site https://example.com/blog`);
+  * reads `in 2023,` and `for 2023.`.
+* **URL collisions**: pages skipped because two files give the same URL are
+  listed in the report, not only on the console.
+
+### Comparing runs
+
+* **`diff`:**
+  * an SPA fallback (`/* /index.html 200`) is not a redirect, so deleted pages
+    stay critical;
+  * `:splat` and `$1` redirect targets are checked against the new build.
+* **`check --baseline` and `diff` compare findings by their full subject.** A
+  new `subject` field in the JSON lists every broken link, duplicate partner
+  and invented number:
+  * a new broken link after the first three is reported;
+  * a second invented number on a page that already had one is reported;
+  * fixing one item of a group is no longer a false "new" finding.
+* **What counts as gone is stricter:**
+  * a run without the dataset no longer reports fact findings as gone;
+  * findings accepted through `ignore` are listed as accepted, not gone.
+* **`doctor --baseline`/`--history`:**
+  * a run without an index export no longer reports pages as back in the index;
+  * runs from the same second are ordered correctly;
+  * trend lines no longer split by output language.
+* **`portfolio`** honours the `profile` and `dataset` in `indexgap.json`.
+* **`brief`** gives colliding slugs their own files.
+* The **HTML "Start here"** lists site-level criticals first.
+
+### doctor
+
+* **Index statuses:**
+  * "Indexed: No", "Non-indexed" and "De-indexed" are not counted as indexed;
+  * the Coverage column wins over an HTTP "Status: OK" column;
+  * "Indexed, though blocked by robots.txt" zips count as indexed;
+  * the `Indexation` summary counts pages, not URL spellings.
+* **Gaps by section**: small sections stay in the table beside a dominant one.
+* **Paths and hosts:**
+  * root-relative paths resolve correctly under a `--site` path prefix;
+  * slugs with a dot count as pages.
+* **Access logs:**
+  * the host field of JSON/CDN logs is respected;
+  * a nested response status is read;
+  * redirects and HEAD requests do not count as pages opened by AI search.
+* **Citations** on another host get their own list.
+
+### Robustness
+
+* **No more tracebacks:**
+  * a malformed log line;
+  * a dataset cell over 128 KB;
+  * a malformed `--site`.
+* **Wrong config types are refused:**
+  * a string where `indexgap.json` expects a list (`fact_units`) is rejected
+    instead of being split into letters;
+  * `--site` with a query string is rejected.
+* **Build contents:**
+  * symlinked directories are checked;
+  * undeclared KOI8-R pages are detected.
+
 ## 1.24.0 — 2026-11-15
 
 Four reports from the community — two pull requests by kirvahe merged as they

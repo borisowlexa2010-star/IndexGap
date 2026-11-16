@@ -623,10 +623,6 @@ MESSAGES = {
         '  baseline findings accepted since then through ignore: {a0} — they are still on the site and are not counted as gone',
     '  ! база снята со сверкой фактов по датасету, этот прогон — без неё: {a0} находок сверки не проверены и в «исчезло» не входят, а новые числа не сверялись. Передай тот же --dataset':
         '  ! the baseline was made with fact-checking against a dataset, this run without it: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Pass the same --dataset',
-    '  ! индекс мерил только один из прогонов (--indexed) — выпавшие и вернувшиеся в индекс и разрывы по разделам не сравниваются':
-        '  ! only one of the runs measured the index (--indexed) — pages that dropped out of or came back to the index and section gaps are not compared',
-    '  ! sitemap сверял только один из прогонов — выпавшие из sitemap и разрывы по разделам не сравниваются':
-        '  ! only one of the runs checked the sitemap — pages that dropped out of the sitemap and section gaps are not compared',
     'индекс':
         'index',
     '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':
