@@ -272,6 +272,10 @@ def read_dataset(path: str) -> dict:
             dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
         except csv.Error:
             dialect = csv.excel
+    # Предел модуля csv — 131 072 символа на ячейку; длинное описание в
+    # датасете роняло check, plan, diff и cite трейсбеком.
+    from .core import MAX_INPUT_BYTES
+    csv.field_size_limit(MAX_INPUT_BYTES)
     reader = csv.DictReader(io.StringIO(text, newline=""), dialect=dialect,
                             restkey="__extra__", restval="")
     rows, problems = [], []

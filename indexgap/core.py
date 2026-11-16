@@ -515,11 +515,27 @@ def check_site_url(site: str) -> str:
     site = (site or "").strip()
     if not site:
         raise SourceError(tr("Не указан адрес сайта. Добавь --site https://example.com"))
-    parts = urlsplit(site)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
+    try:
+        # Непарная «[» (`http://[::1`) — ValueError, не SourceError: команда
+        # падала трассировкой вместо понятной строки.
+        parts = urlsplit(site)
+        parts.port
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme not in ("http", "https") or not parts.netloc:
         guess = site.split("//")[-1].strip("/")
         raise SourceError(
             tr("--site {a0} — так не годится: нужен полный адрес со схемой.\n    Попробуй: --site https://{a1}", a0=site, a1=guess))
+    if parts.query or parts.fragment or "?" in site or "#" in site:
+        # `https://demo.example/?x=1` склеивался с путями страниц в
+        # `<loc>https://demo.example/?x=1/</loc>` — невалидный sitemap.
+        raise SourceError(
+            tr("--site {a0} — так не годится: в адресе сайта не бывает «?» и «#».\n    Попробуй: --site {a1}",
+               a0=site, a1=urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))))
+    # Пробел и кириллица в пути базы шли в <loc> как есть, а пути страниц
+    # уже кодируются. Готовые %-последовательности не трогаются.
+    path = quote(parts.path, safe="/%~-._!$&'()*+,;=:@")
+    site = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
     return site.rstrip("/") + "/"
 
 
@@ -558,7 +574,8 @@ _LABELS = {"iso-8859-1": "cp1252", "iso8859-1": "cp1252", "latin1": "cp1252",
            "shift_jis": "cp932", "sjis": "cp932", "windows-31j": "cp932",
            "windows-874": "cp874", "x-cp1251": "cp1251", "utf-16": "utf-8",
            "utf-16le": "utf-8", "utf-16be": "utf-8", "utf-16-le": "utf-8",
-           "utf-16-be": "utf-8"}
+           "utf-16-be": "utf-8", "x-mac-cyrillic": "mac_cyrillic",
+           "x-mac-ukrainian": "mac_cyrillic"}
 _META_TAG = re.compile(rb"<meta\b[^>]{0,500}>", re.I)
 _HIGH = re.compile(rb"[\x80-\xff]")
 _LETTER_RUN = re.compile(rb"[\xc0-\xff]+")
@@ -627,7 +644,16 @@ def _cyrillic_or_latin(data: bytes) -> str:
     paired = high - len(runs)
     if not high:
         return "cp1252"
-    return "cp1251" if paired / high > 0.4 else "cp1252"
+    if paired / high <= 0.4:
+        return "cp1252"
+    # KOI8-R тоже даёт сплошные «буквенные» байты, и читался как cp1251:
+    # «бТЕОДБ ЛЧБТФЙТЩ» вместо «Аренда квартиры». В cp1251 строчные — 0xE0–0xFF,
+    # в KOI8-R они в 0xC0–0xDF. Обычный текст почти весь из строчных, поэтому
+    # KOI8-R — только когда «строчных» по cp1251 явно меньшинство.
+    lower = sum(1 for r in runs for b in r if b >= 0xE0)
+    if high >= 20 and lower / high < 0.25:
+        return "koi8_r"
+    return "cp1251"
 
 
 
@@ -2370,7 +2396,26 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                            a0=getattr(exc, "filename", "") or root,
                            a1=getattr(exc, "strerror", "") or exc))
 
-    for dirpath, dirnames, filenames in os.walk(root, onerror=unreadable):
+    # Каталог-симлинк сервер отдаёт как обычный, а обход его молча пропускал:
+    # страницы в нём не проверялись, ссылки на них считались битыми. Идём по
+    # ссылкам наружу; ссылку внутрь сборки (её страницы и так обойдены) и на
+    # каталог выше (петля) не трогаем.
+    real_root = os.path.realpath(root)
+    walked = {real_root}
+
+    def follow(dirpath, name):
+        path = os.path.join(dirpath, name)
+        if not os.path.islink(path):
+            return True
+        real = os.path.realpath(path)
+        if (real in walked or real.startswith(real_root + os.sep)
+                or real_root.startswith(real.rstrip(os.sep) + os.sep)):
+            return False
+        walked.add(real)
+        return True
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=unreadable, followlinks=True):
+        dirnames[:] = [d for d in dirnames if follow(dirpath, d)]
         skip = set(ALWAYS_SKIP)
         if dirpath == root and source_repo:
             skip |= BUILD_DIRS

@@ -6,6 +6,9 @@ MESSAGES = {
         "the page text contains “TODO” — if it is the author's note rather than "
         "the subject of the text, the page is unfinished",
     "{a0} — это каталог, а нужен файл.": "{a0} is a directory, a file is needed.",
+    "--no-content выключает сверку фактов: датасет прочитан, но с ним ничего не сверялось. Молчание здесь — не «всё хорошо»":
+        "--no-content turns off fact-checking: the dataset was read, but nothing "
+        "was checked against it. Silence here does not mean all good",
     "{a0} уже существует и это не данные отчёта indexgap.\n    Перезаписывать чужой файл я не буду — укажи другое имя через --out.":
         "{a0} already exists and is not indexgap report data.\n    I will not "
         "overwrite someone else's file — choose another name with --out.",

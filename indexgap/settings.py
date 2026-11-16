@@ -97,6 +97,14 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
         raise SourceError(tr("Не удалось прочитать {a0}: {a1}", a0=path, a1=exc))
     if not isinstance(user, dict):
         raise SourceError(tr("{a0}: ожидался объект верхнего уровня.", a0=path))
+    # Строка вместо списка (`"fact_units": "minutes"`) разбиралась по буквам:
+    # единицами становились «m», «i», «n»…, и сверка фактов молча выключалась.
+    for key in ("fact_units", "extra_fact_units", "vague_anchors"):
+        value = user.get(key)
+        if value is not None and not (isinstance(value, list)
+                                      and all(isinstance(v, str) for v in value)):
+            raise SourceError(tr("{a0}: значение `{a1}` должно быть списком строк, а там {a2}.",
+                                 a0=path, a1=key, a2=json.dumps(value, ensure_ascii=False)[:40]))
     config.update(user)
     config["_path"] = path
     return config
