@@ -317,4 +317,10 @@ MESSAGES = {
         'Translate the page body, or close it from the index until there is a translation: an untranslated page in an hreflang cluster is served where the reader expects their own language.',
     'Сверь цифру перевода с оригиналом и с данными: обычно перевод сделан со старой версии страницы или число переписано вручную. Цифры в переводах лучше подставлять из тех же данных, что и в оригинале.':
         'Check the translated number against the original and the data: usually the translation was made from an older version of the page or the number was retyped by hand. Fill numbers in translations from the same data as the original.',
+    'Дай страницам шаблона свои данные — числа, условия, примеры для каждой строки — а не только подставленное название. Правь общий текст, глядя на эту находку: каждая общая фраза приближает весь шаблон к порогу дубля.':
+        "Give the template's pages their own data — numbers, conditions, examples for each row — not only a substituted name. Edit the shared text with this finding in view: every shared sentence moves the whole template closer to the duplicate threshold.",
+    'Реши по ветке целиком. Закрытие задумано — убери эти страницы из sitemap и перелинковки, чтобы краулер не тратил на них обход. Не задумано — найди условие в шаблоне, которое ставит noindex этим веткам, и почини его один раз.':
+        'Decide for the whole branch. If the closing is intended, take these pages out of the sitemap and the internal links so crawlers do not spend their visits on them. If not, find the template condition that sets noindex on these branches and fix it once.',
+    'Перенеси <link rel="alternate" hreflang> в <head> шаблона: компонент, который выводит переключатель языков в теле страницы, — не место для разметки альтернатив.':
+        'Move <link rel="alternate" hreflang> into the template\'s <head>: the component that renders the language switcher in the page body is not the place for alternates markup.',
 }

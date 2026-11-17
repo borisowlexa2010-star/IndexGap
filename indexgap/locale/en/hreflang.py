@@ -127,4 +127,8 @@ MESSAGES = {
     "язык вывода: en или ru. По умолчанию — из INDEXGAP_LANG или системной локали, иначе английский":
         "output language: en or ru. By default from INDEXGAP_LANG or the system "
         "locale, otherwise English",
+    '{a0} ссылок hreflang стоят в <body> — поисковики читают их только из <head>, и связи между версиями для них нет. Перенеси разметку в <head>':
+        '{a0} hreflang links sit in <body> — search engines read them only from <head>, so they link no versions. Move the markup into <head>',
+    '{a0} ссылается обратно на {a1} — это другой адрес (схема или хост не те, что у остальных ссылок сайта). Поисковик требует точный адрес версии, а не его редирект':
+        "{a0} links back to {a1} — a different address (the scheme or host differs from the rest of the site's links). Search engines need the exact address of the version, not a redirect to it",
 }

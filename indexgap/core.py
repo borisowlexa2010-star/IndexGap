@@ -316,6 +316,7 @@ class Page:
     paragraphs: list = field(default_factory=list) # абзацы основного текста
     blocks: dict = field(default_factory=dict)     # счётчики li/table/img и т.п.
     alternates: list = None                        # hreflang: (код, href); None — не собирались
+    alternates_in_body: int = 0                    # hreflang-ссылок в <body>: не считаются
     outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
     slots: list = None                             # следы незаполненного шаблона: (вид, образец)
     alts: list = field(default_factory=list)       # непустые alt картинок: (текст, src)
@@ -749,6 +750,10 @@ class _Extractor(HTMLParser):
         self.anchors = []
         self.jsonld = []
         self.alternates = []       # (код hreflang как написан, href)
+        # hreflang в <body> поисковик не читает: такие ссылки не считаются
+        # альтернативами, а только пересчитываются для находки.
+        self.alternates_in_body = 0
+        self._in_body = False
         self.alts = []
         self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0, "img_empty_alt": 0,
                        "script": 0, "p": 0}
@@ -896,6 +901,8 @@ class _Extractor(HTMLParser):
         # ссылка в <template> не ведёт никуда, пока её не отрендерит скрипт.
         if self._skip_depth:
             return
+        if tag == "body":
+            self._in_body = True
 
         if tag not in INLINE_TAGS:
             self._glue = False
@@ -1003,7 +1010,10 @@ class _Extractor(HTMLParser):
             # раз: на каталоге в четыре тысячи страниц это было сорок секунд
             # из шестидесяти восьми.
             if "alternate" in rel.split() and a.get("hreflang"):
-                self.alternates.append((a["hreflang"].strip(), a.get("href", "").strip()))
+                if self._in_body:
+                    self.alternates_in_body += 1
+                else:
+                    self.alternates.append((a["hreflang"].strip(), a.get("href", "").strip()))
         elif tag in _HEADING_TAGS:
             self._flush_paragraph()
             self._in_heading = int(tag[1])
@@ -1827,6 +1837,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             notes=notes,
             jsonld=ex.jsonld,
             alternates=ex.alternates,
+            alternates_in_body=ex.alternates_in_body,
             paragraphs=ex.paragraphs,
             blocks=ex.blocks,
             alts=ex.alts,

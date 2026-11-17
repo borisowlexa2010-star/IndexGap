@@ -47,6 +47,10 @@ CONFIG = {
     "exact_below": 400,         # столько страниц сравниваем попарно и точно
     "near_duplicate": 0.80,     # Jaccard, выше которого пара — почти-дубль
     "similar": 0.55,            # ниже дубля, но уже повод посмотреть
+    # Шаблон у порога: столько страниц одного шаблона совпадают между собой
+    # не ниже чем на near_duplicate − duplicate_risk_margin.
+    "duplicate_risk_margin": 0.05,
+    "duplicate_risk_pages": 5,
     "thin_words": 250,          # меньше слов — тонкая страница
     "boilerplate_share": 0.90,  # биграмма в этой доле страниц считается шаблонной
     "boilerplate_min_pages": 8, # меньше — статистики нет, вердикта не будет
@@ -267,6 +271,70 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
     out.sort(key=lambda t: (-t[2], t[0].url, t[1].url))
     # `method_id` — для машин: `method` переведён и на другом языке другой.
     return {"pairs": out, "notes": notes, "method": method, "method_id": method_id}
+
+
+def _slot_pattern(a: str, b: str) -> str:
+    """
+    `/en/visa/alpha/fees` и `/en/visa/beta/fees` — один шаблон
+    `/en/visa/*/fees`: пути одной длины, различие ровно в одном сегменте.
+    Иначе пустая строка.
+    """
+    pa = urlsplit(a).path.strip("/").split("/")
+    pb = urlsplit(b).path.strip("/").split("/")
+    if len(pa) != len(pb):
+        return ""
+    diff = [i for i, (x, y) in enumerate(zip(pa, pb)) if x != y]
+    if len(diff) != 1:
+        return ""
+    pa[diff[0]] = "*"
+    return "/" + "/".join(pa) + "/"
+
+
+def duplicate_risk(pairs, cfg: dict, skip=frozenset()) -> list:
+    """
+    Шаблон, который вот-вот станет дублем.
+
+    Порог почти-дубля — резкий: страницы шаблона на 78% одинаковы — это
+    двести сведений «похожа», а на 80% — сотня критичных. На живом каталоге
+    одна правка общего текста перевела так девять страниц разом, а ещё
+    девяносто одна стояла в двух процентах от порога, размазанная по
+    сведениям. Одна находка на шаблон говорит это вслух до того, как случится.
+    """
+    top = cfg["near_duplicate"]
+    low = top - cfg.get("duplicate_risk_margin", 0.05)
+    need = cfg.get("duplicate_risk_pages", 5)
+    groups = defaultdict(lambda: {"pages": set(), "worst": 0.0, "crossed": set()})
+    for a, b, j in pairs:
+        if j < low or a.url in skip or b.url in skip:
+            continue
+        pattern = _slot_pattern(a.url, b.url)
+        if not pattern:
+            continue
+        g = groups[pattern]
+        if j >= top:
+            g["crossed"] |= {a.url, b.url}
+            continue
+        g["pages"] |= {a.url, b.url}
+        g["worst"] = max(g["worst"], j)
+    out = []
+    for pattern in sorted(groups):
+        g = groups[pattern]
+        near = g["pages"] - g["crossed"]
+        if len(near) < need:
+            continue
+        message = tr(
+            "шаблон {a0}: {a1} страниц(ы) совпадают между собой до {a2:.0%} при пороге "
+            "почти-дубля {a3:.0%}. Одна правка общего текста — и они станут критичными "
+            "дублями. Разведи их своими данными, пока это сведения",
+            # Вниз, а не к ближайшему: 79,6% «до 80% при пороге 80%» звучало
+            # как уже перешедшая граница.
+            a0=pattern, a1=len(near), a2=math.floor(g["worst"] * 100) / 100, a3=top)
+        if g["crossed"]:
+            message += " " + tr("{a0} страниц(ы) этого шаблона порог уже перешли.",
+                                a0=len(g["crossed"]))
+        out.append(("warning", pattern, "duplicate-risk",
+                    Said(message, sorted(url_key(u) for u in near))))
+    return out
 
 
 def _anchor_words(page) -> set:
@@ -1227,22 +1295,22 @@ LEVEL_ORDER = {"critical": 0, "warning": 1, "info": 2}
 # пакета оказывалась в самом низу списка.
 CODE_WEIGHT = {
     "stale-event": 0, "translations-parked": 1, "unsupported-number": 1, "still-draft": 2, "brief-left": 3, "unfilled-slot": 2, "llm-leftover": 3, "mojibake": 4,
-    "noindex": 3, "nosnippet": 4, "canonical-elsewhere": 5,
+    "noindex": 3, "noindex-group": 2, "nosnippet": 4, "canonical-elsewhere": 5,
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
-    "hreflang-no-self": 5, "hreflang-no-return": 6,
+    "hreflang-no-self": 5, "hreflang-no-return": 6, "hreflang-in-body": 6,
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
     "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
     "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "broken-link": 17, "wrong-link-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
 # Находки, которые и должны встречаться массово: это их природа, а не шаблон.
-NOT_TEMPLATE_WIDE = {"near-duplicate", "similar", "js-shell", "unsupported-number",
-                     "translations-parked",
+NOT_TEMPLATE_WIDE = {"near-duplicate", "similar", "duplicate-risk", "js-shell", "unsupported-number",
+                     "translations-parked", "noindex-group",
                      "stale-event", "still-draft", "brief-left",
                      "hreflang-no-return", "hreflang-unknown-target"}
 
@@ -1658,6 +1726,92 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
             and inside(i[1]) else i for i in issues]
 
 
+CLOSED_GROUP_ENTITIES = 3
+
+
+def collapse_closed_groups(issues: list, pages: list) -> list:
+    """
+    Закрытые целиком ветки одного раздела — одно правило, а не сто находок.
+
+    Каталог закрывает noindex страны, по которым нет проверенного текста: у
+    каждой десять вопросов, и одиннадцать стран давали 106 критичных `noindex`
+    подряд в «чинить в этом порядке». Ветка `/visa/alpha/` закрыта, если
+    закрыто не меньше 90% её страниц (их не меньше трёх). Когда в одном
+    разделе таких веток три и больше, закрытых страниц не меньше двадцати, а
+    открытых веток рядом больше, чем закрытых, — находка одна, критичная:
+    решение это или ошибка, без sitemap не видно. Страницы ветки понижаются
+    до сведений. sitemap, из которого ветки убраны, понижает и саму находку.
+    """
+    closed = {i[1] for i in issues if i[2] == "noindex" and i[0] == "critical"}
+    if len(closed) < CLOSED_SECTION_MIN:
+        return issues
+
+    def parts(url):
+        return [x for x in urlsplit(url).path.split("/") if x]
+
+    size, shut = Counter(), Counter()
+    for p in pages:
+        path = parts(p.url)
+        for depth in range(2, len(path) + 1):
+            entity = tuple(path[:depth])
+            size[entity] += 1
+            if p.url in closed:
+                shut[entity] += 1
+    by_parent = defaultdict(list)
+    for entity, n in size.items():
+        by_parent[entity[:-1]].append(entity)
+    chosen = {}
+    for parent, entities in by_parent.items():
+        full = [e for e in entities
+                if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
+        pages_closed = sum(shut[e] for e in full)
+        if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
+                and len(full) * 2 < len(entities)):
+            chosen[parent] = sorted(full)
+    if not chosen:
+        return issues
+    # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
+    for parent in sorted(chosen, key=len):
+        for other in list(chosen):
+            if other != parent and other[:len(parent)] == parent and other in chosen:
+                if any(other[:len(e)] == e for e in chosen[parent]):
+                    del chosen[other]
+    member = {}
+    for parent, full in chosen.items():
+        for e in full:
+            member[e] = parent
+
+    def group_of(url):
+        path = tuple(parts(url))
+        for depth in range(len(path), 1, -1):
+            if path[:depth] in member:
+                return member[path[:depth]]
+        return None
+
+    grouped = defaultdict(list)
+    out = []
+    for item in issues:
+        parent = group_of(item[1]) if item[2] == "noindex" and item[0] == "critical" else None
+        if parent is None:
+            out.append(item)
+            continue
+        grouped[parent].append(item[1])
+        out.append(("info",) + tuple(item[1:]))
+    for parent, urls in sorted(grouped.items()):
+        full = chosen[parent]
+        address = "/" + "/".join(parent) + "/" if parent else "/"
+        names = ", ".join(e[-1] for e in full[:8])
+        more = tr(" и ещё {a0}", a0=len(full) - 8) if len(full) > 8 else ""
+        siblings = len(by_parent[parent])
+        out.append(("critical", address, "noindex-group", Said(tr(
+            "в {a0} закрыты noindex целиком {a1} ветк(и) из {a2} — {a3} страниц: "
+            "{a4}{a5}. Это одно правило шаблона, а не {a3} проблем. Если закрытие "
+            "задумано, убери эти страницы и из sitemap — тогда находка станет "
+            "сведением", a0=address, a1=len(full), a2=siblings, a3=len(urls),
+            a4=names, a5=more), sorted(url_key(u) for u in urls))))
+    return out
+
+
 def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
     """
     noindex на странице, которой нет и в sitemap, — два согласованных решения
@@ -1678,6 +1832,15 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
         listed |= {key, key.split("?", 1)[0]}
     out = []
     for item in issues:
+        if item[2] == "noindex-group":
+            subjects = list(getattr(item[3], "subject", None) or ())
+            if (complete and item[0] == "critical" and subjects
+                    and not any(k in listed for k in subjects)):
+                item = ("info", item[1], item[2], Said(
+                    str(item[3]) + " " + tr("В sitemap их нет — похоже на решение, а "
+                                             "не на ошибку шаблона."), subjects), *item[4:])
+            out.append(item)
+            continue
         key = url_key(item[1]) if item[1] else ""
         if (complete and item[0] == "critical" and item[2] == "noindex" and key
                 and key not in listed):
@@ -1981,6 +2144,8 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         else:
             issues.append(("info", url, "similar",
                            Said(tr("похожа на {a0:.0%} на {a1}{a2}", a0=best, a1=other, a2=more), twins)))
+
+    issues += duplicate_risk(dupes["pairs"], cfg, skip=bare)
 
     # Дубли живут группами, а не парами. На живом каталоге виз 588 страниц
     # с кодом `near-duplicate` оказались 62 группами одинаковых по смыслу

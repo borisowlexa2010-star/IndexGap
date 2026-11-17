@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from urllib.parse import urlsplit
 from collections import Counter, defaultdict
 from .subject import Said
 from .core import (BRIEF_MARKERS, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, brief_prose,
@@ -1220,6 +1221,34 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
     return out
 
 
+SECTION_SEAM_MIN = 5
+
+
+def _section_counter(pages: list, counted=None):
+    """
+    Сколько страниц под общим каталогом группы. Порог шаблонности, взятый от
+    всего сайта, гас, стоило рядом появиться блогу: двадцать одинаковых
+    городских страниц среди семидесяти статей — 22% сайта, но 100% раздела.
+    """
+    paths = {p.url: [x for x in urlsplit(p.url).path.split("/") if x] for p in pages}
+    pool = [paths[p.url] for p in pages if counted is None or counted(p)]
+
+    def section_size(urls):
+        parts = [paths[u] for u in urls if u in paths]
+        if not parts:
+            return 0, ""
+        prefix = []
+        for column in zip(*[x[:-1] for x in parts]):
+            if len(set(column)) != 1:
+                break
+            prefix.append(column[0])
+        if not prefix:
+            return 0, ""
+        size = sum(1 for x in pool if x[:len(prefix)] == prefix)
+        return size, "/" + "/".join(prefix) + "/"
+    return section_size
+
+
 def check_template_seams(pages: list, cfg: dict = None) -> dict:
     """
     Ищет общий скелет: одинаковую последовательность заголовков.
@@ -1243,8 +1272,18 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     with_skeleton = sum(len(urls) for urls in skeletons.values())
     threshold = max(3, int(max(with_skeleton, 1) * cfg["template_share"]))
     stamped = set()
-    for skeleton, urls in sorted(skeletons.items()):
+    in_section = _section_counter(
+        pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2)
+
+    def stamped_here(urls):
         if len(urls) >= threshold:
+            return True
+        size, _ = in_section(urls)
+        return (len(urls) >= SECTION_SEAM_MIN and size >= cfg["min_pages_for_seams"]
+                and len(urls) >= size * cfg["template_share"])
+
+    for skeleton, urls in sorted(skeletons.items()):
+        if stamped_here(urls):
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             stamped.update(urls)
             for url in sorted(urls):
@@ -1258,7 +1297,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     # значение подстановки; оно заменяется меткой, и скелеты сравниваются
     # ещё раз. Только для страниц, которых точное сравнение не нашло.
     for skeleton, urls in sorted(_slot_skeletons(pages, stamped).items()):
-        if len(urls) >= threshold:
+        if stamped_here(urls):
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             for url in sorted(urls):
                 issues.append((
@@ -1272,8 +1311,17 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
         words = _opening(page)[:12]
         if len(words) >= 8:
             openings[" ".join(words)].append(page.url)
-    for opening, urls in sorted(openings.items()):
+    opening_section = _section_counter(pages)
+
+    def same_start(urls):
         if len(urls) >= max(3, int(len(pages) * 0.3)):
+            return True
+        size, _ = opening_section(urls)
+        return (len(urls) >= SECTION_SEAM_MIN and size >= cfg["min_pages_for_seams"]
+                and len(urls) >= size * 0.3)
+
+    for opening, urls in sorted(openings.items()):
+        if same_start(urls):
             for url in sorted(urls):
                 issues.append((
                     "warning", url, "same-opening",

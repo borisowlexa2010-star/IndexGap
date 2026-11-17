@@ -27,7 +27,7 @@ import sys
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
 
-from . import (aeo, checks, cite, content, crawlers, doctor, engines, fetch, freshness, generate,
+from . import (aeo, argparse_ru, checks, cite, content, crawlers, doctor, engines, fetch, freshness, generate,
                history,
                install, portfolio, profiles, publish, repair, report, settings,
                sources)
@@ -676,6 +676,20 @@ def _analyse(args, pages=None):
             aeo_result["issues"] = [i for i in aeo_result["issues"] if i[2] != "no-robots"]
         analysis["issues"] += aeo_result["issues"]
 
+    analysis["issues"] = checks.collapse_closed_groups(analysis["issues"], pages)
+    if not getattr(args, "sitemap", None):
+        # sitemap сборки знает, какие закрытые страницы владелец убрал и из
+        # списка: такой noindex — решение. Остальное без --sitemap не сверяется.
+        own = _build_sitemap_urls(args)
+        if own:
+            before = sum(1 for i in analysis["issues"] if i[2] == "noindex" and i[0] == "critical")
+            analysis["issues"] = checks.closed_off_map(analysis["issues"], own)
+            after = sum(1 for i in analysis["issues"] if i[2] == "noindex" and i[0] == "critical")
+            if before != after:
+                notes.append(tr(
+                    "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет "
+                    "— это решение, а не ошибка, и они понижены до сведений. Остальная "
+                    "сверка с sitemap идёт только с --sitemap", a0=before - after))
     analysis["issues"] = checks.sort_issues(
         checks.drop_closed_noise(analysis["issues"], pages))
     analysis["issues"], accepted = checks.apply_ignore(
@@ -862,13 +876,44 @@ def _print_templates(templates: list, limit: int = 5) -> None:
                  a4=t["warning_share"], a5=top))
 
 
-def _guess_robots(args):
-    for candidate in (os.path.join(args.root, "robots.txt"),
-                      os.path.join(os.path.dirname(os.path.abspath(args.root)),
-                                   "robots.txt")):
-        if os.path.isfile(candidate):
-            return candidate
+def _build_file(folder: str, name: str) -> str:
+    """
+    Файл сборки по имени. Next.js App Router кладёт `robots.txt` и
+    `sitemap.xml` маршрутами: `robots.txt/` — папка с route.js, а ответ лежит
+    рядом в `robots.txt.body`. Без этого живой сайт на Next получал «robots.txt
+    не найден» и сверку noindex без sitemap.
+    """
+    for path in (os.path.join(folder, name), os.path.join(folder, name + ".body")):
+        if os.path.isfile(path):
+            return path
     return ""
+
+
+def _guess_robots(args):
+    for folder in (args.root, os.path.dirname(os.path.abspath(args.root))):
+        found = _build_file(folder, "robots.txt")
+        if found:
+            return found
+    return ""
+
+
+def _build_sitemap_urls(args) -> list:
+    """
+    Адреса из sitemap.xml самой сборки — только если это список страниц, а не
+    индекс: дочерние файлы индекса пришлось бы качать из сети.
+    """
+    path = _build_file(args.root, "sitemap.xml")
+    if not path:
+        return []
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4096).decode("utf-8", "replace")
+    except OSError:
+        return []
+    if "<urlset" not in head or "<sitemapindex" in head:
+        return []
+    sm = doctor.read_sitemaps([path])
+    return [] if sm["errors"] else list(sm["urls"] or ())
 
 
 def _check_command(args) -> str:
@@ -2360,6 +2405,7 @@ def build_parser():
 def main(argv=None):
     _setup_output()
     preset_language(argv)
+    argparse_ru.install()
     parser = build_parser()
     # `--lang` принимается и до команды, и после неё: человек пишет
     # `indexgap --lang en check` и `indexgap check --lang en` примерно поровну.
