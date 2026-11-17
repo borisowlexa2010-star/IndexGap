@@ -281,4 +281,12 @@ MESSAGES = {
     "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. На живом сайте это 404 за редиректом":
         "the redirect stub leads to a page that is not in the build: {a0}. "
         "On the live site that is a 404 behind a redirect",
+    'шаблон {a0}: {a1} страниц(ы) совпадают между собой до {a2:.0%} при пороге почти-дубля {a3:.0%}. Одна правка общего текста — и они станут критичными дублями. Разведи их своими данными, пока это сведения':
+        'template {a0}: {a1} pages match each other by up to {a2:.0%}, and the near-duplicate threshold is {a3:.0%}. One edit to the shared text and they become critical duplicates. Give them their own data while this is still a warning',
+    '{a0} страниц(ы) этого шаблона порог уже перешли.':
+        '{a0} pages of this template have already crossed it.',
+    'в {a0} закрыты noindex целиком {a1} ветк(и) из {a2} — {a3} страниц: {a4}{a5}. Это одно правило шаблона, а не {a3} проблем. Если закрытие задумано, убери эти страницы и из sitemap — тогда находка станет сведением':
+        'in {a0}, {a1} of {a2} branches are closed with noindex as a whole — {a3} pages: {a4}{a5}. That is one template rule, not {a3} problems. If the closing is intended, take these pages out of the sitemap too, and the finding becomes info',
+    'В sitemap их нет — похоже на решение, а не на ошибку шаблона.':
+        'They are not in the sitemap — that looks like a decision, not a template mistake.',
 }

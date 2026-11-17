@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.26.0 — 2026-11-17
+
+Weak spots that a calibration run on a large real multilingual build showed,
+plus the three cases left over from 1.25. On that build the critical findings
+went from 142 to 5. The 5 that remain are real: four template duplicates and
+one rule for parked translations.
+
+* **Next.js builds: robots.txt and sitemap.xml are found.** The App Router
+  writes them as routes: `robots.txt/` is a folder with `route.js`, and the
+  response sits next to it in `robots.txt.body`. Both are now read from the
+  build. The build's own `sitemap.xml` (a page list, not an index) is used
+  without `--sitemap` for one thing only: a `noindex` page that the sitemap
+  also leaves out is a decision and drops to info.
+* **`noindex-group`.** When a section closes whole branches with one template
+  rule, the report shows one finding instead of a hundred. It fires when three
+  or more branches (`/visa/alpha/`, `/visa/beta/` …) are each at least 90%
+  closed, with twenty or more pages in all, while most branches beside them
+  stay open. The finding is critical, and the pages' own `noindex` becomes
+  info. A sitemap that leaves them all out turns the finding into info.
+* **`duplicate-risk`.** A template whose pages sit within five points of the
+  near-duplicate threshold gets one warning. Before, each pair at 75–79% was a
+  separate `similar` note, so the risk was spread over dozens of notes. One
+  edit to the shared text then made the whole group critical at once. The
+  warning covers five or more pages that differ in one path segment, and it
+  lists them.
+* **hreflang:**
+  * links in `<body>` are no longer counted as alternates, and the page gets
+    `hreflang-in-body`;
+  * a return link that points at the http:// or www. variant, while the rest
+    of the site uses another scheme or host, is a `hreflang-no-return`. The
+    reference is the address the site itself uses most, not `--site`.
+* **`template-skeleton` and `same-opening` are measured per section too.**
+  Twenty stamped `/rent/` pages are reported even with seventy blog posts
+  beside them.
+* **argparse speaks Russian.** In Russian, the help scaffolding and argument
+  errors (`error: the following arguments are required`) are translated too,
+  on Python 3.9 to 3.15.
+
 ## 1.25.0 — 2026-11-16
 
 An adversarial release: eight independent testers built sites designed to fool

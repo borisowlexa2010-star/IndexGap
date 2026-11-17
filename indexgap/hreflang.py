@@ -31,7 +31,8 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from urllib.parse import urlsplit
+from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
 from .core import url_key
@@ -82,8 +83,12 @@ class _Links(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.alternates = []      # (код как написан, href)
         self.canonical = ""
+        self.in_body = 0
+        self._body = False
 
     def handle_starttag(self, tag, attrs):
+        if tag == "body":
+            self._body = True
         if tag != "link":
             return
         data = {k.lower(): (v or "") for k, v in attrs}
@@ -93,7 +98,10 @@ class _Links(HTMLParser):
         # Атрибуты в HTML нечувствительны к регистру, и половина фреймворков
         # пишет `hrefLang`. Парсер уже привёл ключи к нижнему регистру.
         if "alternate" in rel and data.get("hreflang"):
-            self.alternates.append((data["hreflang"].strip(), data.get("href", "").strip()))
+            if self._body:
+                self.in_body += 1
+            else:
+                self.alternates.append((data["hreflang"].strip(), data.get("href", "").strip()))
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
@@ -228,13 +236,21 @@ def check(pages: list, cfg: dict = None) -> dict:
     for page in pages:
         alternates = read_alternates(page)
         declared[page.key] = alternates
+        hidden = getattr(page, "alternates_in_body", 0) or 0
+        if hidden:
+            issues.append(("warning", page.url, "hreflang-in-body", tr(
+                "{a0} ссылок hreflang стоят в <body> — поисковики читают их только "
+                "из <head>, и связи между версиями для них нет. Перенеси разметку в "
+                "<head>", a0=hidden)))
         if not alternates:
             # Закрытой странице hreflang не нужен — пакет сам советует снять его
             # с запаркованных переводов. живой каталог так и сделал, а 1.9.0
             # ответил 1 418 предупреждениями «нет hreflang». Заглушке-редиректу
             # он не нужен тем более: это не страница.
             from .checks import redirect_target
-            if indexable(page) and not redirect_target(page):
+            # Разметка в <body> уже названа своей находкой: «не объявляет
+            # ни одной альтернативы» было бы неправдой.
+            if indexable(page) and not redirect_target(page) and not hidden:
                 empty.append(page)
             continue
         keys = set()
@@ -278,6 +294,37 @@ def check(pages: list, cfg: dict = None) -> dict:
                               a0=len(members), a1=len(targets),
                               a2=", ".join(sample))))
 
+    # Адрес, которым сайт называет свои версии: http:// или другой хост в
+    # одной ответной ссылке — уже не та страница, а её редирект. Сравнивается
+    # с тем, как пишет сам сайт, а не с --site: неверный --site не должен
+    # превращать каждую ссылку в находку.
+    def split(href):
+        try:
+            return urlsplit(href)
+        except ValueError:              # `http://[x` — битый адрес, не повод падать
+            return None
+
+    origins = Counter()
+    for alternates in declared.values():
+        for _, href in alternates:
+            parts = split(href)
+            if parts and parts.scheme and parts.netloc:
+                origins[(parts.scheme.lower(), parts.netloc.lower())] += 1
+    home = origins.most_common(1)[0][0] if origins else None
+
+    def exact_return(target, page_key):
+        """href, которым target называет страницу, если он отличается от адреса сайта."""
+        if home is None:
+            return ""
+        for _, href in declared.get(target.key) or ():
+            if url_key(href) != page_key:
+                continue
+            parts = split(href)
+            if parts and parts.scheme and parts.netloc and (
+                    parts.scheme.lower(), parts.netloc.lower()) != home:
+                return href
+        return ""
+
     from .publish import indexable
     for page in pages:
         keys = targets.get(page.key)
@@ -320,6 +367,14 @@ def check(pages: list, cfg: dict = None) -> dict:
                                   "обратно. Односторонняя связь не «учитывается "
                                   "частично» — она отбрасывается вся",
                                   a0=target.url)))
+            elif back:
+                variant = exact_return(target, page.key)
+                if variant:
+                    issues.append(("critical", page.url, "hreflang-no-return", tr(
+                        "{a0} ссылается обратно на {a1} — это другой адрес (схема или "
+                        "хост не те, что у остальных ссылок сайта). Поисковик требует "
+                        "точный адрес версии, а не его редирект",
+                        a0=target.url, a1=variant)))
             if not indexable(target):
                 issues.append(("warning", page.url, "hreflang-target-blocked",
                                tr("альтернатива {a0} закрыта от индексации или "

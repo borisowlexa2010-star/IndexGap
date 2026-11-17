@@ -161,6 +161,12 @@ WHY = {
    "Structured data that disagrees with the page: an Offer price, an aggregate rating or a review count in the JSON-LD that the visible text does not contain, in any spelling (`1,600`, `1 600`, `1600.00` are one number). Google's guidelines require markup to describe what the reader sees; on a generated site the two drift apart when the template takes the markup from one dataset column and the text from another. Ratings of individual reviews are not judged.",
  "hub-missing-links":
    "A section page — `/plumbing/` — that does not link to some of the pages under it. They are found only through the sitemap or a stray link, and the section passes them none of its weight. A link counts from the section page itself and from the listing pages it leads to, at any size: its pagination (`/plumbing/page/2/`, `/plumbing-2/`), the letters of an alphabetical index, and deeper pages whose links inside the section go mostly to its pages. A \"nearby\" block on the section's own pages does not count: it sits on every page of a programmatic site and would hide a section page that links two of twenty. One finding per section, naming the pages it misses.",
+ "hreflang-in-body":
+   "`<link rel=\"alternate\" hreflang>` placed in `<body>` — usually a language-switcher component that prints the alternates where it renders. Search engines read hreflang only from `<head>` (or the sitemap, or HTTP headers), so these links are not counted as alternates at all, and the reciprocity checks see the page as having none.",
+ "noindex-group":
+   "Several branches of one section closed with noindex as a whole: three or more of them (`/visa/alpha/`, `/visa/beta/`, …), each at least 90% closed and at least three pages, twenty or more pages in all, while most branches beside them stay open. That is one template rule — a catalogue closing the entries it has no reviewed text for — and it was a hundred critical `noindex` findings in a row. Now it is one critical finding at the section, and the pages' own `noindex` becomes info. A sitemap that leaves all of them out — `--sitemap`, or the build's own `sitemap.xml` — turns it into info: closed and unlisted is a decision.",
+ "duplicate-risk":
+   "A template whose pages are within five points of the near-duplicate threshold: five or more pages that differ in one path segment (`/rent/*/deposit/`) and match each other by 75–79%. Below the threshold each pair is only a `similar` note, so the risk is spread over dozens of notes; one edit to the shared text and the whole group becomes critical at once. One warning per template, listing its pages. The margin and the page count are `duplicate_risk_margin` and `duplicate_risk_pages` in the `checks` settings.",
  "stale-year":
    "The same past year in the headings of a whole section: \"Best plumbers in Austin 2024\", \"…in Boston 2024\", \"…in Dallas 2024\" in 2026 — the heading template nobody updated in January. One page with a year in its title says nothing on its own (\"2019 Honda Civic\", \"The Batman (2022) review\", \"Paris Olympics 2024\" are about that year), so the finding needs five or more pages and at least a third of the section sharing the year. Ranges that reach the current year (\"2025–2026\", \"2025/26\"), starting points (\"since 2015\") and pages dated in that same year are not counted. One finding per section.",
  "title-h1-mismatch":
@@ -212,11 +218,15 @@ WHY = {
  "template-skeleton":
    "The same headings in the same order across many pages tell a reader — and "
    "a ranking system — that the pages were stamped out. Structure that follows "
-   "each row's own data is both better reading and better evidence of effort.",
+   "each row's own data is both better reading and better evidence of effort. "
+   "The share is measured across the site and within the group's own section: "
+   "twenty stamped `/rent/` pages are reported even when seventy blog posts with "
+   "their own headings sit beside them.",
  "same-opening":
    "The opening paragraph is what gets quoted, previewed and read first. When "
    "it is identical across pages, every one of them makes the same first "
-   "impression, and none of them answers its own query.",
+   "impression, and none of them answers its own query. Like the heading "
+   "skeleton, it is measured within the section as well as across the site.",
  "near-duplicate":
    "Near-duplicates are a group problem: a single page out of a cluster of "
    "twenty cannot be fixed alone. When the pages target different queries "
@@ -332,7 +342,10 @@ WHY = {
    "the whole set.",
  "hreflang-no-return":
    "hreflang has to be mutual: if A claims B, B must claim A. A one-sided "
-   "declaration is discarded, so the work of adding it earns nothing.",
+   "declaration is discarded, so the work of adding it earns nothing. The return "
+   "link has to name the exact address: one that points at the http:// or www. "
+   "variant of the page, while the rest of the site's links use another scheme "
+   "or host, names a redirect, not the version, and is reported too.",
  "hreflang-bad-code":
    "An alternate with an empty or malformed href is a broken link inside the "
    "signal that is supposed to hold the language versions together.",
@@ -441,7 +454,7 @@ FAMILIES = [
  ("indexing", "Indexing and reachability",
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
-  ["noindex", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
+  ["noindex", "noindex-group", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
    "wrong-link-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
 
  ("content", "Content quality at scale",
@@ -449,7 +462,7 @@ FAMILIES = [
   "single generated page always looks fine; it is the set that gives the "
   "pipeline away.",
   ["thin", "low-uniqueness", "template-skeleton", "same-opening",
-   "near-duplicate", "similar", "long-paragraph"]),
+   "near-duplicate", "similar", "duplicate-risk", "long-paragraph"]),
 
  ("head", "Titles, descriptions and headings",
   "The fields a search engine reads first and a person sees before deciding to "
@@ -468,7 +481,7 @@ FAMILIES = [
   ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
    "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch", "lang-text-mismatch", "fact-drift",
    "hreflang-canonical-conflict",
-   "hreflang-target-blocked", "hreflang-static-cluster"]),
+   "hreflang-target-blocked", "hreflang-static-cluster", "hreflang-in-body"]),
 
  ("aeo", "AI search and answer extraction",
   "AI search retrieves passages and quotes them. These checks ask whether a "

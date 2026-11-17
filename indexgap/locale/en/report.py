@@ -367,4 +367,10 @@ MESSAGES = {
         'A price or percentage in the translation differs from the original: readers of this version see another number.',
     '<li><strong>{a0}</strong> — весь сайт: {a1}</li>':
         '<li><strong>{a0}</strong> — whole site: {a1}</li>',
+    'Страницы одного шаблона почти дотянули до порога дубля: одна правка общего текста — и они станут критичными разом.':
+        'Pages of one template are close to the duplicate threshold: one edit to the shared text and they all become critical at once.',
+    'Несколько веток раздела закрыты от индекса целиком — одним правилом шаблона. Решение это или ошибка, скажет sitemap.':
+        'Several branches of a section are closed to indexing as a whole, by one template rule. The sitemap tells whether it is a decision or a mistake.',
+    'Ссылки hreflang стоят в <body>: поисковики читают их только из <head>, и версии не связаны.':
+        'hreflang links sit in <body>: search engines read them only from <head>, so the versions are not linked.',
 }
