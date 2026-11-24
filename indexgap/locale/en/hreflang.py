@@ -131,4 +131,6 @@ MESSAGES = {
         '{a0} hreflang links sit in <body> — search engines read them only from <head>, so they link no versions. Move the markup into <head>',
     '{a0} ссылается обратно на {a1} — это другой адрес (схема или хост не те, что у остальных ссылок сайта). Поисковик требует точный адрес версии, а не его редирект':
         "{a0} links back to {a1} — a different address (the scheme or host differs from the rest of the site's links). Search engines need the exact address of the version, not a redirect to it",
+    'ссылки hreflang ведут на {a0}, а сами страницы в canonical называют себя адресами {a1} ({a2} из {a3}). Каждая альтернатива — редирект, а не версия, и поисковик отбрасывает кластер. Чинится один раз, в шаблоне hreflang':
+        'hreflang links point at {a0}, while the pages name themselves {a1} in their canonical ({a2} of {a3}). Every alternate is a redirect, not a version, and search engines drop the cluster. Fix it once, in the hreflang template',
 }

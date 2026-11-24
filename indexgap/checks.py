@@ -2145,7 +2145,11 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             issues.append(("info", url, "similar",
                            Said(tr("похожа на {a0:.0%} на {a1}{a2}", a0=best, a1=other, a2=more), twins)))
 
-    issues += duplicate_risk(dupes["pairs"], cfg, skip=bare)
+    # Региональные версии одной страницы и не станут дублями: hreflang для того
+    # и нужен. Из near-duplicate они уже убраны — и из «вот-вот станут» тоже.
+    issues += duplicate_risk([(a, b, j) for a, b, j in dupes["pairs"]
+                              if tuple(sorted((a.url, b.url))) not in regional],
+                             cfg, skip=bare)
 
     # Дубли живут группами, а не парами. На живом каталоге виз 588 страниц
     # с кодом `near-duplicate` оказались 62 группами одинаковых по смыслу
