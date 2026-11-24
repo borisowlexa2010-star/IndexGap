@@ -156,6 +156,15 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
                                    spec.get("keyword", "keyword"),
                                    spec.get("config", ""))
         project = profiles.apply(project, result["profile"])
+        result["notes"] += project.get("_config_notes") or []
+        # Сроки годности: из портфеля, иначе из indexgap.json проекта — как
+        # в `check`. Проверяются здесь, чтобы `"grace_days": "1"` стало
+        # строкой отчёта об одном проекте, а не трассировкой всего прогона.
+        fresh_cfg = spec.get("freshness")
+        if fresh_cfg is None:
+            fresh_cfg = project.get("freshness")
+        else:
+            result["notes"] += settings.check_section("freshness", fresh_cfg)
         result["profile_title"] = project["_profile_title"]
         result["profile_notes"] = project["_profile_notes"]
 
@@ -204,7 +213,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         analysis["issues"] += aeo_issues
 
         if project["_checks_freshness"]:
-            fresh = freshness.check(pages, spec.get("freshness"))
+            fresh = freshness.check(pages, fresh_cfg)
             analysis["issues"] += fresh["issues"]
             result["dated_pages"] = fresh["dated"]
             if fresh["note"]:

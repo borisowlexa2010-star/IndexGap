@@ -606,7 +606,10 @@ def _analyse(args, pages=None):
         _warn_stale_skills(config_path)
         pages = _load(args)
     rows = _read_rows(args)
-    project = settings.resolve(args.root, pages, rows, args.keyword, args.config)
+    # Тот же файл, из которого взяты site, pages и профиль: иначе пороги и
+    # ignore читались из другого indexgap.json (или не читались вовсе).
+    project = settings.resolve(args.root, pages, rows, args.keyword,
+                               args.config or config_path)
     project = profiles.apply(project, args.profile or project.get("profile"))
     _describe_project(project, rows)
     print(tr("Профиль — {a0} ({a1})", a0=tr(project['_profile_title']),
@@ -627,7 +630,7 @@ def _analyse(args, pages=None):
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
-    notes = list(analysis.get("notes") or [])
+    notes = list(project.get("_config_notes") or []) + list(analysis.get("notes") or [])
 
     content_result = None
     if project["_skip_facts"]:
@@ -654,7 +657,7 @@ def _analyse(args, pages=None):
                          a0=len(orphan_rows), a1=", ".join(orphan_rows[:3])))
 
     if project["_checks_freshness"]:
-        fresh = freshness.check(pages)
+        fresh = freshness.check(pages, project.get("freshness"))
         analysis["issues"] += fresh["issues"]
         print(tr("Датировано страниц: {a0} из {a1}", a0=fresh['dated'], a1=len(pages))
               + (tr(", просрочено {a0}", a0=fresh['stale']) if fresh["stale"] else ""))
@@ -1193,10 +1196,10 @@ def cmd_doctor(args):
     if previous is None and history_dir:
         previous = history.latest(history_dir)
         baseline_label = (previous or {}).get("_path", "")
-    apply_project_defaults(args)
+    config_path = apply_project_defaults(args)
     pages = _load(args)
     _sitemap_hreflang(args, pages)
-    project = settings.resolve(args.root, pages, explicit=args.config)
+    project = settings.resolve(args.root, pages, explicit=args.config or config_path)
     # Та же достижимость, что у check: ссылки закрытых в robots.txt страниц
     # поисковик не читает.
     robots_path = getattr(args, "robots", None) or _guess_robots(args)
@@ -2170,6 +2173,11 @@ def preset_language(argv=None):
             lang = item.split("=", 1)[1]
         elif item == "--lang" and i + 1 < len(argv):
             lang = argv[i + 1]
+    # Неизвестное значение (`--lang xx`) argparse всё равно отвергнет, но
+    # ошибка должна прийти на языке из INDEXGAP_LANG, а не на запасном
+    # английском.
+    if lang.strip().lower() not in i18n.LANGS:
+        lang = ""
     return i18n.set_lang(lang)
 
 
