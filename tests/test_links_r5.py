@@ -277,11 +277,14 @@ class HostForms(Site):
         self.assertEqual(len(found), 1)
 
     def test_a_redirect_rule_covers_the_link(self):
-        cases = [{"_redirects": "/faq/  /faq  301\n/about.html /about/ 301\n"},
-                 {"_redirects": "/*  /index.html  200\n"}]
+        cases = [{"_redirects": "/faq/  /faq  301\n/about.html /about/ 301\n"}]
         for files in cases:
             with self.subTest(files=files):
                 self.assertEqual(self.found("/faq/", "/about.html", **files), [])
+        # Запасной вход SPA отдаёт главную с кодом 200 — это мягкий 404, а не
+        # перенаправление (1.27).
+        self.assertEqual(len(self.found("/faq/", "/about.html",
+                                        _redirects="/*  /index.html  200\n")), 1)
         toml = ('[[redirects]]\n  from = "/faq/"\n  to = "/faq"\n'
                 '[[redirects]]\n  from = "/about.html"\n  to = "/about/"\n')
         self.assertEqual(self.found("/faq/", "/about.html", parent={"netlify.toml": toml}), [])

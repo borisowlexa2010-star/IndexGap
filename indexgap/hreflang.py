@@ -231,6 +231,7 @@ def check(pages: list, cfg: dict = None) -> dict:
     declared = {}
     targets = {}
     x_default = set()
+    default_only = {}
     empty = []
 
     for page in pages:
@@ -253,7 +254,7 @@ def check(pages: list, cfg: dict = None) -> dict:
             if indexable(page) and not redirect_target(page) and not hidden:
                 empty.append(page)
             continue
-        keys = set()
+        keys, default_keys, lang_keys = set(), set(), set()
         for code, href in alternates:
             problem = check_tag(code)
             if problem:
@@ -264,8 +265,12 @@ def check(pages: list, cfg: dict = None) -> dict:
                 continue
             if code.strip().lower() == "x-default":
                 x_default.add(page.key)
+                default_keys.add(url_key(href))
+            else:
+                lang_keys.add(url_key(href))
             keys.add(url_key(href))
         targets[page.key] = keys
+        default_only[page.key] = default_keys - lang_keys
 
     # Шаблон, печатающий один и тот же кластер на всех страницах, — это одна
     # беда, а не тысяча. На живом каталоге недвижимости все 1 099 страниц
@@ -326,6 +331,7 @@ def check(pages: list, cfg: dict = None) -> dict:
         return ""
 
     from .publish import indexable
+    from .checks import redirect_target
     for page in pages:
         keys = targets.get(page.key)
         if keys is None:
@@ -375,6 +381,12 @@ def check(pages: list, cfg: dict = None) -> dict:
                         "хост не те, что у остальных ссылок сайта). Поисковик требует "
                         "точный адрес версии, а не его редирект",
                         a0=target.url, a1=variant)))
+            # x-default на заглушку, которая разводит посетителей по языкам
+            # (корень Hugo и Astro с языком в подкаталоге), — ровно то, что
+            # Google советует для x-default: страница выбора или редиректор.
+            if (not indexable(target) and other in default_only.get(page.key, ())
+                    and redirect_target(target)):
+                continue
             if not indexable(target):
                 issues.append(("warning", page.url, "hreflang-target-blocked",
                                tr("альтернатива {a0} закрыта от индексации или "

@@ -1859,6 +1859,21 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
     return out
 
 
+def stubs_in_sitemap(pages: list, sitemap_urls) -> list:
+    """
+    Заглушки-редиректы, которые стоят в sitemap. Как страницы они не
+    проверяются, поэтому и находки о них нет, а Search Console отметит такой
+    адрес как «страница с переадресацией»: в sitemap место цели.
+    """
+    if not sitemap_urls:
+        return []
+    listed = set()
+    for u in sitemap_urls:
+        key = url_key(u)
+        listed |= {key, key.split("?", 1)[0]}
+    return sorted(p.url for p in pages if p.key in listed and redirect_target(p))
+
+
 def drop_closed_noise(issues: list, pages: list) -> list:
     """
     Убирает находки о содержимом страниц, закрытых от индекса.
@@ -2001,6 +2016,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     boiler = boilerplate_profile(pages, cfg, words)
     dupes = find_near_duplicates(pages, cfg, words)
     shells = {p.url for p in pages if is_shell(p, cfg)}
+    by_url_all = {p.url: p for p in pages}
     # Страница из одного заголовка — тонкая, и об этом сказано. Сравнивать её с
     # другой такой же и сообщать «100% дубль» и «0% уникального» — та же
     # находка ещё дважды: сравнивать там нечего.
@@ -2017,13 +2033,16 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     from . import facts
     issues += facts.drift(pages)
     notes = list(dupes["notes"]) + list(multi["notes"]) + unknown
-    for url in sorted(shells):
+    # Заглушка-редирект без текста — тоже «пустой каркас» по виду, но о ней
+    # своя строка ниже: совет про серверный HTML к ней не относится.
+    real_shells = sorted(url for url in shells if not redirect_target(by_url_all[url]))
+    for url in real_shells:
         issues.append(("critical", url, "js-shell",
                        tr("в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют")))
-    if shells:
-        share = len(shells) / len(pages) if pages else 0
+    if real_shells:
+        share = len(real_shells) / len(pages) if pages else 0
         notes.append(
-            tr("пустых JS-каркасов: {a0} из {a1} ({a2:.0%}). На этих страницах не считались объём текста, уникальность, дубли и ссылки — в исходном HTML их неоткуда взять. Это одна беда, а не четыре: появится серверный HTML — проверки заработают.", a0=len(shells), a1=len(pages), a2=share))
+            tr("пустых JS-каркасов: {a0} из {a1} ({a2:.0%}). На этих страницах не считались объём текста, уникальность, дубли и ссылки — в исходном HTML их неоткуда взять. Это одна беда, а не четыре: появится серверный HTML — проверки заработают.", a0=len(real_shells), a1=len(pages), a2=share))
     if boiler["skipped"]:
         notes.append(tr("шаблонность не оценивалась: ") + boiler["skipped"])
     mismatch = root_mismatch(pages, graph, urlsplit(home_url).path if home_url else "")

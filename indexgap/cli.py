@@ -766,6 +766,13 @@ def cmd_check(args):
         segments = doctor.segments(funnel_result, pages)
 
     notes += got["template_notes"]
+    listed_stubs = checks.stubs_in_sitemap(pages, sitemap_urls)
+    if listed_stubs:
+        notes.append(tr(
+            "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как "
+            "страницы с переадресацией — в sitemap нужен адрес, куда они ведут.",
+            a0=len(listed_stubs), a1=", ".join(listed_stubs[:5])
+            + (tr(" и ещё {a0}", a0=len(listed_stubs) - 5) if len(listed_stubs) > 5 else "")))
 
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
