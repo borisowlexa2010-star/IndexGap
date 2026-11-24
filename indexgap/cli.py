@@ -513,13 +513,15 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
         level, url, code, message, given = item
         k = key(level, url, code)
         mine = set(subject(code, message, given))
-        return k in other and bool(mine - other[k])
+        # Пустой предмет на той стороне — неизвестный, а не «никакой»: у дубля
+        # из группы, сравненной с образцом, близнец — артефакт выборки.
+        return k in other and bool(other[k]) and bool(mine - other[k])
 
     def moved(item, other):
         level, url, code, message, given = item
         k = key(level, url, code)
         mine = set(subject(code, message, given))
-        return k in other and bool(mine) and not (mine & other[k])
+        return k in other and bool(mine) and bool(other[k]) and not (mine & other[k])
 
     before = Counter(key(l, u, c) for l, u, c, _, _ in old_items)
     now = Counter(key(l, u, c) for l, u, c, _, _ in new_items)
@@ -816,6 +818,7 @@ def cmd_check(args):
                        for a, b, j in analysis["duplicates"]],
         "duplicate_method": analysis.get("duplicate_method"),
         "duplicate_method_label": analysis.get("duplicate_method_label"),
+        "duplicates_sampled": bool(analysis.get("duplicates_sampled")),
         "unique_share": analysis["unique_share"],
         "funnel": funnel_result,
         "causes": causes,
@@ -838,7 +841,12 @@ def cmd_check(args):
     # ни того, ни другого нет, поэтому показывать её в этих счётчиках —
     # значит четыре раза сообщить об одной беде.
     reported = sum(1 for i in analysis["issues"] if i[2] == "orphan")
-    print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
+    if analysis.get("duplicates_sampled"):
+        # Пары групп-клонов показаны выборкой: число не сравнить с попарным
+        # прогоном, где 399 клонов дают 79 401 пару.
+        print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3} (выборка: группы клонов сравнивались с образцом)", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
+    else:
+        print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
     _print_first_things(analysis["issues"])
     _print_templates(got["templates"])
     print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
