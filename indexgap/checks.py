@@ -1479,15 +1479,24 @@ def template_risk(issues: list, pages: list, min_pages: int = RISK_MIN_PAGES) ->
     worst = defaultdict(float)
     levels = defaultdict(set)
     codes = defaultdict(Counter)
-    for level, url, code, _ in issues:
+    for level, url, code, message in issues:
         if level not in ("critical", "warning") or not url:
             continue
-        own = by_url.get(url) or by_url.get(url_key(url))
-        if own is None:
-            continue
-        worst[own] = max(worst[own], _severity(level, code))
-        levels[own].add(level)
-        codes[template_of[own]][code] += 1
+        owners = [by_url.get(url) or by_url.get(url_key(url))]
+        if code == "noindex-group":
+            # Находка о разделе стоит на пути `/visa/`, а закрыты страницы её
+            # веток: их собственный noindex понижен до сведений, и риск шаблона
+            # иначе обнулялся тем вернее, чем больше веток закрыто.
+            owners = [by_url.get(k) for k in getattr(message, "subject", None) or ()]
+        seen = set()
+        for own in owners:
+            if own is None:
+                continue
+            worst[own] = max(worst[own], _severity(level, code))
+            levels[own].add(level)
+            if template_of[own] not in seen:
+                seen.add(template_of[own])
+                codes[template_of[own]][code] += 1
 
     members = defaultdict(list)
     for url, name in template_of.items():
@@ -1680,6 +1689,18 @@ KEEP_ON_CLOSED = {"noindex", "canonical-elsewhere", "nosnippet", "stale-closed",
 CLOSED_SECTION_MIN = 20
 
 
+class _SectionNote(str):
+    """Заметка о закрытом разделе: помнит раздел, чтобы её можно было снять."""
+
+    def __new__(cls, section, text):
+        self = super().__new__(cls, text)
+        self.section = section
+        return self
+
+    def __reduce__(self):
+        return (_SectionNote, (self.section, str(self)))
+
+
 def _closed_sections(issues: list, notes: list, pages: list) -> list:
     """
     Закрытый раздел — решение, а не четыре тысячи ошибок.
@@ -1700,9 +1721,15 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
             total[prefix] += 1
             if p.noindex:
                 closed[prefix] += 1
+    # Ветки каталога, закрытые рядом с такими же открытыми, — не старая
+    # версия документации, а `noindex-group`: двадцать вопросов на страну
+    # тихо уходили в сведения, и большая авария выглядела зеленее малой.
+    branches = _catalogue_branches(
+        {i[1] for i in issues if i[2] == "noindex" and i[0] == "critical"}, pages)
     sections = sorted(
         (prefix for prefix, n in total.items()
-         if n >= CLOSED_SECTION_MIN and closed[prefix] >= 0.9 * n and n < 0.5 * len(pages)),
+         if n >= CLOSED_SECTION_MIN and closed[prefix] >= 0.9 * n and n < 0.5 * len(pages)
+         and not any(prefix.startswith(b) or b.startswith(prefix) for b in branches)),
         key=lambda s: (s.count("/"), s))
     chosen = []
     for prefix in sections:
@@ -1711,11 +1738,11 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
     if not chosen:
         return issues
     for prefix in chosen:
-        notes.append(tr(
+        notes.append(_SectionNote(prefix, tr(
             "раздел {a0}: закрыто от индекса {a1} страниц из {a2}. Похоже на решение, а "
             "не на ошибку — старые версии документации, черновики, служебные копии. "
             "Если так и задумано, делать ничего не нужно; находки noindex там понижены "
-            "до сведений", a0=prefix, a1=closed[prefix], a2=total[prefix]))
+            "до сведений", a0=prefix, a1=closed[prefix], a2=total[prefix])))
 
     def inside(url):
         path = urlsplit(url).path
@@ -1727,6 +1754,63 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
 
 
 CLOSED_GROUP_ENTITIES = 3
+
+# Имена веток, которые выдают версии документации: `/docs/1.2/`, `/v3/`, `/next/`.
+_VERSION_BRANCH = re.compile(
+    r"^(v?\d+(?:[._-]\d+)*(?:[._-]x)?|next|dev|nightly|canary|legacy|archive|old)$", re.I)
+
+
+def _closed_groups(closed: set, pages: list) -> tuple:
+    """
+    Разделы, в которых закрыты целиком три ветки и больше: {раздел: [ветки]},
+    а ещё ветки каждого раздела и размеры веток (всех и закрытых страниц).
+    """
+    size, shut = Counter(), Counter()
+    by_parent = defaultdict(list)
+    if len(closed) < CLOSED_SECTION_MIN:
+        return {}, by_parent, size, shut
+    for p in pages:
+        path = [x for x in urlsplit(p.url).path.split("/") if x]
+        for depth in range(2, len(path) + 1):
+            entity = tuple(path[:depth])
+            size[entity] += 1
+            if p.url in closed:
+                shut[entity] += 1
+    for entity in size:
+        by_parent[entity[:-1]].append(entity)
+    chosen = {}
+    for parent, entities in by_parent.items():
+        full = [e for e in entities
+                if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
+        pages_closed = sum(shut[e] for e in full)
+        if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
+                and len(full) * 2 < len(entities)):
+            chosen[parent] = sorted(full)
+    # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
+    for parent in sorted(chosen, key=len):
+        for other in list(chosen):
+            if other != parent and other[:len(parent)] == parent and other in chosen:
+                if any(other[:len(e)] == e for e in chosen[parent]):
+                    del chosen[other]
+    return chosen, by_parent, size, shut
+
+
+def _catalogue_branches(closed: set, pages: list) -> set:
+    """
+    Закрытые ветки, которые `noindex-group` должен увидеть, даже если каждая
+    сама по себе — большой закрытый раздел: рядом стоят такие же открытые
+    ветки (не меньше трёх страниц, и их больше, чем закрытых), и ни одна
+    закрытая не названа как версия документации. Пути веток — `/visa/alpha/`.
+    """
+    chosen, by_parent, size, _ = _closed_groups(closed, pages)
+    out = set()
+    for parent, full in chosen.items():
+        if any(_VERSION_BRANCH.match(e[-1]) for e in full):
+            continue
+        shaped = sum(1 for e in by_parent[parent] if e not in full and size[e] >= 3)
+        if shaped > len(full):
+            out |= {"/" + "/".join(e) + "/" for e in full}
+    return out
 
 
 def collapse_closed_groups(issues: list, pages: list) -> list:
@@ -1743,39 +1827,13 @@ def collapse_closed_groups(issues: list, pages: list) -> list:
     до сведений. sitemap, из которого ветки убраны, понижает и саму находку.
     """
     closed = {i[1] for i in issues if i[2] == "noindex" and i[0] == "critical"}
-    if len(closed) < CLOSED_SECTION_MIN:
+    chosen, by_parent, _, _ = _closed_groups(closed, pages)
+    if not chosen:
         return issues
 
     def parts(url):
         return [x for x in urlsplit(url).path.split("/") if x]
 
-    size, shut = Counter(), Counter()
-    for p in pages:
-        path = parts(p.url)
-        for depth in range(2, len(path) + 1):
-            entity = tuple(path[:depth])
-            size[entity] += 1
-            if p.url in closed:
-                shut[entity] += 1
-    by_parent = defaultdict(list)
-    for entity, n in size.items():
-        by_parent[entity[:-1]].append(entity)
-    chosen = {}
-    for parent, entities in by_parent.items():
-        full = [e for e in entities
-                if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
-        pages_closed = sum(shut[e] for e in full)
-        if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
-                and len(full) * 2 < len(entities)):
-            chosen[parent] = sorted(full)
-    if not chosen:
-        return issues
-    # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
-    for parent in sorted(chosen, key=len):
-        for other in list(chosen):
-            if other != parent and other[:len(parent)] == parent and other in chosen:
-                if any(other[:len(e)] == e for e in chosen[parent]):
-                    del chosen[other]
     member = {}
     for parent, full in chosen.items():
         for e in full:
@@ -1825,11 +1883,13 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
     """
     if not sitemap_urls:
         return issues
-    listed = set()
-    for u in sitemap_urls:
-        key = url_key(u)
-        # `/a/?utm_source=feed` в sitemap — это страница `/a/`, как и в воронке.
-        listed |= {key, key.split("?", 1)[0]}
+    listed = _listed_keys(sitemap_urls)
+    # Страницы, которые уже представлены находкой `noindex-group`: поднимать
+    # каждую обратно в критичные — считать одно правило шаблона дважды.
+    in_group = set()
+    for item in issues:
+        if item[2] == "noindex-group":
+            in_group.update(getattr(item[3], "subject", None) or ())
     out = []
     for item in issues:
         if item[2] == "noindex-group":
@@ -1837,8 +1897,9 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
             if (complete and item[0] == "critical" and subjects
                     and not any(k in listed for k in subjects)):
                 item = ("info", item[1], item[2], Said(
-                    str(item[3]) + " " + tr("В sitemap их нет — похоже на решение, а "
-                                             "не на ошибку шаблона."), subjects), *item[4:])
+                    str(item[3]).rstrip(". ") + ". "
+                    + tr("В sitemap их нет — похоже на решение, а "
+                         "не на ошибку шаблона."), subjects), *item[4:])
             out.append(item)
             continue
         key = url_key(item[1]) if item[1] else ""
@@ -1848,6 +1909,7 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
                 "страница закрыта от индексации и убрана из sitemap — похоже на "
                 "решение, а не на ошибку шаблона"), *item[4:])
         elif (item[0] == "info" and item[2] == "noindex" and key in listed
+              and key not in in_group
               and _slug(item[1]) not in _CLOSED_BY_DESIGN):
             # Закрытый раздел понижен до сведений ещё при разборе сборки, когда
             # sitemap не было видно. Раздел, который всё ещё отдан в sitemap,
@@ -1856,6 +1918,75 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
                 "страница закрыта от индексации, но стоит в sitemap — противоречие: "
                 "если закрытие не задумано, трафика не будет"), *item[4:])
         out.append(item)
+    return out
+
+
+def _listed_keys(sitemap_urls) -> set:
+    listed = set()
+    for u in sitemap_urls or ():
+        key = url_key(u)
+        # `/a/?utm_source=feed` в sitemap — это страница `/a/`, как и в воронке.
+        listed |= {key, key.split("?", 1)[0]}
+    return listed
+
+
+SITEMAP_COVERAGE_MIN = 0.5
+
+
+def closed_against_sitemap(issues: list, notes: list, pages: list, sitemap_urls,
+                           complete: bool = True, build: bool = False) -> list:
+    """
+    `closed_off_map` с проверкой, что sitemap вообще можно верить, и с
+    заметками, которые совпадают с тем, что случилось.
+
+    «Нет в sitemap — значит убрана намеренно» верно только для полного
+    списка. Устаревший sitemap сборки с одной главной или собранный для
+    `localhost:3000` не называет и открытых страниц: по нему любой noindex
+    выглядел решением. Если в sitemap меньше половины открытых страниц,
+    noindex не понижается, и об этом сказано. Закрытая страница, которая в нём
+    стоит, по-прежнему противоречие. Заметка «раздел понижен до сведений»
+    снимается, если sitemap поднял его страницы обратно. `build` — sitemap
+    взят из сборки, без `--sitemap`.
+    """
+    if not sitemap_urls:
+        return issues
+    listed = _listed_keys(sitemap_urls)
+    open_keys = {url_key(p.url) for p in pages if indexable(p)}
+    covered = len(open_keys & listed)
+    sparse = not open_keys or covered < SITEMAP_COVERAGE_MIN * len(open_keys)
+    out = closed_off_map(issues, sitemap_urls, complete=complete and not sparse)
+
+    def lowered(after):
+        n = 0
+        for was, now in zip(issues, after):
+            if was[0] == "critical" and now[0] == "info":
+                if now[2] == "noindex":
+                    n += 1
+                elif now[2] == "noindex-group":
+                    n += len(getattr(now[3], "subject", None) or ())
+        return n
+
+    if complete and sparse and lowered(closed_off_map(issues, sitemap_urls)):
+        notes.append(tr(
+            "noindex не сверен с sitemap: в нём {a0} из {a1} открытых страниц — "
+            "список неполный, устарел или собран для другого адреса. «Нет в "
+            "sitemap» по нему не значит «убрана намеренно», и закрытые страницы "
+            "остаются критичными", a0=covered, a1=len(open_keys)))
+    down = lowered(out)
+    if build and down:
+        notes.append(tr(
+            "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет "
+            "— это решение, а не ошибка, и они понижены до сведений. Остальная "
+            "сверка с sitemap идёт только с --sitemap", a0=down))
+    raised = [now[1] for was, now in zip(issues, out)
+              if was[0] == "info" and now[0] == "critical" and now[2] == "noindex"]
+    if raised:
+        paths = []
+        for url in raised:
+            path = urlsplit(url).path
+            paths.append(path if path.endswith("/") else path + "/")
+        notes[:] = [n for n in notes if not (
+            isinstance(n, _SectionNote) and any(p.startswith(n.section) for p in paths))]
     return out
 
 

@@ -464,8 +464,25 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     которые в этот раз не шли (`unchecked` — их коды), тоже не исчезли:
     их не искали.
     """
+    # Страница, чей noindex теперь представлен находкой `noindex-group`, не
+    # «исчезла» критичной и не «появилась» сведением: она закрыта, как и была.
+    grouped, accepted_group = set(), set()
+    for level, url, code, message in list(issues) + list(accepted or []):
+        if code == "noindex-group":
+            grouped.update(subject_of(message) or ())
+    for level, url, code, message in accepted or []:
+        if code == "noindex-group":
+            accepted_group.update(subject_of(message) or ())
+    # ignore принимает группу по пути раздела, и ветка, закрытая после базы,
+    # входила в неё молча. Страница, которой в базе не было среди закрытых,
+    # — новая критичная, даже если принятая группа её поглотила.
+    was_closed = {url_key(i.get("url") or "") for i in old if i.get("code") == "noindex"}
+
     def key(level, url, code):
-        return level, code, url_key(url or "")
+        address = url_key(url or "")
+        if code == "noindex" and address in grouped:
+            level = "grouped"
+        return level, code, address
 
     # База до 1.25 не хранит полный предмет: тогда обе стороны сравниваются
     # по тексту, иначе полный предмет новой стороны против укороченного
@@ -512,6 +529,9 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
         k = key(level, url, code)
         seen[k] += 1
         if seen[k] > before[k] or changed(item, had):
+            if (code == "noindex" and k[2] in accepted_group
+                    and k[2] not in was_closed):
+                level = "critical"
             new.append({"level": level, "url": url, "code": code, "message": message})
     kept_items = [(level, url, code, message, subject_of(message))
                   for level, url, code, message in accepted or []]
@@ -682,14 +702,8 @@ def _analyse(args, pages=None):
         # списка: такой noindex — решение. Остальное без --sitemap не сверяется.
         own = _build_sitemap_urls(args)
         if own:
-            before = sum(1 for i in analysis["issues"] if i[2] == "noindex" and i[0] == "critical")
-            analysis["issues"] = checks.closed_off_map(analysis["issues"], own)
-            after = sum(1 for i in analysis["issues"] if i[2] == "noindex" and i[0] == "critical")
-            if before != after:
-                notes.append(tr(
-                    "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет "
-                    "— это решение, а не ошибка, и они понижены до сведений. Остальная "
-                    "сверка с sitemap идёт только с --sitemap", a0=before - after))
+            analysis["issues"] = checks.closed_against_sitemap(
+                analysis["issues"], notes, pages, own, build=True)
     analysis["issues"] = checks.sort_issues(
         checks.drop_closed_noise(analysis["issues"], pages))
     analysis["issues"], accepted = checks.apply_ignore(
@@ -749,8 +763,8 @@ def cmd_check(args):
         if sm["urls"]:
             sitemap_urls = sm["urls"]
             analysis["issues"] = checks.sort_issues(
-                checks.closed_off_map(analysis["issues"], sitemap_urls,
-                                      complete=not sm["errors"]))
+                checks.closed_against_sitemap(analysis["issues"], notes, pages, sitemap_urls,
+                                              complete=not sm["errors"]))
             got["template_notes"] = checks.template_wide(analysis["issues"], len(pages),
                                                          pages=pages)
             got["templates"] = checks.template_risk(analysis["issues"], pages)
@@ -877,16 +891,7 @@ def _print_templates(templates: list, limit: int = 5) -> None:
 
 
 def _build_file(folder: str, name: str) -> str:
-    """
-    Файл сборки по имени. Next.js App Router кладёт `robots.txt` и
-    `sitemap.xml` маршрутами: `robots.txt/` — папка с route.js, а ответ лежит
-    рядом в `robots.txt.body`. Без этого живой сайт на Next получал «robots.txt
-    не найден» и сверку noindex без sitemap.
-    """
-    for path in (os.path.join(folder, name), os.path.join(folder, name + ".body")):
-        if os.path.isfile(path):
-            return path
-    return ""
+    return portfolio.build_file(folder, name)
 
 
 def _guess_robots(args):
@@ -898,22 +903,7 @@ def _guess_robots(args):
 
 
 def _build_sitemap_urls(args) -> list:
-    """
-    Адреса из sitemap.xml самой сборки — только если это список страниц, а не
-    индекс: дочерние файлы индекса пришлось бы качать из сети.
-    """
-    path = _build_file(args.root, "sitemap.xml")
-    if not path:
-        return []
-    try:
-        with open(path, "rb") as fh:
-            head = fh.read(4096).decode("utf-8", "replace")
-    except OSError:
-        return []
-    if "<urlset" not in head or "<sitemapindex" in head:
-        return []
-    sm = doctor.read_sitemaps([path])
-    return [] if sm["errors"] else list(sm["urls"] or ())
+    return portfolio.build_sitemap_urls(args.root)
 
 
 def _check_command(args) -> str:
@@ -1806,7 +1796,9 @@ def cmd_portfolio(args):
                                   out_path=report_pair(args.out)[0])
     json_path = report_pair(args.out)[1]
     _write_json(json_path, {
-        "projects": [{k: v for k, v in r.items() if k != "issues"} for r in results],
+        # Название профиля хранится русским ключом словаря, как и в HTML.
+        "projects": [{k: (tr(v) if k == "profile_title" and v else v)
+                      for k, v in r.items() if k != "issues"} for r in results],
         "patterns": patterns,
         "unique": uniques,
     })

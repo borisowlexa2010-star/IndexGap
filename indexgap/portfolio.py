@@ -210,6 +210,9 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             if fresh["note"]:
                 result["notes"].append(fresh["note"])
 
+        # Закрытые ветки и sitemap — тем же порядком, что в `check`: иначе
+        # один проект получал в портфеле другой счёт критичных.
+        analysis["issues"] = checks.collapse_closed_groups(analysis["issues"], pages)
         if spec.get("sitemap"):
             sm = doctor.read_sitemap(spec["sitemap"])
             if sm["error"]:
@@ -217,6 +220,13 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             else:
                 funnel = doctor.funnel(pages, sm["urls"], None)
                 result["funnel"] = funnel["steps"]
+                analysis["issues"] = checks.closed_against_sitemap(
+                    analysis["issues"], result["notes"], pages, sm["urls"])
+        else:
+            own = build_sitemap_urls(spec["root"])
+            if own:
+                analysis["issues"] = checks.closed_against_sitemap(
+                    analysis["issues"], result["notes"], pages, own, build=True)
 
         analysis["issues"] = checks.sort_issues(
             checks.drop_closed_noise(analysis["issues"], pages))
@@ -239,11 +249,44 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
     return result
 
 
+def build_file(folder: str, name: str) -> str:
+    """
+    Файл сборки по имени. Next.js App Router кладёт `robots.txt` и
+    `sitemap.xml` маршрутами: `robots.txt/` — папка с route.js, а ответ лежит
+    рядом в `robots.txt.body`. Без этого живой сайт на Next получал «robots.txt
+    не найден» и сверку noindex без sitemap.
+    """
+    for path in (os.path.join(folder, name), os.path.join(folder, name + ".body")):
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+def build_sitemap_urls(root: str) -> list:
+    """
+    Адреса из sitemap.xml самой сборки — только если это список страниц, а не
+    индекс: дочерние файлы индекса пришлось бы качать из сети.
+    """
+    path = build_file(root, "sitemap.xml")
+    if not path:
+        return []
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4096).decode("utf-8", "replace")
+    except OSError:
+        return []
+    if "<urlset" not in head or "<sitemapindex" in head:
+        return []
+    sm = doctor.read_sitemaps([path])
+    return [] if sm["errors"] else list(sm["urls"] or ())
+
+
 def _guess_robots(root: str) -> str:
-    for candidate in (os.path.join(root, "robots.txt"),
-                      os.path.join(os.path.dirname(os.path.abspath(root)), "robots.txt")):
-        if os.path.isfile(candidate):
-            return candidate
+    # Тот же поиск, что в `check`: и `robots.txt.body` маршрута Next.js.
+    for folder in (root, os.path.dirname(os.path.abspath(root))):
+        found = build_file(folder, "robots.txt")
+        if found:
+            return found
     return ""
 
 

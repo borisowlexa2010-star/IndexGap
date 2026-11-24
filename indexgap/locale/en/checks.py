@@ -289,4 +289,8 @@ MESSAGES = {
         'in {a0}, {a1} of {a2} branches are closed with noindex as a whole — {a3} pages: {a4}{a5}. That is one template rule, not {a3} problems. If the closing is intended, take these pages out of the sitemap too, and the finding becomes info',
     'В sitemap их нет — похоже на решение, а не на ошибку шаблона.':
         'They are not in the sitemap — that looks like a decision, not a template mistake.',
+    "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет — это решение, а не ошибка, и они понижены до сведений. Остальная сверка с sitemap идёт только с --sitemap":
+        "noindex was checked against the build's sitemap.xml: {a0} closed pages are not listed in it — that is a decision, not a mistake, and they are lowered to info. Everything else is checked against the sitemap only with --sitemap",
+    "noindex не сверен с sitemap: в нём {a0} из {a1} открытых страниц — список неполный, устарел или собран для другого адреса. «Нет в sitemap» по нему не значит «убрана намеренно», и закрытые страницы остаются критичными":
+        "noindex was not checked against the sitemap: it lists {a0} of {a1} open pages — the list is partial, stale or built for another address. \"Not in the sitemap\" does not mean \"left out on purpose\" there, and the closed pages stay critical",
 }
