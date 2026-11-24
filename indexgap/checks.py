@@ -2118,6 +2118,17 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
             path = path[len(base):]
         return path
 
+    def pattern_of(pattern):
+        # Адрес целиком или путь без ведущей косой черты не совпадали ни с чем:
+        # сравнивается путь, а он всегда начинается с «/».
+        if "://" in pattern:
+            pattern = path_of(pattern)
+        elif pattern and pattern[0] not in "/*?[":
+            pattern = "/" + pattern
+        return pattern
+
+    rules = {code: (rule if rule is True else [pattern_of(p) for p in rule])
+             for code, rule in rules.items()}
     kept, accepted = [], []
     for issue in issues:
         path = path_of(issue[1])
