@@ -108,6 +108,35 @@ def intent_key(value: str) -> frozenset:
                      if t not in STOPWORDS and (len(t) > 1 or t.isdigit()))
 
 
+# Предлоги направления. «london to paris» и «paris to london» — один набор
+# слов, но два маршрута с разными ценами: каталог маршрутов терял половину.
+_TOWARD = {"to", "into", "в", "во", "до"}
+_AWAY = {"from", "из", "от", "с", "со"}
+
+
+def direction_key(value: str) -> tuple:
+    """
+    Куда и откуда: основы слов сразу после предлогов направления.
+
+    Пустой результат — направления в запросе нет: «таиланд виза» не спорит
+    ни с «виза в таиланд», ни с «визы в таиланде».
+    """
+    tokens = re.findall(r"\w+", (value or "").lower(), flags=re.UNICODE)
+    toward, away = set(), set()
+    for n, token in enumerate(tokens):
+        side = toward if token in _TOWARD else away if token in _AWAY else None
+        if side is None:
+            continue
+        for nxt in tokens[n + 1:]:
+            if nxt in STOPWORDS:
+                continue
+            side.add(_stem(nxt))
+            break
+    if not toward and not away:
+        return ()
+    return (frozenset(toward), frozenset(away))
+
+
 def slugify(value: str, max_len: int = None) -> str:
     """
     Латинский slug. Кириллица транслитерируется, диакритика снимается.
@@ -433,7 +462,11 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
                              "reason": tr("slug совпадает с «{a0}»", a0=seen_slugs[slug])})
             continue
         seen_slugs[slug] = key
-        survivors.append((i, key, slug, row))
+        # Собственная колонка `slug` задаёт адрес сама (см. write_tasks), и
+        # в разбор уходит именно он: раньше --json называл slug, которого
+        # в записанных путях не было.
+        own = (row.get("slug") or "").strip()
+        survivors.append((i, key, _path_segment(own) if own else slug, row))
 
     for column, count in sorted(empty_columns.items()):
         if count == len(kept) and kept:
@@ -450,10 +483,20 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     for intent, positions in sorted(groups.items(), key=lambda kv: survivors[kv[1][0]][1]):
         if len(positions) < 2 or not intent:
             continue
-        keeper = positions[0]
-        for pos in positions[1:]:
-            near.append((survivors[keeper][1], survivors[pos][1], 1.0))
-            drop.add(pos)
+        # Внутри одного набора слов разное направление — разные маршруты.
+        # Строка без направления примыкает к первой: «таиланд виза» — это
+        # всё ещё «виза в таиланд».
+        routes = defaultdict(list)
+        for pos in positions:
+            routes[direction_key(survivors[pos][1])].append(pos)
+        loose = routes.pop((), [])
+        buckets = list(routes.values()) or [[]]
+        buckets[0] = sorted(buckets[0] + loose)
+        for bucket in buckets:
+            keeper = bucket[0]
+            for pos in bucket[1:]:
+                near.append((survivors[keeper][1], survivors[pos][1], 1.0))
+                drop.add(pos)
 
     final = [s for pos, s in enumerate(survivors) if pos not in drop]
     for pos, (i, key, slug, row) in enumerate(survivors):
@@ -534,16 +577,17 @@ def write_tasks(audit: dict, out_dir: str, keyword_field: str,
     # на языке, определённом до разбора `--lang`.
     brief = brief or tr(DEFAULT_BRIEF)
     written, skipped, failed = [], [], []
+    planned = {}
     root = os.path.abspath(out_dir)
     for i, key, slug, row in audit["keep"]:
         fields = {k: _path_segment(v) for k, v in row.items()}
         # Собственная колонка `slug` в датасете важнее нашей: человек завёл её
         # ровно затем, чтобы задать адреса самому. Раньше она молча
         # перезаписывалась, и продуманная структура URL исчезала без следа.
-        if not (row.get("slug") or "").strip():
-            fields["slug"] = slug
+        # Разбор уже кладёт её значение в `slug`.
+        fields["slug"] = slug
         if not (row.get("keyword") or "").strip() or keyword_field != "keyword":
-            fields["keyword"] = slug
+            fields["keyword"] = slugify(key)
         try:
             rel = path_pattern.format(**fields)
         except (KeyError, IndexError, ValueError) as exc:
@@ -564,6 +608,15 @@ def write_tasks(audit: dict, out_dir: str, keyword_field: str,
             failed.append({"keyword": key,
                            "reason": tr("шаблон уводит файл за пределы --out-dir")})
             continue
+        # Две строки датасета с одним адресом (одинаковый собственный slug,
+        # шаблон без различающей колонки). Раньше вторая молча считалась
+        # «файл уже есть», хотя файл только что записала первая.
+        if path in planned:
+            failed.append({"keyword": key,
+                           "reason": tr("тот же путь, что у «{a0}»: поправь slug в датасете "
+                                        "или --pattern", a0=planned[path])})
+            continue
+        planned[path] = key
         if os.path.exists(path):
             skipped.append(path)
             continue

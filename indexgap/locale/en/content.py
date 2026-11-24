@@ -67,6 +67,8 @@ MESSAGES = {
     "--pattern «{a0}»: {a1}. Фигурные скобки должны быть парными, а внутри них — имя колонки.":
         "--pattern “{a0}”: {a1}. Braces must be balanced, with a column name inside.",
     "--pattern «{a0}»: колонок ": "--pattern “{a0}”: column ",
+    "тот же путь, что у «{a0}»: поправь slug в датасете или --pattern":
+        "the same path as “{a0}”: fix the slug in the dataset or --pattern",
     "slug совпадает с «{a0}»": "slug collides with “{a0}”",
     "{a0} — это каталог, а нужен файл с ключами.":
         "{a0} is a directory — a file of keywords is needed.",

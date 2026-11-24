@@ -1031,6 +1031,28 @@ def _first_run_note(manifest_path: str) -> None:
              "каждой сборке.", a0=manifest_path))
 
 
+def _warn_sitemap_blocked(args, pages) -> None:
+    """
+    Страницы в sitemap, которые robots.txt сборки не пускает обходить.
+
+    Из sitemap они не убираются: что неверно — правило или список, решает
+    человек. Но молча записать то, что `check` назовёт критичным, нельзя.
+    Как и в `check`, robots.txt сборки под подпутём (/repo/) не действует.
+    """
+    if urlsplit(args.site or "").path.strip("/"):
+        return
+    robots_path = _guess_robots(args)
+    if not robots_path:
+        return
+    blocked = aeo.blocked_urls(pages, aeo.read_robots(robots_path))
+    listed = sorted(p.url for p in pages if p.url in blocked and publish.indexable(p))
+    if listed:
+        print(tr("  ! {a0} адрес(ов) в sitemap закрыты в {a1} (Disallow) — поисковик их "
+                 "не обойдёт: {a2}. Открой раздел или закрой страницы noindex.",
+                 a0=len(listed), a1=robots_path, a2=", ".join(listed[:3])
+                 + (" …" if len(listed) > 3 else "")))
+
+
 def cmd_sitemap(args):
     config_path = apply_project_defaults(args)
     pages = _load(args)
@@ -1039,7 +1061,8 @@ def cmd_sitemap(args):
     manifest = load_manifest(manifest_path)
     if manifest.pop("_broken", False):
         print(tr("  ! манифест был повреждён и прочитан как пустой — у всех страниц будет сегодняшний lastmod"))
-    foreign = publish.foreign_sitemap(args.out_dir or args.root, manifest)
+    manifest_base = os.path.dirname(os.path.abspath(manifest_path))
+    foreign = publish.foreign_sitemap(args.out_dir or args.root, manifest, manifest_base)
     if foreign and not args.force:
         raise SourceError(tr(
             "{a0} уже существует, и написал его не indexgap. Заменять без спроса не "
@@ -1063,7 +1086,8 @@ def cmd_sitemap(args):
         _first_run_note(manifest_path)
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
-                                   public_prefix=args.public_prefix)
+                                   public_prefix=args.public_prefix,
+                                   base_dir=manifest_base)
     save_manifest(manifest_path, result["manifest"])
     print(tr("Включено: {a0}   Исключено (noindex, canonical, черновики): {a1}", a0=result['included'], a1=result['excluded']))
     if result["drafts"]:
@@ -1072,7 +1096,12 @@ def cmd_sitemap(args):
         print(f"  {path}")
     for path in result["removed"]:
         print(tr("  удалён устаревший шард: {a0}", a0=path))
-    if args.out_dir and not args.public_prefix and result["included"] > publish.MAX_URLS_PER_FILE:
+    _warn_sitemap_blocked(args, pages)
+    if result["too_long"]:
+        print(tr("  ! {a0} адрес(ов) длиннее {a1} символов — поисковик такой адрес из sitemap "
+                 "не примет, укороти slug: {a2}", a0=len(result["too_long"]),
+                 a1=publish.MAX_LOC_LENGTH - 1, a2=result["too_long"][0][:120] + "…"))
+    if args.out_dir and not args.public_prefix and result["shards"]:
         print(tr("  ! шардов больше одного: если ./public не корень сайта, укажи --public-prefix, иначе индекс будет ссылаться не туда"))
     return 0
 

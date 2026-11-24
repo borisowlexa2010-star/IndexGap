@@ -140,6 +140,12 @@ MESSAGES = {
     "  сайт       {a0}": "  site       {a0}",
     "  страницы   {a0}": "  pages      {a0}",
     "  тип        {a0}   ({a1})": "  type       {a0}   ({a1})",
+    "  ! {a0} адрес(ов) в sitemap закрыты в {a1} (Disallow) — поисковик их не обойдёт: {a2}. Открой раздел или закрой страницы noindex.":
+        "  ! {a0} address(es) in the sitemap are blocked in {a1} (Disallow) — the search "
+        "engine will not crawl them: {a2}. Open the section or close those pages with noindex.",
+    "  ! {a0} адрес(ов) длиннее {a1} символов — поисковик такой адрес из sitemap не примет, укороти slug: {a2}":
+        "  ! {a0} address(es) are longer than {a1} characters — a search engine will not "
+        "accept such an address from a sitemap; shorten the slug: {a2}",
     "  удалён устаревший шард: {a0}": "  removed a stale shard: {a0}",
     "  черновиков не опубликовано: {a0} (status: draft во фронтматтере)":
         "  drafts held back: {a0} (status: draft in the frontmatter)",
