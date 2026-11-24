@@ -905,6 +905,11 @@ def _filled(value) -> bool:
     if isinstance(value, (list, tuple)):
         return any(_filled(v) for v in value)
     if isinstance(value, dict):
+        # `{"@id": "https://site/#organization"}` — ссылка на узел графа, где
+        # издатель описан один раз на весь сайт. Это заполненное поле: так
+        # пишет Yoast, Next.js-шаблоны и половина генераторов JSON-LD.
+        if _filled(value.get("@id")):
+            return True
         return any(_filled(v) for k, v in value.items() if not str(k).startswith("@"))
     return value is not None and value is not False
 

@@ -267,5 +267,15 @@ class QuestionHeadings(unittest.TestCase):
         self.assertIn("no-question-headings", {i[2] for i in aeo.check_extractable(page)})
 
 
+
+class ReferencedPublisher(unittest.TestCase):
+    """Издатель ссылкой на узел графа — заполненное поле (сверка на живой сборке)."""
+
+    def test_an_id_reference_is_an_author(self):
+        from indexgap import aeo
+        self.assertTrue(aeo._filled({"@id": "https://demo.example/#organization"}))
+        self.assertFalse(aeo._filled({"@id": ""}))
+        self.assertFalse(aeo._filled({"@type": "Person"}))
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,120 @@
 # Changelog
 
+## 1.27.0 — 2026-11-24
+
+A second adversarial round: ten testers built sites to fool 1.26 and reported
+92 reproduced cases. 87 are fixed here, each with a regression test. Four are
+deferred and one is by design. On a large real multilingual build the critical
+count stays at 5. 35 declarative headings no longer count as questions, so
+`no-question-headings` rises by 35.
+
+### Closed pages and sitemaps
+
+* **A sitemap no longer lowers `noindex` when it cannot be trusted.** This
+  covers a stale or partial `sitemap.xml`, and one written for another host
+  such as `localhost:3000`. It applies to `noindex` and `noindex-group`. When
+  the sitemap lists fewer than half of the open pages, closed pages stay
+  critical and the run says so.
+* **Large closed catalogue branches (20 or more pages each) get
+  `noindex-group`.** Closed documentation versions (`/1.2/`, `/v3/`, `/next/`)
+  still count as a decision.
+* **`portfolio` now counts like `check`.** It reads Next.js `robots.txt.body`,
+  groups closed branches and checks `noindex` against a sitemap.
+* **`--baseline`: a branch closed inside an accepted (ignored) group is new
+  critical.** Pages absorbed into a group are no longer reported as gone.
+
+### Facts
+
+* **Fewer numbers pass without a match:**
+  * a scale suffix no longer lets a page number match any row number: `$3k`
+    next to `3 months` is critical;
+  * a number from a column with a different measure no longer supports the
+    page;
+  * date and URL cells no longer give a row stray numbers.
+* **More unit spellings are read:**
+  * short units match long forms (`min` ↔ `minutes`);
+  * CJK units followed by kana or hangul (`44分です`) are read.
+* **Ranges:**
+  * a year-like upper end of a price range is checked;
+  * a descending range keeps its first end;
+  * `$1,450 – 1600 Oak Avenue` is no longer a range.
+* **Site constants need a rare second value.** A 5:3 split is per-row data.
+* **Units in column names count** for computed totals (`rent_usd`,
+  `deposit_months`).
+
+### Framework builds
+
+* **Pages under `/status/404/` and similar paths are checked.** Error pages are
+  skipped only at the root.
+* **SPA fallbacks and app shells are not checked as pages.** This covers
+  `200.html`, the Gatsby app-shell fallback and Next.js `_global-error.html`.
+* **A catch-all `200` rewrite is a soft 404, not a redirect.**
+* **Fewer false findings on framework output:**
+  * Next.js redirect stubs are not "empty shells";
+  * an `x-default` to the language-redirect root is fine;
+  * `check --sitemap` names redirect stubs listed in the sitemap.
+
+### Structured data and AI search
+
+* **JSON-LD `Infinity` / `1e400` no longer crashes the run.** NaN and Infinity
+  are `jsonld-broken`.
+* **`jsonld-mismatch` is stricter:**
+  * a price is no longer matched from unrelated whole and cents numbers;
+  * `16` is no longer matched by `$1,600`.
+* **`jsonld-faq-invisible` checks more:**
+  * the full question text is compared;
+  * a nested FAQPage is checked too.
+* **Fewer false or missed signals:**
+  * `jsonld-no-type` flags `@context` without `@type`;
+  * `ai-crawler-blocked` respects `Allow` rules;
+  * empty or null author and date values do not count, and microdata or RDFa
+    ones do;
+  * a publisher given by `@id` reference counts;
+  * "Who we are" is not a question.
+
+### diff
+
+* **Redirects that shadow pages still in the build are checked.** This covers
+  Vercel `redirects` and Netlify forced rules.
+* **Rules that never answer a crawler no longer hide 404s:**
+  * a `_redirects` outside the publish directory;
+  * conditional rules;
+  * 404/410 answers.
+* **A section rewritten to the home page is a soft 404.**
+* **Sitewide canonical and URL-form changes are template changes.**
+* **A meta-refresh into nothing is a warning.**
+* **Findings follow a moved section.**
+* **More redirect formats are read.**
+
+### Generation, scale and configuration
+
+* **`sitemap`:**
+  * it no longer deletes or overwrites another tool's files;
+  * it encodes `<loc>` and splits by size;
+  * it warns about robots-blocked and over-long addresses;
+  * it skips expired pages.
+* **`plan` and `init`:**
+  * `plan` keeps opposite-direction routes and reports slug collisions;
+  * `init` keeps the site path and picks the right dataset.
+* **LSH duplicate search:**
+  * it is stable across baselines;
+  * it no longer loses clone pairs;
+  * the seams check is no longer quadratic: 30,000 pages take about 8 s
+    instead of 105 s.
+* **Configuration:**
+  * one `indexgap.json` per run, applied whole even when the pages are deep in
+    the project;
+  * `content`, `aeo` and `freshness` settings are validated;
+  * typos get a note;
+  * `ignore` accepts full URLs.
+* **Links:**
+  * `hub-missing-links` works beside "nearby" blocks;
+  * header `nofollow` stops the crawl;
+  * `.md` / `.htm` / `INDEX.HTML` links are `wrong-link-form`;
+  * unquoted meta refresh is a redirect;
+  * nofollow links are kept;
+  * links into an empty section get a note.
+
 ## 1.26.0 — 2026-11-17
 
 Weak spots that a calibration run on a large real multilingual build showed,
