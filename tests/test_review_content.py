@@ -44,9 +44,10 @@ class TestNumbersAreReadWhole(unittest.TestCase):
             found = findings(text, {"k": "a", "processing": "3-5 days"})
             self.assertNotIn("unsupported-number", found, (text, found))
 
-    def test_a_date_in_the_row_gives_its_numbers(self):
+    def test_a_date_in_the_row_does_not_support_other_facts(self):
+        # 1.27: the day of a date is not a number of days.
         found = findings("Open for 15 days.", {"k": "a", "opens": "2026-03-15"})
-        self.assertNotIn("unsupported-number", found, found)
+        self.assertIn("unsupported-number", found, found)
 
     def test_sku_still_does_not_pardon_a_fake_number(self):
         found = findings("Lasts 90 days.", {"k": "a", "sku": "A-90-15"})

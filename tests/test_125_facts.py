@@ -75,7 +75,9 @@ class TestSiteConstants(unittest.TestCase):
         self.assertEqual(content._site_constants([{"term": "3-5 days"}] * 4), {"3", "5"})
 
     def test_a_clear_majority_stays_constant(self):
-        rows = [{"fee": "500"}] * 6 + [{"fee": "700"}] * 4
+        # 1.27: a runner-up in a quarter of the top or more is row data, not
+        # an exception (6:4 is now per-row); a rare exception keeps the constant.
+        rows = [{"fee": "500"}] * 9 + [{"fee": "700"}] * 1
         self.assertEqual(content._site_constants(rows), {"500"})
 
 
