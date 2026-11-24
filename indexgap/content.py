@@ -1224,14 +1224,55 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
 SECTION_SEAM_MIN = 5
 
 
+_SLUG_TOKEN = re.compile(r"[-_.]+")
+_SLUG_DEPTH = 8
+
+
 def _section_counter(pages: list, counted=None):
     """
     Сколько страниц под общим каталогом группы. Порог шаблонности, взятый от
     всего сайта, гас, стоило рядом появиться блогу: двадцать одинаковых
     городских страниц среди семидесяти статей — 22% сайта, но 100% раздела.
+
+    У плоских адресов (`/rent-alpha/`, `/rent-beta/`) общего каталога нет:
+    раздел тогда — общее начало адреса (`rent-`) у страниц одного уровня.
+
+    Счёт по готовым таблицам: раньше на каждую группу перебирался весь сайт,
+    и на 30 000 страниц с разным началом текста это стоило две минуты.
     """
     paths = {p.url: [x for x in urlsplit(p.url).path.split("/") if x] for p in pages}
-    pool = [paths[p.url] for p in pages if counted is None or counted(p)]
+    under = Counter()
+    by_slug = Counter()
+    for p in pages:
+        if counted is not None and not counted(p):
+            continue
+        x = paths[p.url]
+        for i in range(1, len(x) + 1):
+            under[tuple(x[:i])] += 1
+        if x:
+            parent = tuple(x[:-1])
+            tokens = [t for t in _SLUG_TOKEN.split(x[-1].lower()) if t]
+            for i in range(1, min(len(tokens), _SLUG_DEPTH) + 1):
+                by_slug[(parent, tuple(tokens[:i]))] += 1
+
+    def slug_section(parts):
+        # Только страницы одного уровня с одним родителем: иначе общее
+        # начало адреса ничего не значит.
+        parents = {tuple(x[:-1]) for x in parts}
+        if len(parents) != 1 or not all(parts):
+            return 0, ""
+        parent = parents.pop()
+        slugs = [[t for t in _SLUG_TOKEN.split(x[-1].lower()) if t] for x in parts]
+        common = []
+        for column in zip(*[t[:_SLUG_DEPTH] for t in slugs]):
+            if len(set(column)) != 1:
+                break
+            common.append(column[0])
+        # Начало, равное целому адресу одной из страниц, — не раздел.
+        if not common or any(len(t) == len(common) for t in slugs):
+            return 0, ""
+        size = by_slug[(parent, tuple(common))]
+        return size, "/" + "".join(x + "/" for x in parent) + "-".join(common) + "-"
 
     def section_size(urls):
         parts = [paths[u] for u in urls if u in paths]
@@ -1243,9 +1284,8 @@ def _section_counter(pages: list, counted=None):
                 break
             prefix.append(column[0])
         if not prefix:
-            return 0, ""
-        size = sum(1 for x in pool if x[:len(prefix)] == prefix)
-        return size, "/" + "/".join(prefix) + "/"
+            return slug_section(parts)
+        return under[tuple(prefix)], "/" + "/".join(prefix) + "/"
     return section_size
 
 
@@ -1278,9 +1318,10 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     def stamped_here(urls):
         if len(urls) >= threshold:
             return True
+        if len(urls) < SECTION_SEAM_MIN:
+            return False
         size, _ = in_section(urls)
-        return (len(urls) >= SECTION_SEAM_MIN and size >= cfg["min_pages_for_seams"]
-                and len(urls) >= size * cfg["template_share"])
+        return size >= cfg["min_pages_for_seams"] and len(urls) >= size * cfg["template_share"]
 
     for skeleton, urls in sorted(skeletons.items()):
         if stamped_here(urls):
@@ -1316,9 +1357,10 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     def same_start(urls):
         if len(urls) >= max(3, int(len(pages) * 0.3)):
             return True
+        if len(urls) < SECTION_SEAM_MIN:
+            return False
         size, _ = opening_section(urls)
-        return (len(urls) >= SECTION_SEAM_MIN and size >= cfg["min_pages_for_seams"]
-                and len(urls) >= size * 0.3)
+        return size >= cfg["min_pages_for_seams"] and len(urls) >= size * 0.3
 
     for opening, urls in sorted(openings.items()):
         if same_start(urls):

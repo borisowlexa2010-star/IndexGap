@@ -188,10 +188,12 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
 
     urls = sorted({p.url for p in pages if words.get(p.url)})
     if len(urls) < 2:
-        return {"pairs": [], "notes": notes, "method": tr("нет данных"), "method_id": "none"}
+        return {"pairs": [], "notes": notes, "method": tr("нет данных"), "method_id": "none",
+                "sampled_urls": frozenset()}
 
     if len(urls) <= cfg["exact_below"]:
         method, method_id = tr("попарное сравнение"), "pairwise"
+        sampled = set()
         shingles = {u: shingle_set(u) for u in urls}
         get = shingles.__getitem__
         candidates = [(urls[i], urls[j])
@@ -229,7 +231,11 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
 
         cap = 200
         candidate_set = set()
-        clustered = set()
+        # Пары «образец — остальные» из переполненной корзины: предмет такой
+        # находки — образец, а он зависит от того, какой адрес первым по
+        # алфавиту. Удалили одну страницу — у тысячи сменился «близнец».
+        sampled = set()
+        overflow = set()
         for bucket in buckets.values():
             if len(bucket) < 2:
                 continue
@@ -238,18 +244,47 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
                     for j in range(i + 1, len(bucket)):
                         candidate_set.add((bucket[i], bucket[j]))
             else:
-                # Корзина такого размера — это не «шаблон, значит не дубли»,
-                # а наоборот: кластер почти одинаковых страниц. Полный перебор
-                # внутри неё квадратичен, поэтому сравниваем всех с образцом.
-                rep = bucket[0]
-                # Одна группа попадает в корзину каждой полосы: считаем группы,
-                # а не полосы — «8 групп» печаталось для одной.
-                clustered.add(frozenset(bucket))
-                for other in bucket[1:]:
-                    candidate_set.add((rep, other))
-        if clustered:
-            notes.append(
-                tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=len(clustered)))
+                # Одна группа попадает в корзину каждой полосы: разбираем
+                # группу, а не полосу.
+                overflow.add(tuple(bucket))
+        if overflow:
+            # Переполненная корзина — не обязательно кластер одинаковых
+            # страниц: полосы по множеству слов собирают в одну корзину
+            # всё, что написано одним словарём. Сравнение «все с образцом»
+            # теряло в такой корзине настоящие пары клонов. Корзина
+            # разбирается ещё раз — по полосам из пар слов: подстановка
+            # портит две пары, а не пять шинглов, и клоны совпадают на 0,85,
+            # тогда как разные тексты одного словаря — на десятые доли.
+            pair_sig = {}
+
+            def pair_signature(url):
+                if url not in pair_sig:
+                    own = words.get(url, [])
+                    pair_sig[url] = _minhash(_shingles(own, 4 if is_dense(own) else 2), perms)
+                return pair_sig[url]
+
+            for bucket in sorted(overflow):
+                sub = defaultdict(list)
+                for url in bucket:
+                    sig = pair_signature(url)
+                    for b in range(bands):
+                        band = sig[b * rows:(b + 1) * rows]
+                        sub[(b, hashlib.blake2b(repr(band).encode(), digest_size=8).digest())].append(url)
+                for part in sub.values():
+                    if len(part) < 2:
+                        continue
+                    if len(part) <= cap:
+                        for i in range(len(part)):
+                            for j in range(i + 1, len(part)):
+                                candidate_set.add((part[i], part[j]))
+                        continue
+                    # А такая корзина — уже кластер почти одинаковых страниц.
+                    # Полный перебор внутри неё квадратичен, поэтому
+                    # сравниваем всех с образцом.
+                    rep = part[0]
+                    for other in part[1:]:
+                        candidate_set.add((rep, other))
+                        sampled.add((rep, other))
         candidates = sorted(candidate_set)
 
     by_url = {p.url: p for p in pages}
@@ -269,8 +304,19 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         if j >= cfg["similar"]:
             out.append((by_url[a], by_url[b], round(j, 3)))
     out.sort(key=lambda t: (-t[2], t[0].url, t[1].url))
+    # Заметка — о группах, где сравнение с образцом действительно нашло
+    # похожие страницы. Корзина, переполненная словарём, а не сходством,
+    # ничего не утверждает: «группы оказались похожи» при нуле пар — неправда.
+    found = [(a.url, b.url) for a, b, _ in out if (a.url, b.url) in sampled]
+    groups = _clusters(found)
+    if groups:
+        notes.append(
+            tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=len(groups)))
     # `method_id` — для машин: `method` переведён и на другом языке другой.
-    return {"pairs": out, "notes": notes, "method": method, "method_id": method_id}
+    # `sampled_urls` — страницы, чей «близнец» — образец группы: их предмет
+    # зависит от выборки, а не от сайта.
+    return {"pairs": out, "notes": notes, "method": method, "method_id": method_id,
+            "sampled_urls": frozenset(u for pair in found for u in pair)}
 
 
 def _slot_pattern(a: str, b: str) -> str:
@@ -2137,7 +2183,10 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         found = sorted(partners[url], reverse=True)
         best, other = found[0]
         more = tr(" и ещё {a0}", a0=len(found) - 1) if len(found) > 1 else ""
-        twins = [url_key(u) for _, u in found]
+        # Близнец из сравнения с образцом группы — артефакт выборки: сменился
+        # образец, сменился и он, и --baseline считал новой каждую находку
+        # группы. У такой находки предмета нет — она сверяется по странице.
+        twins = [] if url in dupes.get("sampled_urls", ()) else [url_key(u) for _, u in found]
         if best >= cfg["near_duplicate"]:
             issues.append(("critical", url, "near-duplicate",
                            Said(tr("совпадает на {a0:.0%} со страницей {a1}{a2} — поисковик оставит в индексе одну", a0=best, a1=other, a2=more), twins)))
@@ -2199,6 +2248,9 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         "duplicates": pairs,
         "duplicate_method": dupes["method_id"],
         "duplicate_method_label": dupes["method"],
+        # Пары крупных групп-клонов показаны выборкой: «похожих пар» тогда
+        # не сравнить с попарным прогоном — 399 клонов дают 79 401 пару.
+        "duplicates_sampled": bool(dupes.get("sampled_urls")),
         "issues": sort_issues(issues),
         "notes": notes,
         "config": cfg,

@@ -191,6 +191,9 @@ MESSAGES = {
         "Quality control for a programmatic SEO pipeline",
     "Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}":
         "Critical: {a0}   Warnings: {a1}   Orphans: {a2}   Similar pairs: {a3}",
+    "Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3} (выборка: группы клонов сравнивались с образцом)":
+        "Critical: {a0}   Warnings: {a1}   Orphans: {a2}   Similar pairs: {a3} "
+        "(a sample: clone groups were compared against a representative)",
     "Не проверено проектов: {a0}": "Projects not checked: {a0}",
     "Не хватает данных о проекте.\n    Либо укажи их явно: indexgap check ./content --site https://example.com\n    Либо один раз выполни `indexgap init` в корне проекта — тогда\n    ежедневная команда станет просто `indexgap check`.":
         "Not enough is known about the project.\n"
