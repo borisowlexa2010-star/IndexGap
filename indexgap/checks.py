@@ -606,8 +606,11 @@ def _cohort(page) -> str:
 _NEXT_REDIRECT = re.compile(r"NEXT_REDIRECT;(?:replace|push);([^;\"\\\s]+);30[1278]")
 _META_TAG = re.compile(r"<meta\b[^>]{0,2000}>", re.I)
 _REFRESH = re.compile(r"http-equiv\s*=\s*[\"']?refresh", re.I)
+# Кавычки у атрибута необязательны: минификатор HTML пишет
+# `content=0;url=/en/`, и главная-заглушка не узнавалась.
 _REFRESH_CONTENT = re.compile(
-    r"content\s*=\s*[\"']\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?([^\"'\s>]+)", re.I)
+    r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?"
+    r"([^\"'\s>]+)", re.I)
 # Где «редирект» — не редирект: его показывают, выключили или держат про запас.
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 
@@ -702,6 +705,9 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     unresolved = set()
     unresolved_from = defaultdict(set)
     unresolved_dirs = set()
+    soft = defaultdict(set)
+    soft_inbound = set()
+    landing_of = {}
     for p in pages:
         targets = set()
         for link in p.links:
@@ -723,6 +729,7 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         landing = by_key.get(url_key(raw_landing)) if raw_landing else None
         if landing and landing != p.url:
             targets.add(landing)
+            landing_of[p.url] = landing
         elif raw_landing and not landing:
             # Заглушка ведёт на страницу, которой в сборке нет: на живом сайте
             # это 404 за редиректом. Ссылкой <a> её могли и не продублировать.
@@ -730,6 +737,21 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             if key and urlsplit(key).netloc == urlsplit(url_key(p.url)).netloc:
                 unresolved.add(key)
                 unresolved_from[p.url].add(key)
+        # `rel="nofollow"` у ссылки: входящей она остаётся — страница не
+        # сирота, — но по ней не идут. Битая такая ссылка — 404 для человека;
+        # из корня сайта она обычно ведёт на /login или /cart, которых в
+        # статической сборке нет, поэтому битой считается только внутри раздела.
+        for link in p.__dict__.get("_nofollow_links", ()):
+            key = url_key(link)
+            target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
+            if target and target != p.url:
+                soft[p.url].add(target)
+                soft_inbound.add(target)
+            elif not target and key.split("?", 1)[0].count("/") >= 4:
+                unresolved.add(key)
+                unresolved_from[p.url].add(key)
+                if urlsplit(link).path.endswith("/"):
+                    unresolved_dirs.add(key)
         outbound[p.url] = targets
         if getattr(p, "nofollow", False):
             nofollow.add(p.url)
@@ -767,6 +789,9 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     urls = sorted(by_key.values())
 
     def walk(edges):
+        # Редирект заглушки — не клик: шаг к цели бесплатный (обход 0-1).
+        # Раньше `/go/` с meta refresh посреди пути добавлял уровень, и
+        # `deep` срабатывал на клик раньше.
         found = {}
         if home:
             found[home] = 0
@@ -774,9 +799,14 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             while queue:
                 cur = queue.popleft()
                 for nxt in sorted(edges(cur)):
-                    if nxt not in found:
-                        found[nxt] = found[cur] + 1
-                        queue.append(nxt)
+                    free = landing_of.get(cur) == nxt
+                    step = found[cur] + (0 if free else 1)
+                    if nxt not in found or step < found[nxt]:
+                        found[nxt] = step
+                        if free:
+                            queue.appendleft(nxt)
+                        else:
+                            queue.append(nxt)
         return found
 
     by_links = walk(lambda u: () if u in blocked else followed.get(u, ()))
@@ -787,9 +817,10 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         anyway = walk(lambda u: set(followed.get(u, ())) | by_hreflang.get(u, set()))
         behind_robots = sorted(u for u in anyway if u not in depth)
     behind_nofollow = []
-    if nofollow and home:
+    if (nofollow or soft) and home:
         loose = walk(lambda u: set() if u in blocked
-                     else set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+                     else set(outbound.get(u, ())) | soft.get(u, set())
+                     | by_hreflang.get(u, set()))
         behind_nofollow = sorted(u for u in loose if u not in depth)
     # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
     only_hreflang = sorted(set(depth) - set(by_links))
@@ -813,7 +844,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         # никуда не нужно доходить.
         "only_hreflang": only_hreflang,
         "orphans": sorted(u for u in urls if not inbound.get(u) and u != home
-                          and u != redirected_from and not hreflang_inbound.get(u)),
+                          and u != redirected_from and not hreflang_inbound.get(u)
+                          and u not in soft_inbound),
         "dead_ends": sorted(u for u in urls if not outbound.get(u)),
         "unreachable": sorted(u for u in urls if u not in depth
                               and u != redirected_from) if home else [],
@@ -896,6 +928,46 @@ def _is_file_link(key: str, dirs: set) -> bool:
     if "." not in last or key in dirs:
         return False
     return last.rsplit(".", 1)[-1].lower() in ASSET_EXTS
+
+
+def missing_sections(pages: list, graph: dict, base_path: str = "",
+                     least: int = 10) -> list:
+    """
+    Разделы, на страницы которых сайт ссылается, а в сборке их нет вовсе:
+    [(раздел, сколько разных адресов)].
+
+    Битой такая ссылка не считается — другая часть домена бывает отдана
+    другим приложением. Но когда генератор раздела упал, двенадцать ссылок
+    главной на /rent/… молчали, и отчёт выходил чистым. Порог — `least`
+    разных адресов в одном разделе: одна-две ссылки на /login — это не раздел.
+    """
+    base = "/" + base_path.strip("/") if base_path.strip("/") else ""
+    dirs = set(graph.get("unresolved_dirs") or ())
+
+    def local_of(key):
+        local = "/" + key.split("/", 3)[-1] if key.count("/") >= 3 else "/"
+        if base:
+            if local != base and not local.startswith(base + "/"):
+                return None
+            local = local[len(base):] or "/"
+        return local
+
+    present = set()
+    for p in pages:
+        local = local_of(p.key)
+        if local:
+            present.add(local.strip("/").split("/", 1)[0])
+    targets = defaultdict(set)
+    for key in graph.get("unresolved") or ():
+        path = key.split("?", 1)[0]
+        if _is_file_link(path, dirs):
+            continue
+        local = local_of(path)
+        segs = [x for x in (local or "").strip("/").split("/") if x]
+        if len(segs) >= 2 and segs[0] not in present:
+            targets[segs[0]].add(path)
+    return sorted(((section, len(found)) for section, found in targets.items()
+                   if len(found) >= least), key=lambda x: (-x[1], x[0]))
 
 
 def broken_links(pages: list, graph: dict, base_path: str = "",
@@ -2264,6 +2336,12 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                 "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. "
                 "На живом сайте это 404 за редиректом", a0=shown), subjects)))
         issues += wrong_form_issues(pages, twins)
+        for section, n in missing_sections(pages, graph, base_path):
+            notes.append(tr(
+                "в раздел {a0} ведут ссылки на {a1} разных страниц, а ни одной страницы "
+                "этого раздела в сборке нет. Если раздел собирает этот же генератор, он "
+                "выпал из сборки, и на живом сайте это 404; если его отдаёт другое "
+                "приложение, всё в порядке.", a0=base_path.rstrip("/") + "/" + section + "/", a1=n))
     if graph.get("home_redirected_from"):
         notes.append(tr(
             "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "
@@ -2311,8 +2389,9 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         issues.append(("critical", url, "unreachable",
                        tr("до страницы ведут только ссылки со страниц, закрытых в robots.txt, "
                           "а их поисковик не читает") if url in behind else
-                       tr("до страницы ведут только ссылки со страниц с meta robots "
-                          "nofollow, а по ним краулер не идёт") if url in unfollowed else
+                       tr("до страницы ведут только ссылки nofollow — со страниц с meta "
+                          "robots nofollow или с rel=\"nofollow\", — а по ним краулер "
+                          "не идёт") if url in unfollowed else
                        tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
         if url in shells or url in closed:

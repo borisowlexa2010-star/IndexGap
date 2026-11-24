@@ -275,9 +275,9 @@ MESSAGES = {
         "a redirect.",
     'страница закрыта от индексации, но стоит в sitemap — противоречие: если закрытие не задумано, трафика не будет':
         'the page is closed from indexing but listed in the sitemap, which is a contradiction: if the closing is not intended, there will be no traffic',
-    "до страницы ведут только ссылки со страниц с meta robots nofollow, а по ним краулер не идёт":
-        "only pages with meta robots nofollow link here, and a crawler does not "
-        "follow their links",
+    "до страницы ведут только ссылки nofollow — со страниц с meta robots nofollow или с rel=\"nofollow\", — а по ним краулер не идёт":
+        "only nofollow links lead here — from pages with meta robots nofollow or "
+        "with rel=\"nofollow\" — and a crawler does not follow them",
     "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. На живом сайте это 404 за редиректом":
         "the redirect stub leads to a page that is not in the build: {a0}. "
         "On the live site that is a 404 behind a redirect",
@@ -293,4 +293,9 @@ MESSAGES = {
         "noindex was checked against the build's sitemap.xml: {a0} closed pages are not listed in it — that is a decision, not a mistake, and they are lowered to info. Everything else is checked against the sitemap only with --sitemap",
     "noindex не сверен с sitemap: в нём {a0} из {a1} открытых страниц — список неполный, устарел или собран для другого адреса. «Нет в sitemap» по нему не значит «убрана намеренно», и закрытые страницы остаются критичными":
         "noindex was not checked against the sitemap: it lists {a0} of {a1} open pages — the list is partial, stale or built for another address. \"Not in the sitemap\" does not mean \"left out on purpose\" there, and the closed pages stay critical",
+    "в раздел {a0} ведут ссылки на {a1} разных страниц, а ни одной страницы этого раздела в сборке нет. Если раздел собирает этот же генератор, он выпал из сборки, и на живом сайте это 404; если его отдаёт другое приложение, всё в порядке.":
+        "links lead to {a1} different pages in the {a0} section, but the build has no "
+        "pages of that section at all. If this generator builds the section, it dropped "
+        "out of the build and these are 404s on the live site; if another application "
+        "serves it, all is well.",
 }

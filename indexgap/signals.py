@@ -474,6 +474,11 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
     # Оглавление на весь сайт (`toc.html` mdBook, HTML-карта сайта) — тоже
     # путь к страницам раздела: оно ссылается почти на всех его детей сразу.
     hub_of = {url: k for k, urls in kid_urls.items() for url in urls}
+    # Свой ребёнок раздела с такими ссылками засчитывается, только если он
+    # один: оглавление раздела — одна страница, а блок «рядом» со всеми
+    # соседями стоит на каждой, и раньше с шести детей он прятал хаб, который
+    # не ссылается ни на кого.
+    own_tocs = defaultdict(list)
     for page in pages:
         out = set(outbound.get(page.url, ()))
         if len(out) < 5:
@@ -481,7 +486,13 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
         touched = Counter(hub_of[u] for u in out if u in hub_of)
         for hub_key, n in touched.items():
             if n >= max(5, 0.8 * len(kid_urls[hub_key])):
-                listing[hub_key].add(page.url)
+                if page.url in kid_urls[hub_key]:
+                    own_tocs[hub_key].append(page.url)
+                else:
+                    listing[hub_key].add(page.url)
+    for hub_key, tocs in own_tocs.items():
+        if len(tocs) == 1:
+            listing[hub_key].add(tocs[0])
     # Кандидаты в списки: страница → «лист» (засчитывается, если ведёт хоть к
     # одному ребёнку) или «глубже» (если дети — большинство её ссылок в разделе).
     candidates = defaultdict(dict)
