@@ -736,6 +736,9 @@ class _Extractor(HTMLParser):
         self.lang = ""
         self.base = ""
         self.hrefs = []
+        # `rel="nofollow"`: по ним краулер не идёт, но ссылка есть — и
+        # человек по битой попадает на 404.
+        self.nofollow_hrefs = []
         self.headings = []
         # Те же заголовки без врезок, подвала и меню. `no-question-headings`
         # считал колонки подвала и «Keep reading» заголовками статьи: на
@@ -1025,6 +1028,8 @@ class _Extractor(HTMLParser):
                 self.hrefs.append(a["href"].strip())
                 self._in_anchor = True
                 self._anchor_buf = ""
+            else:
+                self.nofollow_hrefs.append(a["href"].strip())
 
     def handle_startendtag(self, tag, attrs):
         # `<path/>` внутри пропускаемого <svg> ничего не открывал: starttag
@@ -1776,6 +1781,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             notes.append(tr("фронтматтер не распознан"))
         matches = _md_links(_strip_fences(body))
         hrefs = [href for _, href in matches]
+        nofollow_hrefs = []
         md_anchors = [text.strip() for text, _ in matches]
         md_headings = [(len(h), _clean(t)) for h, t in MD_HEADING.findall(_strip_fences(body))]
         base_href = ""
@@ -1817,6 +1823,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         ex.feed(raw)
         ex.close()
         hrefs = ex.hrefs
+        nofollow_hrefs = ex.nofollow_hrefs
         base_href = ex.base
         page = Page(
             path=path, url=url,
@@ -1906,8 +1913,25 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         if key != page.key and key not in seen:
             seen.add(key)
             page.links.append(absolute)
-            forms.append((key, form))
+            forms.append((key, form, unquote(raw_path)))
     page.__dict__["_link_forms"] = forms
+    unfollowed = []
+    for href in nofollow_hrefs:
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
+            continue
+        try:
+            absolute, _ = urldefrag(urljoin(base_for_links, href))
+            if urlsplit(url_key(absolute)).netloc != host:
+                continue
+        except ValueError:
+            continue
+        absolute = normalize_url(absolute)
+        key = url_key(absolute)
+        if key != page.key and key not in seen:
+            seen.add(key)
+            unfollowed.append(absolute)
+    if unfollowed:
+        page.__dict__["_nofollow_links"] = unfollowed
     if foreign:
         page.__dict__["_foreign_links"] = foreign
 
@@ -2204,9 +2228,33 @@ def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
     `X-Robots-Tag: nosnippet` (или `max-snippet:0`) из `_headers`, `netlify.toml`
     и `vercel.json` действует так же, как мета-тег: раньше он не переносился
     на страницы, и запрет сниппета, отданный заголовком, был невидим.
+
+    Так же переносится `nofollow` (и `none`): ссылки страницы, закрытые
+    заголовком, краулер не проходит, а раньше граф шёл по ним, как по открытым.
     """
-    rules = [rule for rule in header_noindex_rules(root, urlsplit(base_url).netloc,
-                                                    _hides_snippet)
+    _apply_directive(pages, root, base_url, _hides_snippet, "nosnippet",
+                     lambda page: page.nosnippet)
+    _apply_directive(pages, root, base_url, _unfollows, "nofollow",
+                     lambda page: page.nofollow)
+
+
+def _unfollows(value: str) -> bool:
+    """`nofollow` или `none` в X-Robots-Tag — для всех или для Google."""
+    agent = ""
+    for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.endswith(":") and len(token) > 1:
+            agent = token[:-1]
+            continue
+        if ":" in token:
+            agent, _, token = token.partition(":")
+        if token in ("nofollow", "none") and agent in ("", "googlebot"):
+            return True
+    return False
+
+
+def _apply_directive(pages: list, root: str, base_url: str, test, directive: str,
+                     already) -> None:
+    rules = [rule for rule in header_noindex_rules(root, urlsplit(base_url).netloc, test)
              if rule[0] is not None]
     if not any(on for *_, on in rules):
         return
@@ -2216,8 +2264,8 @@ def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
         matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
         reopened = {source for regex, source, _, on in rules if not on and matches(regex)}
         if any(on and source not in reopened and matches(regex)
-               for regex, source, _, on in rules) and not page.nosnippet:
-            page.robots = (page.robots + ",nosnippet").strip(",")
+               for regex, source, _, on in rules) and not already(page):
+            page.robots = (page.robots + "," + directive).strip(",")
 
 
 _TOML_FROM = re.compile(r"""^\s*from\s*=\s*["']([^"']+)["']""", re.M)
@@ -2301,10 +2349,10 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     for page in pages:
         forms = page.__dict__.pop("_link_forms", ())
         written.append((page, forms))
-        for key, form in forms:
+        for key, form, _written in forms:
             votes[key][form] += 1
     redirects, host_rewrites = host_redirect_rules(root)
-    kinds, flat = {}, []
+    kinds, flat, files = {}, [], {}
     for page in pages:
         name = os.path.basename(page.path or "").lower()
         kind = None
@@ -2315,6 +2363,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         # `a.html` рядом с `a/index.html`: какую форму отдаст хостинг, не понять.
         key = page.key
         kinds[key] = kind if kinds.get(key, kind) == kind else None
+        files[key] = os.path.basename(page.path or "")
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
     for page in flat:
@@ -2330,16 +2379,21 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     if host_rewrites:
         return
     base = urlsplit(base_url).path.rstrip("/")
-    suffix = {("folder", "file"): ".html", ("flat", "slash"): "/",
-              ("flat", "index"): "/index.html"}
+    always = {("folder", "file"), ("flat", "slash"), ("flat", "index")}
     for page, forms in written:
         wrong = []
-        for key, form in forms:
-            tail = suffix.get((kinds.get(key), form))
-            if not tail:
+        html = (page.path or "").lower().endswith((".html", ".htm"))
+        for key, form, path in forms:
+            kind = kinds.get(key)
+            # `/b/index.md`, `/c.htm` при `c.html`, `/d/INDEX.HTML`: `url_key`
+            # сводит их к странице, а хостинг отдаёт файл только под его
+            # точным именем. Ссылки из Markdown не трогаем: генератор
+            # переписывает `b.md` сам.
+            exact = (html and form in ("file", "index")
+                     and (kind, form) in (("folder", "index"), ("flat", "file"))
+                     and path.rsplit("/", 1)[-1] != files.get(key))
+            if (kind, form) not in always and not exact:
                 continue
-            path = "/" + key.split("/", 3)[-1] if key.count("/") >= 3 else "/"
-            path = path.rstrip("/") + tail
             local = path[len(base):] if base and path.startswith(base + "/") else path
             if not any(regex.match(local) for regex in redirects):
                 wrong.append((key, path))
