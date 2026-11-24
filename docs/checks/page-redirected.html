@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>page redirected — indexgap check</title>
-<meta name="description" content="page redirected: what indexgap reports, why it matters and how to fix it. Reported as warning.">
+<meta name="description" content="page redirected: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <link rel="canonical" href="https://borisowlexa2010-star.github.io/IndexGap/checks/page-redirected.html">
 <meta property="og:type" content="article">
 <meta property="og:title" content="page redirected — indexgap check">
-<meta property="og:description" content="page redirected: what indexgap reports, why it matters and how to fix it. Reported as warning.">
+<meta property="og:description" content="page redirected: what indexgap reports, why it matters and how to fix it. Reported as critical.">
 <meta property="og:url" content="https://borisowlexa2010-star.github.io/IndexGap/checks/page-redirected.html">
 <meta property="og:image" content="https://borisowlexa2010-star.github.io/IndexGap/og.png">
 <meta property="og:image:width" content="1200">
@@ -17,7 +17,7 @@
 <meta name="author" content="Alexey Borisov">
 <script type="application/ld+json">{
  "@context":"https://schema.org","@type":"TechArticle",
- "headline":"page redirected \u2014 indexgap check","description":"page redirected: what indexgap reports, why it matters and how to fix it. Reported as warning.",
+ "headline":"page redirected \u2014 indexgap check","description":"page redirected: what indexgap reports, why it matters and how to fix it. Reported as critical.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/page-redirected.html","inLanguage":"en",
  "datePublished":"2026-08-29","dateModified":"2026-11-17",
  "author":{"@type":"Person","name":"Alexey Borisov"},
@@ -91,15 +91,15 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>page redirected</h1>
 <div class="meta">
-  <span class="tag warning">warning</span> <span class="tag info">info</span>
+  <span class="tag critical">critical</span> <span class="tag warning">warning</span> <span class="tag info">info</span>
   <span class="tag">page-redirected</span>
   <span class="tag acc">What a deploy breaks (indexgap diff)</span>
 </div>
-<p class="lede">Informational: the page is gone but its address is redirected. It becomes a warning when the redirect points at a path the new build does not have.</p>
+<p class="lede">Informational: the page is gone but its address is redirected. It becomes a warning when the redirect points at a path the new build does not have, and critical when a redirect that runs before the files sends a page still in the build to the home page.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>warning  page-redirected  the page is gone, and a redirect sends its address on</code></pre>
+<pre><code>critical  page-redirected  the page is gone or shadowed by a forced redirect, and a redirect sends its address on</code></pre>
 
 <h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
 

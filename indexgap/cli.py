@@ -2066,7 +2066,7 @@ def cmd_diff(args):
     print(tr("Стало — {a0}", a0=args.new))
     new_pages = _load(argparse.Namespace(root=args.new, site=site))
 
-    rules, redirect_files = diffs.read_redirects(args.new)
+    rules, redirect_files = diffs.read_redirects(args.new, urlsplit(site).netloc)
     if redirect_files:
         print(tr("Редиректы новой сборки: {a0} — правил {a1}",
                  a0=", ".join(redirect_files), a1=len(rules)))
@@ -2081,7 +2081,10 @@ def cmd_diff(args):
         args.profile = profile
         before = _build_findings(args.old, old_pages, site, args, config)
         after = _build_findings(args.new, new_pages, site, args, config)
-        delta = compare_baseline(after, _serialize_issues(before))
+        # Страница, уехавшая редиректом в новую сборку, уносит с собой и свои
+        # находки: в NEW они не новые.
+        delta = compare_baseline(after, diffs.moved_findings(
+            _serialize_issues(before), result, new_pages))
         said = {i[1] for i in items if i[2] in ("page-closed", "nosnippet-added")}
         shown = 0
         for item in delta["new"]:
