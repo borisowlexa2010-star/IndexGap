@@ -23,4 +23,26 @@ MESSAGES = {
         "the live site will answer 404",
     "страницы нет; она и раньше была закрыта от индекса":
         "the page is gone; it was already closed to indexing",
+    "страница стала заглушкой-редиректом на {a0} — а этой страницы в новой сборке нет":
+        "the page became a redirect stub to {a0} — which is not in the new build",
+    "страница есть в новой сборке, но правило из {a0} срабатывает раньше файла и уводит её на "
+    "{a1} — а этой страницы в новой сборке нет":
+        "the page is in the new build, but a rule in {a0} runs before the file and sends it to "
+        "{a1} — which is not in the new build",
+    "страница есть в новой сборке, но правило из {a0} срабатывает раньше файла и уводит её на {a1}":
+        "the page is in the new build, but a rule in {a0} runs before the file and sends it to {a1}",
+    "страница есть в новой сборке, но правило из {a0} срабатывает раньше файла и отвечает кодом {a1}":
+        "the page is in the new build, but a rule in {a0} runs before the file and answers {a1}",
+    "страница есть в новой сборке, но правило из {a0} срабатывает раньше файла и отдаёт по её "
+    "адресу главную с кодом 200 — это мягкий 404":
+        "the page is in the new build, but a rule in {a0} runs before the file and serves the "
+        "home page at its address with 200 — a soft 404",
+    "была открыта для индекса, в новой сборке её нет, а правило из {a0} отдаёт по этому адресу "
+    "главную с кодом 200 — это мягкий 404":
+        "it was open to indexing, it is not in the new build, and a rule in {a0} serves the home "
+        "page at its address with 200 — a soft 404",
+    "была открыта для индекса, в новой сборке её нет, а правило из {a0} отвечает по этому адресу "
+    "кодом {a1}":
+        "it was open to indexing, it is not in the new build, and a rule in {a0} answers {a1} "
+        "at its address",
 }

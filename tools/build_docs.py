@@ -82,7 +82,9 @@ WHY = {
    "to miss, because the pages still render.",
  "page-redirected":
    "Informational: the page is gone but its address is redirected. It becomes a "
-   "warning when the redirect points at a path the new build does not have.",
+   "warning when the redirect points at a path the new build does not have, and "
+   "critical when a redirect that runs before the files sends a page still in the "
+   "build to the home page.",
  "template-change":
    "Titles and H1s changed on hundreds of pages at once are a template edit. That "
    "can be the intended rewrite or a broken variable; either way it resets how "
@@ -723,12 +725,14 @@ LEVEL_OVERRIDES = {
                                 "and no redirect covers it"},
     "page-closed": {"levels": {"critical"},
                     "message": "the page was open for indexing and is now closed: noindex, a "
-                               "canonical to another page, or a draft"},
-    "page-redirected": {"levels": {"info", "warning"},
-                        "message": "the page is gone, and a redirect sends its address on"},
+                               "canonical to another page, a draft, or a forced 404 or "
+                               "home-page rewrite that runs before the file"},
+    "page-redirected": {"levels": {"info", "warning", "critical"},
+                        "message": "the page is gone or shadowed by a forced redirect, and a "
+                                   "redirect sends its address on"},
     "template-change": {"levels": {"warning", "info"},
-                        "message": "titles, H1s or descriptions changed on most pages of one "
-                                   "URL template at once"},
+                        "message": "titles, H1s, descriptions, canonicals or the URL form "
+                                   "changed on most pages of one URL template at once"},
     "new-finding": {"levels": {"critical"},
                     "message": "a critical finding that the old build did not have"},
     "ai-crawler-blocked": {"levels": {"critical", "info"},
