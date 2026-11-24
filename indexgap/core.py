@@ -58,6 +58,11 @@ def request(url: str, **kwargs):
 # шаблона не существует, пока её не отрендерит скрипт.
 SKIP_TAGS = {"script", "style", "noscript", "template", "svg"}
 
+# Что может стоять в <head>. Любой другой открывающий тег начинает <body>, даже
+# если самого <body> нет: HTML5 разрешает его опускать, и минификаторы опускают.
+HEAD_TAGS = {"html", "head", "base", "basefont", "bgsound", "link", "meta",
+             "noframes", "script", "style", "template", "title", "noscript"}
+
 # Инлайновые теги не разрывают слово: «Виза<b>free</b>» — одно слово.
 # Ссылок и подписей здесь нет намеренно: два соседних <a> — это два разных
 # пункта, и склеивать их в «словослово» нельзя.
@@ -901,7 +906,7 @@ class _Extractor(HTMLParser):
         # ссылка в <template> не ведёт никуда, пока её не отрендерит скрипт.
         if self._skip_depth:
             return
-        if tag == "body":
+        if tag == "body" or tag not in HEAD_TAGS:
             self._in_body = True
 
         if tag not in INLINE_TAGS:
@@ -1858,6 +1863,13 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
     except ValueError:
         base_for_links = location
     if page.canonical:
+        # Записан ли canonical полным адресом. Относительный достраивается от
+        # --site, и его схема и хост — это --site, а не то, как пишет сам сайт.
+        try:
+            written = urlsplit(page.canonical)
+            page.__dict__["_canonical_absolute"] = bool(written.scheme and written.netloc)
+        except ValueError:
+            pass
         try:
             page.canonical = urljoin(base_for_links, page.canonical)
         except ValueError:
