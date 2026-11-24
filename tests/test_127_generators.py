@@ -184,7 +184,9 @@ class SitemapLimits(Base):
 
     def test_too_long_address_is_named(self):
         site = self.path("site")
-        deep = os.path.join(site, *(["d" * 200] * 11))
+        # Длина набирается кодировкой, а не диском: путь macOS ограничен 1024
+        # байтами, а «ж» в <loc> — это «%D0%B6», шесть символов на букву.
+        deep = os.path.join(site, *(["ж" * 120] * 3))
         write(os.path.join(deep, "index.html"), page_html("Long"))
         write(os.path.join(site, "index.html"), page_html("Home"))
         manifest = self.path("m.json")
