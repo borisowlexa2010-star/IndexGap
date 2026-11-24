@@ -629,4 +629,9 @@ MESSAGES = {
         '  ! only one of the runs has data for the "{a0}" step — that step and the sections are not compared',
     '\nЦитируется страница другого хоста ({a0}) — к этой сборке она не относится:':
         '\nCited pages on another host ({a0}) — they are not part of this build:',
+    "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет — это решение, а не ошибка, и они понижены до сведений. Остальная сверка с sitemap идёт только с --sitemap":
+        "noindex was checked against the build's sitemap.xml: {a0} closed pages are not listed in it — that is a decision, not a mistake, and they are lowered to info. Everything else is checked against the sitemap only with --sitemap",
+    "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как страницы с переадресацией — в sitemap нужен адрес, куда они ведут.":
+        "the sitemap lists redirect stubs ({a0}): {a1}. Search engines will report them as pages with redirect — the sitemap needs the address they lead to.",
+    " и ещё {a0}": " and {a0} more",
 }

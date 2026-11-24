@@ -2233,6 +2233,7 @@ def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
 
 
 _TOML_FROM = re.compile(r"""^\s*from\s*=\s*["']([^"']+)["']""", re.M)
+_TOML_STATUS = re.compile(r"""^\s*status\s*=\s*["']?(\d{3})""", re.M)
 
 
 def host_redirect_rules(root: str) -> tuple:
@@ -2247,9 +2248,14 @@ def host_redirect_rules(root: str) -> tuple:
     """
     rules, rewrites_forms = [], False
 
-    def add(pattern):
+    def add(pattern, status=""):
         pattern = urlsplit(pattern).path if "://" in pattern else pattern
         regex = _route_regex(pattern) if pattern.startswith("/") else None
+        # Перезапись 200 на любой адрес (`/* /index.html 200`) — запасной вход
+        # SPA, а не редирект: по `/about/` хостинг отдаёт главную с кодом 200.
+        # Это мягкий 404, и неверная форма ссылки остаётся находкой.
+        if regex and str(status).startswith("200") and regex.match("/indexgap-probe/any/depth"):
+            return
         if regex:
             rules.append(regex)
 
@@ -2260,18 +2266,21 @@ def host_redirect_rules(root: str) -> tuple:
             return ""
 
     for line in text_of(os.path.join(root, "_redirects")).splitlines():
-        fields = line.split()
-        if len(fields) >= 2 and not fields[0].startswith("#"):
-            add(fields[0])
+        fields = line.split("#", 1)[0].split()
+        if len(fields) >= 2:
+            status = next((f for f in fields[1:] if re.match(r"^\d{3}!?$", f)), "301")
+            add(fields[0], status)
     near = [root, os.path.dirname(os.path.abspath(root))]
     for folder in near:
         text = text_of(os.path.join(folder, "netlify.toml"))
         if text:
             text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("#"))
             for block in text.split("[[redirects]]")[1:]:
-                found = _TOML_FROM.search(block.split("[[", 1)[0])
+                block = block.split("[[", 1)[0]
+                found = _TOML_FROM.search(block)
                 if found:
-                    add(found.group(1))
+                    status = _TOML_STATUS.search(block)
+                    add(found.group(1), status.group(1) if status else "301")
             break
     for folder in near:
         text = text_of(os.path.join(folder, "vercel.json"))
@@ -2286,7 +2295,7 @@ def host_redirect_rules(root: str) -> tuple:
             for section in ("redirects", "rewrites"):
                 for entry in data.get(section) or ():
                     if isinstance(entry, dict) and isinstance(entry.get("source"), str):
-                        add(entry["source"])
+                        add(entry["source"], "200" if section == "rewrites" else "301")
         break
     return rules, rewrites_forms
 
@@ -2405,7 +2414,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
-    todo = []
+    todo, maybe_error = [], set()
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
@@ -2460,8 +2469,14 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             # Страница ошибки — не страница сайта: на неё никто не ссылается,
             # она короткая, и в sitemap ей не место. Её выдаёт почти любой
             # генератор, и каждая получала «сироту» и «тонкую».
-            if _ERROR_PAGE.search(os.path.relpath(path, root).replace(os.sep, "/")):
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
+            if _ERROR_FILE.search(rel) or _TOP_ERROR.match(rel):
                 continue
+            if _ERROR_PAGE.search(rel):
+                # `status/404/index.html` в глубине сборки — это может быть
+                # статья про код ответа, а не страница ошибки. Её судьбу
+                # решают ссылки: на страницу ошибки сайт не ссылается.
+                maybe_error.add(path)
             readme_home = (jekyll and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
@@ -2474,6 +2489,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             # Строки, пришедшие из разных процессов, — разные объекты.
             value.anchors = list(map(sys.intern, value.anchors))
             loaded.append(value)
+    if maybe_error:
+        linked = {url_key(link) for page in loaded if page.path not in maybe_error
+                  for link in page.links}
+        loaded = [page for page in loaded
+                  if page.path not in maybe_error or page.key in linked]
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
@@ -2610,6 +2630,17 @@ def _is_fragment(raw: str) -> bool:
 _ERROR_PAGE = re.compile(
     r"(^|/)(40[134]|50[0-4x]|5xx|4xx|offline|_not-found|not-found|_error)"
     r"(\.html?|/index\.html?)$", re.I)
+# Имена, которые генераторы дают только служебным файлам, на любой глубине:
+# `_not-found` и `_global-error` Next.js, оболочка gatsby-plugin-offline.
+_ERROR_FILE = re.compile(
+    r"(^|/)(5xx|4xx|_not-found|_error|_global-error|offline-plugin-app-shell-fallback)"
+    r"(\.html?|/index\.html?)$", re.I)
+# Коды и `200.html` (запасной вход SPA у Nuxt, SvelteKit, Surge) — служебные
+# только в корне сборки или в корне языка: `status/404/` в глубине — обычная
+# страница, если на неё ссылаются.
+_TOP_ERROR = re.compile(
+    r"^(?:[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*/)?"
+    r"(40[134]|50[0-4x]|200|offline|not-found)(\.html?|/index\.html?)$", re.I)
 
 
 # Каталоги вложений: `.md` в них — пример или ресурс (Docsify `_media`), а не страница.
