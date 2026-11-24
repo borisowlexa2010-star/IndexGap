@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -64,7 +65,9 @@ def _is_preamble(lowered: str) -> bool:
             rest = lowered[len(phrase):len(phrase) + 1]
             if not rest or not (rest.isalnum() or rest == "-"):
                 return True
-    return False
+    # «Updated: in this article we will…» — подпись-ярлык перед тем же разгоном.
+    label = re.match(r"[^\s:]{1,20}:\s+", lowered)
+    return bool(label) and _is_preamble(lowered[label.end():])
 
 
 # В ar/fa/ur используется U+061F: без него восемь вопросных заголовков
@@ -204,6 +207,17 @@ def _blocks_everything(entry: dict) -> bool:
     return bool(disallow & _BLOCK_ALL) and not (allow & _BLOCK_ALL)
 
 
+def _search_bot_closed(entry: dict) -> bool:
+    """
+    Бот ИИ-поиска закрыт целиком: `Disallow: /` и ни одного Allow, которое
+    открыло бы хоть что-то. `Disallow: /` с `Allow: /rent/` — частичный
+    запрет: по правилу самого длинного совпадения такие страницы открыты,
+    и считать их надо по сборке, а не объявлять бота закрытым.
+    """
+    return _blocks_everything(entry) and not any(
+        a.strip() for a in (entry.get("allow") or []))
+
+
 # Поисковики, у которых бывает своя группа правил в robots.txt.
 _SEARCH_ENGINES = ("googlebot", "bingbot", "yandex", "yandexbot", "duckduckbot",
                    "baiduspider", "slurp", "applebot")
@@ -334,7 +348,7 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
     issues = []
     for agent in sorted(AI_SEARCH_AGENTS):
         entry = rules.get(agent)
-        if not entry or _blocks_everything(entry):
+        if not entry or _search_bot_closed(entry):
             continue
         blocked = Counter()
         for page in open_pages:
@@ -390,8 +404,9 @@ def check_robots(robots: dict) -> list:
                        tr("Disallow: / для Googlebot — Google не обходит сайт целиком")))
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
-        if entry and _blocks_everything(entry):
-            level = "critical" if agent in AI_SEARCH_AGENTS else "info"
+        search = agent in AI_SEARCH_AGENTS
+        if entry and (_search_bot_closed(entry) if search else _blocks_everything(entry)):
+            level = "critical" if search else "info"
             issues.append((level, "robots.txt", "ai-crawler-blocked",
                            tr("{a0} закрыт: {a1}", a0=agent, a1=tr(why))))
     if not robots.get("sitemaps"):
@@ -405,10 +420,16 @@ def _first_sentence(text: str) -> str:
     return parts[0] if parts else ""
 
 
+# После слова должна идти дата, имя или «by/on»: «By law, a deposit…»,
+# «Written permission is required…» и «Updated: in this article we will…» —
+# обычные первые фразы, а не подпись. Раньше их выбрасывали как дату, и
+# оценивался второй абзац.
+_UPPER = "A-ZÀ-ÖØ-ÞА-ЯЁ"
 _DATELINE = re.compile(
-    r"^\s*(?:last\s+)?(?:updated|published|posted|modified|reviewed|written|by\b|"
+    r"^\s*(?:(?i:(?:last\s+)?(?:updated|published|posted|modified|reviewed|written|"
     r"обновлено|опубликовано|дата|автор|aktualisiert|veröffentlicht|mis à jour|publié|"
-    r"actualizado|publicado)", re.I)
+    r"actualizado|publicado))(?:\s*:)?\s+(?:(?i:by|on|am|le|el|em|от)\b|\d|[" + _UPPER + r"])"
+    r"|(?i:by)\s+[" + _UPPER + r"])")
 _DATE_ONLY = re.compile(
     r"^[\s\d.,/:\-–—·|]*(?:[A-Za-zА-Яа-яЁё]+[\s\d.,/:\-–—·|]*){0,4}$")
 
@@ -455,6 +476,21 @@ def check_answer(page, cfg: dict = None) -> list:
     return issues
 
 
+# «Who we are», «What we offer», «Как мы работаем» без «?» — подпись раздела,
+# а не вопрос: за вопросительным словом сразу стоит подлежащее-местоимение.
+_DECLARATIVE = re.compile(
+    r"^(?:how|what|where|who|why|when|which|как|что|где|кто|почему|зачем|"
+    r"wie|was|wo|wer|warum)\s+(?:we|you|i|they|it|our|your|us|мы|вы|нас|вас|wir|sie|ihr)\b",
+    re.I | re.U)
+
+
+def _is_question(heading: str) -> bool:
+    text = heading.strip()
+    if not QUESTION.search(text):
+        return False
+    return bool(re.search(r"[?？؟]\s*$", text)) or not _DECLARATIVE.match(text)
+
+
 def check_extractable(page, cfg: dict = None) -> list:
     """
     Извлекаемость: вопросные подзаголовки, списки и таблицы, длина абзаца.
@@ -467,7 +503,7 @@ def check_extractable(page, cfg: dict = None) -> list:
     outline = page.outline if getattr(page, "outline", None) is not None else page.headings
     subheads = [t for lvl, t in outline if lvl >= 2]
     if len(subheads) >= 3:
-        questions = sum(1 for t in subheads if QUESTION.search(t))
+        questions = sum(1 for t in subheads if _is_question(t))
         # Считаем долю, а не «хотя бы один»: одно ложное срабатывание
         # регулярки гасило проверку целиком.
         if questions / len(subheads) < cfg["question_share"]:
@@ -586,6 +622,45 @@ def check_shell(page, cfg: dict = None) -> list:
     return []
 
 
+def _no_constant(name):
+    raise ValueError(tr("{a0} — не число JSON", a0=name))
+
+
+def _load_ld(raw: str):
+    """
+    JSON-LD строго по RFC 8259. Python принимает `NaN` и `Infinity`, а
+    строгий парсер поисковика выбрасывает такой блок целиком.
+    """
+    return json.loads(raw, parse_constant=_no_constant)
+
+
+def _faq_pages(data, depth=0):
+    """
+    FAQPage в любом месте разметки: и вложенная в `WebPage.mainEntity` или
+    `hasPart`. Раньше смотрелся только верхний уровень и `@graph`.
+    """
+    if depth > 8:
+        return
+    if isinstance(data, list):
+        for value in data:
+            yield from _faq_pages(value, depth + 1)
+    elif isinstance(data, dict):
+        if "faqpage" in _ld_types(data):
+            yield data
+        for value in data.values():
+            if isinstance(value, (dict, list)):
+                yield from _faq_pages(value, depth + 1)
+
+
+_TAG = re.compile(r"<[^<>]+>")
+
+
+def _question_key(question: str) -> str:
+    """Вопрос для поиска в тексте: без тегов и финального знака вопроса."""
+    text = _plain(_TAG.sub(" ", question))
+    return " ".join(text.split()).rstrip(" ?？؟.!:")
+
+
 def check_jsonld(page) -> list:
     """
     Разметка проверяется на валидность и на соответствие тексту, а не на наличие.
@@ -598,11 +673,13 @@ def check_jsonld(page) -> list:
     issues = []
     for raw in page.jsonld or ():
         try:
-            data = json.loads(raw)
+            data = _load_ld(raw)
         except (ValueError, RecursionError) as exc:
             issues.append(("warning", page.url, "jsonld-broken",
                            tr("блок JSON-LD не парсится ({a0}) — для поисковика его просто нет",
-                              a0=getattr(exc, "msg", None) or tr("слишком глубокая вложенность"))))
+                              a0=getattr(exc, "msg", None)
+                              or (str(exc) if isinstance(exc, ValueError) else "")
+                              or tr("слишком глубокая вложенность"))))
             continue
         mismatch = _ld_numbers_missing(data, page)
         if mismatch:
@@ -612,29 +689,34 @@ def check_jsonld(page) -> list:
         for item in _ld_items(data):
             # Контейнер `@graph` сам по себе типа не имеет — это обёртка,
             # а не сущность. Раньше каждая страница с разметкой Yoast
-            # получала за неё ложную находку.
-            if "@type" not in item and not {"@graph", "@context"} & set(item):
+            # получала за неё ложную находку. Но `@context` без `@type`
+            # рядом с данными — как раз забытый тип, а не обёртка.
+            if "@type" not in item and "@graph" not in item \
+                    and not set(item) <= {"@context", "@id"}:
                 issues.append(("info", page.url, "jsonld-no-type",
                                tr("в блоке JSON-LD нет @type")))
-            if "faqpage" in _ld_types(item):
-                # Вопрос ищется во всём видимом тексте и после приведения обеих
-                # сторон к одному виду: вёрстка ставит «’» вместо «'», тире
-                # вместо дефиса, а в разметке лежит `&amp;`. Каждое такое
-                # расхождение давало находку с угрозой ручных санкций.
-                haystack = _plain((page.text or "") + " " + (getattr(page, "chrome", "") or ""))
-                missing = []
-                entities = item.get("mainEntity") or []
-                if isinstance(entities, dict):
-                    entities = [entities]
-                for entity in entities:
-                    if not isinstance(entity, dict):
-                        continue
-                    question = str(entity.get("name") or "").strip()
-                    if question and _plain(question)[:40] not in haystack:
-                        missing.append(question)
-                if missing:
-                    issues.append(("warning", page.url, "jsonld-faq-invisible",
-                                   tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
+        for item in _faq_pages(data):
+            # Вопрос ищется во всём видимом тексте и после приведения обеих
+            # сторон к одному виду: вёрстка ставит «’» вместо «'», тире
+            # вместо дефиса, а в разметке лежит `&amp;`. Каждое такое
+            # расхождение давало находку с угрозой ручных санкций.
+            # Сверяется весь вопрос, а не первые 40 символов: в программном
+            # FAQ отличается как раз хвост — город или товар.
+            haystack = _plain((page.text or "") + " " + (getattr(page, "chrome", "") or ""))
+            missing = []
+            entities = item.get("mainEntity") or []
+            if isinstance(entities, dict):
+                entities = [entities]
+            for entity in entities:
+                if not isinstance(entity, dict):
+                    continue
+                question = str(entity.get("name") or "").strip()
+                key = _question_key(question)
+                if key and key not in haystack:
+                    missing.append(question)
+            if missing:
+                issues.append(("warning", page.url, "jsonld-faq-invisible",
+                               tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
     return issues
 
 
@@ -689,7 +771,7 @@ def _visible_numbers(text: str) -> tuple:
     for raw in re.findall(r"(?<![\d.,])(" + NUMBER + r")", text):
         try:
             values.add(round(float(_norm_number(raw)), 4))
-        except ValueError:
+        except (ValueError, OverflowError):
             pass
     for raw in _LOOSE_GROUPS.findall(text):
         digits.add(re.sub(r"\D", "", raw).lstrip("0") or "0")
@@ -701,18 +783,22 @@ def _visible_numbers(text: str) -> tuple:
     return values, digits, thousands
 
 
-def _shown(number: float, values: set, digits: set, thousands: list) -> bool:
+def _shown(number: float, values: set, digits: set, thousands: list, text: str = "") -> bool:
     if number in values:
         return True
     whole = int(number)
     cents = int(round((number - whole) * 100))
     if cents:
-        # $16<sup>99</sup> — «1699»; <span>16</span><span>.99</span> — «16» и «99».
-        if f"{whole}{cents:02d}".lstrip("0") in digits:
+        # $16<sup>99</sup> — «16 99»; <span>16</span><span>.99</span> — «16 .99».
+        # Целая часть и центы должны стоять рядом: раньше «19» из даты и «99»
+        # из другой цены в любом месте страницы засчитывались за 19.99.
+        if re.search(r"(?<![\d.,])%d\s?[.,]?\s?%02d(?!\d)" % (whole, cents), text):
             return True
-        if str(whole) in digits and f"{cents:02d}".lstrip("0") in digits:
-            return True
-    elif str(whole) in digits or f"{whole}00" in digits:
+    elif str(whole) in digits:
+        return True
+    elif re.search(r"(?<![\d.,])%d\s?[.,]?\s?00(?!\d)" % whole, text):
+        # $16<sup>00</sup> — «$1600» в тексте. Не «$1,600»: цена 16 при видимых
+        # 1,600 — ошибка в сто раз, а не другое написание.
         return True
     return any(abs(t - number) <= number * 0.1 for t in thousands if number >= 1000)
 
@@ -720,17 +806,24 @@ def _shown(number: float, values: set, digits: set, thousands: list) -> bool:
 def _ld_value(value):
     """Число из поля разметки: `1600`, `"1,600.00"`, а и `"$1,600"`, `"1600 USD"`."""
     from .content import NUMBER, _norm_number
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     text = str(value).strip()
     try:
-        return round(float(_norm_number(text.replace(" ", ""))), 4)
+        number = float(_norm_number(text.replace(" ", "")))
+    except OverflowError:
+        # `"inf"`, `"Infinity"`, `"1e400"`: числа нет — сравнивать нечего.
+        # Раньше одно такое поле роняло проверку всего сайта.
+        return None
     except ValueError:
         found = re.search(NUMBER, text)
         if not found:
             return None
         try:
-            return round(float(_norm_number(found.group(0))), 4)
-        except ValueError:
+            number = float(_norm_number(found.group(0)))
+        except (ValueError, OverflowError):
             return None
+    return round(number, 4) if math.isfinite(number) else None
 
 
 def _ld_numbers_missing(data, page) -> list:
@@ -739,7 +832,7 @@ def _ld_numbers_missing(data, page) -> list:
     out = []
     for field, value in _ld_numbers(data):
         number = _ld_value(value)
-        if number is None or number <= 0 or _shown(number, values, digits, thousands):
+        if number is None or number <= 0 or _shown(number, values, digits, thousands, text):
             continue
         shown = f"{field} {value}"
         if shown not in out:
@@ -791,25 +884,63 @@ def _ld_types(item: dict) -> set:
 DATE_KEYS = ("datepublished", "datemodified", "date", "updated", "published")
 
 
+# В значении даты есть год: `<time datetime="09:00">` в часах работы — не дата.
+_HAS_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+# Микроданные и RDFa на обычных элементах: `<span itemprop="author">`,
+# `<span property="datePublished" content="…">`. Читаются Google так же, как
+# JSON-LD, а извлекатель берёт itemprop только с <meta>.
+_INLINE_AUTHOR = re.compile(
+    r"<[a-z][^<>]*\b(?:itemprop|property)\s*=\s*[\"']?(?:[^\"'<>]*\s)?(?:schema:)?"
+    r"(?:author|creator|publisher)(?![\w:-])", re.I)
+_INLINE_DATE = re.compile(
+    r"<[a-z][^<>]*\b(?:itemprop|property)\s*=\s*[\"']?(?:[^\"'<>]*\s)?(?:schema:)?"
+    r"(?:datePublished|dateModified|dateCreated)(?![\w:-])", re.I)
+
+
+def _filled(value) -> bool:
+    """Поле заполнено: `"author": ""` и `"datePublished": null` — не автор и не дата."""
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple)):
+        return any(_filled(v) for v in value)
+    if isinstance(value, dict):
+        # `{"@id": "https://site/#organization"}` — ссылка на узел графа, где
+        # издатель описан один раз на весь сайт. Это заполненное поле: так
+        # пишет Yoast, Next.js-шаблоны и половина генераторов JSON-LD.
+        if _filled(value.get("@id")):
+            return True
+        return any(_filled(v) for k, v in value.items() if not str(k).startswith("@"))
+    return value is not None and value is not False
+
+
 def check_provenance(page) -> list:
     """Даты и автор в машиночитаемом виде — сигналы, которые ИИ-поиск читает."""
     issues = []
-    meta_keys = {k.lower() for k in (page.meta or {})}
-    has_date = bool(meta_keys & set(DATE_KEYS))
-    has_author = "author" in meta_keys
+    meta = {str(k).lower(): v for k, v in (page.meta or {}).items()}
+    has_date = any(_HAS_YEAR.search(str(meta.get(k) or "")) for k in DATE_KEYS)
+    has_author = _filled(meta.get("author"))
     for raw in page.jsonld or ():
         try:
-            data = json.loads(raw)
+            data = _load_ld(raw)
         except (ValueError, RecursionError):
             continue
         for item in _ld_items(data):
-            keys = {str(k).lower() for k in item}
-            has_date = has_date or bool(keys & set(DATE_KEYS))
+            values = {str(k).lower(): v for k, v in item.items()}
+            has_date = has_date or any(_filled(values.get(k)) for k in DATE_KEYS)
             # Издатель — тоже «кто за этим стоит»; находка так и называется:
             # «автор или организация».
-            has_author = has_author or bool(keys & {"author", "publisher", "creator"})
-    if not has_date and re.search(r"<time\b[^<>]{0,500}?datetime=", page.raw or "", re.I):
-        has_date = True
+            has_author = has_author or any(_filled(values.get(k))
+                                           for k in ("author", "publisher", "creator"))
+    if not has_date or not has_author:
+        # Закомментированная разметка не разметка.
+        raw = _COMMENT.sub(" ", page.raw or "")
+        if not has_date:
+            has_date = any(_HAS_YEAR.search(m) for m in re.findall(
+                r"<time\b[^<>]{0,500}?datetime\s*=\s*[\"']?([^\"'<>]*)", raw, re.I))
+            has_date = has_date or bool(_INLINE_DATE.search(raw))
+        if not has_author:
+            has_author = bool(_INLINE_AUTHOR.search(raw))
     if not has_date:
         issues.append(("info", page.url, "no-date",
                        tr("нет машиночитаемой даты публикации или обновления")))

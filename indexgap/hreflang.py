@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
-from .core import url_key
+from .core import HEAD_TAGS, url_key
 from .i18n import N_, tr
 
 # ISO 639-1. Список нужен, чтобы отличить язык от страны: без него `en-uk`
@@ -85,9 +85,14 @@ class _Links(HTMLParser):
         self.canonical = ""
         self.in_body = 0
         self._body = False
+        self._raw = 0             # внутри <noscript>/<template>: это не разметка head
 
     def handle_starttag(self, tag, attrs):
-        if tag == "body":
+        if tag in ("noscript", "template"):
+            self._raw += 1
+        if self._raw:
+            return
+        if tag == "body" or tag not in HEAD_TAGS:
             self._body = True
         if tag != "link":
             return
@@ -104,7 +109,13 @@ class _Links(HTMLParser):
                 self.alternates.append((data["hreflang"].strip(), data.get("href", "").strip()))
 
     def handle_startendtag(self, tag, attrs):
+        if tag in ("noscript", "template"):
+            return
         self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        if tag in ("noscript", "template") and self._raw:
+            self._raw -= 1
 
 
 def read_alternates(page) -> list:
@@ -217,6 +228,30 @@ def _canonical_to_a_sibling(page, keys) -> bool:
     return False
 
 
+def _origin(parts):
+    """
+    (схема, хост) адреса в той форме, в которой два написания одного адреса
+    совпадают: `demo.example:443` — это `demo.example`, а `xn--e1afmkfd.xn--p1ai`
+    — это `пример.рф`. Без этого точная ответная ссылка с явным портом или в
+    punycode объявлялась «другим адресом». `www.` не снимается: это другой хост
+    и настоящий редирект.
+    """
+    if not parts or not parts.scheme or not parts.netloc:
+        return None
+    scheme = parts.scheme.lower()
+    host = parts.netloc.lower()
+    default = {"https": ":443", "http": ":80"}.get(scheme)
+    if default and host.endswith(default):
+        host = host[: -len(default)]
+    if not host.isascii():
+        try:
+            base, colon, rest = host.partition(":")
+            host = base.encode("idna").decode("ascii") + colon + rest
+        except UnicodeError:
+            pass
+    return scheme, host
+
+
 def check(pages: list, cfg: dict = None) -> dict:
     """Все проверки hreflang разом. Возвращает находки, заметки и пары-регионы."""
     issues, notes = [], []
@@ -231,6 +266,7 @@ def check(pages: list, cfg: dict = None) -> dict:
     declared = {}
     targets = {}
     x_default = set()
+    default_only = {}
     empty = []
 
     for page in pages:
@@ -253,7 +289,7 @@ def check(pages: list, cfg: dict = None) -> dict:
             if indexable(page) and not redirect_target(page) and not hidden:
                 empty.append(page)
             continue
-        keys = set()
+        keys, default_keys, lang_keys = set(), set(), set()
         for code, href in alternates:
             problem = check_tag(code)
             if problem:
@@ -264,8 +300,12 @@ def check(pages: list, cfg: dict = None) -> dict:
                 continue
             if code.strip().lower() == "x-default":
                 x_default.add(page.key)
+                default_keys.add(url_key(href))
+            else:
+                lang_keys.add(url_key(href))
             keys.add(url_key(href))
         targets[page.key] = keys
+        default_only[page.key] = default_keys - lang_keys
 
     # Шаблон, печатающий один и тот же кластер на всех страницах, — это одна
     # беда, а не тысяча. На живом каталоге недвижимости все 1 099 страниц
@@ -307,10 +347,49 @@ def check(pages: list, cfg: dict = None) -> dict:
     origins = Counter()
     for alternates in declared.values():
         for _, href in alternates:
-            parts = split(href)
-            if parts and parts.scheme and parts.netloc:
-                origins[(parts.scheme.lower(), parts.netloc.lower())] += 1
+            origin = _origin(split(href))
+            if origin:
+                origins[origin] += 1
     home = origins.most_common(1)[0][0] if origins else None
+
+    # Шаблон, который пишет http:// (или чужой хост) во всех альтернативах,
+    # сам становится «адресом сайта», и сравнивать не с чем: худший случай
+    # был невидим. Сверяемся с тем, как страницы называют себя в canonical, —
+    # только с canonical, записанным полным адресом: относительный достроен
+    # от --site и о сайте ничего не говорит.
+    own = Counter()
+    for page in pages:
+        if (declared.get(page.key) and page.canonical
+                and page.__dict__.get("_canonical_absolute")
+                and url_key(page.canonical) == page.key):
+            origin = _origin(split(page.canonical))
+            if origin:
+                own[origin] += 1
+    # Сравниваются только альтернативы, которые называют страницы этого же
+    # сайта: ссылки на соседние домены (`demo.de` с `demo.example`) — не
+    # другое написание своего адреса, а другие сайты.
+    named = Counter()
+    for alternates in declared.values():
+        for _, href in alternates:
+            origin = _origin(split(href))
+            if origin and url_key(href) in known:
+                named[origin] += 1
+    if named and own:
+        stated, count = own.most_common(1)[0]
+        wrong = Counter({o: c for o, c in named.items() if o != stated})
+        if (wrong and count >= 2
+                and count / sum(own.values()) >= 0.9
+                and sum(wrong.values()) / sum(named.values()) >= 0.5):
+            home = wrong.most_common(1)[0][0]
+            issues.append(("critical", "", "hreflang-no-return", tr(
+                "ссылки hreflang ведут на {a0}, а сами страницы в canonical "
+                "называют себя адресами {a1} ({a2} из {a3}). Каждая альтернатива — "
+                "редирект, а не версия, и поисковик отбрасывает кластер. Чинится "
+                "один раз, в шаблоне hreflang",
+                a0="%s://%s" % home, a1="%s://%s" % stated,
+                a2=count, a3=sum(own.values()))))
+            # Об отдельных ответных ссылках говорить уже нечего: неверен шаблон.
+            home = None
 
     def exact_return(target, page_key):
         """href, которым target называет страницу, если он отличается от адреса сайта."""
@@ -319,13 +398,13 @@ def check(pages: list, cfg: dict = None) -> dict:
         for _, href in declared.get(target.key) or ():
             if url_key(href) != page_key:
                 continue
-            parts = split(href)
-            if parts and parts.scheme and parts.netloc and (
-                    parts.scheme.lower(), parts.netloc.lower()) != home:
+            origin = _origin(split(href))
+            if origin and origin != home:
                 return href
         return ""
 
     from .publish import indexable
+    from .checks import redirect_target
     for page in pages:
         keys = targets.get(page.key)
         if keys is None:
@@ -375,6 +454,12 @@ def check(pages: list, cfg: dict = None) -> dict:
                         "хост не те, что у остальных ссылок сайта). Поисковик требует "
                         "точный адрес версии, а не его редирект",
                         a0=target.url, a1=variant)))
+            # x-default на заглушку, которая разводит посетителей по языкам
+            # (корень Hugo и Astro с языком в подкаталоге), — ровно то, что
+            # Google советует для x-default: страница выбора или редиректор.
+            if (not indexable(target) and other in default_only.get(page.key, ())
+                    and redirect_target(target)):
+                continue
             if not indexable(target):
                 issues.append(("warning", page.url, "hreflang-target-blocked",
                                tr("альтернатива {a0} закрыта от индексации или "

@@ -33,6 +33,8 @@ from .core import USER_AGENT, SourceError, url_key
 from .i18n import tr
 
 MAX_URLS_PER_FILE = 45000          # запас к лимиту 50 000
+MAX_BYTES_PER_FILE = 50_000_000    # запас к лимиту 50 МБ (52 428 800 байт)
+MAX_LOC_LENGTH = 2048              # адрес длиннее протокол не принимает
 INDEXNOW_BATCH = 10000             # лимит протокола
 INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow"
 
@@ -91,9 +93,51 @@ def is_draft(page, today: str = None) -> bool:
     return False
 
 
+_ISO_DAY = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def _day(value) -> str:
+    """Дата `YYYY-MM-DD` из ISO-строки или даты по RFC 822 — или пустая строка."""
+    text = str(value or "").strip().strip("'\"")
+    found = _ISO_DAY.match(text)
+    if found:
+        return found.group(1)
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(text).date().isoformat()
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return ""
+
+
+def is_expired(page, today: str = None) -> bool:
+    """
+    Страница, срок которой вышел.
+
+    Hugo не публикует страницу с `expiryDate` (он же `unpublishDate`) в
+    прошлом, а `<meta name="robots" content="unavailable_after: …">` просит
+    поисковик убрать её из выдачи после даты. Обе раньше уезжали в sitemap.
+    Сегодняшняя дата истёкшей не считается: часовой пояс неизвестен.
+    """
+    today = today or date.today().isoformat()
+    meta = {str(k).lower().replace("-", "_"): v for k, v in (page.meta or {}).items()}
+    for key in ("expirydate", "expiry_date", "unpublishdate", "unpublish_date"):
+        day = _day(meta.get(key, ""))
+        if day and day < today:
+            return True
+    for part in (page.robots or "").split(","):
+        name, sep, value = part.partition(":")
+        if sep and name.strip().lower() == "unavailable_after":
+            day = _day(value)
+            if day and day < today:
+                return True
+    return False
+
+
 def indexable(page) -> bool:
     """Страница, которую вообще имеет смысл показывать поисковику."""
     if page.noindex:
+        return False
+    if is_expired(page):
         return False
     # Черновик не публикуется. Раньше страница со `status: draft` спокойно
     # уезжала и в sitemap, и в очередь IndexNow: проверка смотрела только
@@ -144,25 +188,59 @@ def _rekeyed(manifest: dict, pages: list) -> dict:
     return manifest
 
 
-def foreign_sitemap(out_dir: str, manifest: dict) -> str:
+def _out_key(out_dir: str, base_dir: str = None) -> str:
+    """
+    Каталог вывода так, как он записывается в манифест: относительно каталога
+    манифеста, а не абсолютным путём — манифест коммитят, и в CI checkout
+    лежит в другом месте.
+    """
+    base = os.path.abspath(base_dir or os.getcwd())
+    try:
+        rel = os.path.relpath(os.path.abspath(out_dir), base)
+    except ValueError:                     # другой диск в Windows
+        rel = os.path.abspath(out_dir)
+    return rel.replace(os.sep, "/")
+
+
+def _own_files(out_dir: str, manifest: dict, base_dir: str = None) -> list:
+    """
+    Имена файлов, которые пакет записал именно в этот каталог.
+
+    Раньше в манифесте хранились только имена (`_shards`), без каталога, и
+    sitemap.xml, записанный в любой другой --out-dir, делал «своим» каждый
+    sitemap.xml — а sitemap-1.xml из чужой папки удалялся как устаревший шард.
+    Манифест прошлых версий без `_outputs` читается по-старому.
+    """
+    manifest = manifest or {}
+    outputs = manifest.get("_outputs")
+    if isinstance(outputs, dict):
+        listed = outputs.get(_out_key(out_dir, base_dir))
+    else:
+        listed = manifest.get("_shards")
+    if not isinstance(listed, list):
+        return []
+    return [name for name in listed if isinstance(name, str)]
+
+
+def foreign_sitemap(out_dir: str, manifest: dict, base_dir: str = None) -> str:
     """
     Путь к sitemap.xml, который написал не пакет, — или пустая строка.
 
-    Своим файл считается, если он записан в манифесте: пакет заносит туда всё,
-    что создаёт. Файл без записи — чужой, и молча заменять его нельзя.
+    Своим файл считается, если он записан в манифесте за этим каталогом: пакет
+    заносит туда всё, что создаёт. Файл без записи — чужой, и молча заменять
+    его нельзя.
     """
     path = os.path.join(out_dir, "sitemap.xml")
     if not os.path.isfile(path):
         return ""
-    listed = (manifest or {}).get("_shards")
-    if isinstance(listed, list) and "sitemap.xml" in listed:
+    if "sitemap.xml" in _own_files(out_dir, manifest, base_dir):
         return ""
     return path
 
 
 def build_sitemap(pages: list, out_dir: str, base_url: str,
                   manifest: dict = None, today: str = None,
-                  public_prefix: str = "") -> dict:
+                  public_prefix: str = "", base_dir: str = None) -> dict:
     """
     Пишет sitemap.xml (или sitemap.xml-индекс + шарды) в out_dir.
 
@@ -172,12 +250,16 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
 
     Манифест дополняется, а не переписывается: поле `notified` принадлежит
     команде notify и не должно исчезать при сборке sitemap.
+
+    `base_dir` — каталог манифеста: относительно него записывается, в какой
+    каталог легли файлы.
     """
     today = today or date.today().isoformat()
     manifest = _rekeyed(manifest, pages)
     included = sorted([p for p in pages if indexable(p)], key=lambda p: p.url)
 
-    new_manifest = {k: dict(v) for k, v in manifest.items() if isinstance(v, dict)}
+    new_manifest = {k: dict(v) for k, v in manifest.items()
+                    if isinstance(v, dict) and not str(k).startswith("_")}
     live = {p.url for p in pages}
     # Записи удалённых страниц не копятся вечно: на каталоге с ротацией
     # манифест разрастался до тысяч мёртвых URL, а «Пропало: 1530»
@@ -215,11 +297,13 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
     os.makedirs(out_dir, exist_ok=True)
     written = []
 
+    head = ['<?xml version="1.0" encoding="UTF-8"?>',
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    rows = [f"  <url><loc>{escape(url)}</loc><lastmod>{escape(lastmod)}</lastmod></url>"
+            for url, lastmod in entries]
+
     def write_urlset(path, chunk):
-        lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-        for url, lastmod in chunk:
-            lines.append(f"  <url><loc>{escape(url)}</loc><lastmod>{escape(lastmod)}</lastmod></url>")
+        lines = list(head) + [row for _entry, row in chunk]
         lines.append("</urlset>")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
@@ -231,16 +315,28 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
     # поиск по маске сносил чужие sitemap-news.xml и sitemap-images.xml.
     # И только по имени, которое пакет сам даёт шардам: манифест из чужого
     # репозитория называл «шардом» `../../что-угодно`, и файл удалялся.
-    listed = manifest.get("_shards")
+    # И только из того каталога, куда пакет их записал: имя без каталога
+    # удаляло sitemap-1.xml чужой утилиты в другом --out-dir.
     stale = {os.path.join(out_dir, name)
-             for name in (listed if isinstance(listed, list) else [])
-             if isinstance(name, str) and _SHARD_NAME.match(name)}
+             for name in _own_files(out_dir, manifest, base_dir)
+             if _SHARD_NAME.match(name)}
 
-    if len(entries) <= MAX_URLS_PER_FILE:
-        write_urlset(os.path.join(out_dir, "sitemap.xml"), entries)
+    # Шард режется и по числу адресов, и по размеру: длинные кириллические
+    # адреса в процент-кодировании давали 58 МБ в одном файле при 45 000 URL.
+    shards, chunk, size = [], [], 0
+    budget = MAX_BYTES_PER_FILE - sum(len(line) + 1 for line in head) - len("</urlset>\n")
+    for entry, row in zip(entries, rows):
+        weight = len(row.encode("utf-8")) + 1
+        if chunk and (len(chunk) >= MAX_URLS_PER_FILE or size + weight > budget):
+            shards.append(chunk)
+            chunk, size = [], 0
+        chunk.append((entry, row))
+        size += weight
+    shards.append(chunk)
+
+    if len(shards) == 1:
+        write_urlset(os.path.join(out_dir, "sitemap.xml"), shards[0])
     else:
-        shards = [entries[i:i + MAX_URLS_PER_FILE]
-                  for i in range(0, len(entries), MAX_URLS_PER_FILE)]
         for i, chunk in enumerate(shards, 1):
             path = os.path.join(out_dir, f"sitemap-{i}.xml")
             write_urlset(path, chunk)
@@ -249,7 +345,7 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
                        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
         for i, chunk in enumerate(shards, 1):
             loc = _shard_loc(base_url, public_prefix, f"sitemap-{i}.xml")
-            newest = max(lastmod for _, lastmod in chunk)
+            newest = max(lastmod for (_url, lastmod), _row in chunk)
             index_lines.append(
                 f"  <sitemap><loc>{escape(loc)}</loc><lastmod>{newest}</lastmod></sitemap>")
         index_lines.append("</sitemapindex>")
@@ -267,7 +363,13 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
             removed.append(path)
         except OSError:
             pass
-    new_manifest["_shards"] = sorted(os.path.basename(p) for p in written)
+    names = sorted(os.path.basename(p) for p in written)
+    new_manifest["_shards"] = names
+    outputs = manifest.get("_outputs")
+    outputs = {k: v for k, v in outputs.items() if isinstance(v, list)} \
+        if isinstance(outputs, dict) else {}
+    outputs[_out_key(out_dir, base_dir)] = names
+    new_manifest["_outputs"] = outputs
 
     return {
         "manifest": new_manifest,
@@ -276,6 +378,8 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         "included": len(entries),
         "excluded": len(pages) - len(entries),
         "drafts": sorted(p.url for p in pages if is_draft(p)),
+        "too_long": [url for url, _ in entries if len(url) >= MAX_LOC_LENGTH],
+        "shards": len(shards) if len(shards) > 1 else 0,
     }
 
 

@@ -70,15 +70,54 @@ _WIDE_SCRIPT = re.compile(
 CHARS_PER_WORD = 2.0
 
 
+# Насколько высоко над страницами искать конфиг, который назвал их своими:
+# `.next/server/app` — три уровня от корня проекта.
+_CONFIG_DEPTH = 6
+
+
+def _pages_of(path: str) -> str:
+    """Каталог страниц, записанный в конфиге (`pages`), — абсолютным путём."""
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    pages = data.get("pages")
+    if not isinstance(pages, str):
+        pages = data.get("content") if isinstance(data.get("content"), str) else ""
+    if not pages:
+        return ""
+    return os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(path)), pages))
+
+
 def find_config(root: str) -> str:
-    """Ищет конфиг рядом со страницами, затем на уровень выше."""
-    candidates = []
-    for directory in (root, os.path.dirname(os.path.abspath(root))):
+    """
+    Ищет конфиг рядом со страницами, затем на уровень выше.
+
+    Выше этого берётся только конфиг, чей `pages` указывает ровно на эти
+    страницы: `indexgap init` в проекте на Next.js пишет
+    `"pages": "./.next/server/app"`, и такой конфиг лежит тремя уровнями выше.
+    Чужой indexgap.json где-то над каталогом не подхватывается.
+    """
+    here = os.path.abspath(root)
+    for directory in (here, os.path.dirname(here)):
         for name in CONFIG_NAMES:
-            candidates.append(os.path.join(directory, name))
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
+            path = os.path.join(directory, name)
+            if os.path.isfile(path):
+                return path
+    target = os.path.realpath(here)
+    directory = os.path.dirname(here)
+    for _ in range(_CONFIG_DEPTH):
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            break
+        directory = parent
+        for name in CONFIG_NAMES:
+            path = os.path.join(directory, name)
+            if os.path.isfile(path) and _pages_of(path) == target:
+                return path
     return ""
 
 
@@ -105,8 +144,12 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
                                       and all(isinstance(v, str) for v in value)):
             raise SourceError(tr("{a0}: значение `{a1}` должно быть списком строк, а там {a2}.",
                                  a0=path, a1=key, a2=json.dumps(value, ensure_ascii=False)[:40]))
-    config.update(user)
+    # `null` — «как по умолчанию»: проверка выше его пропускает, и пустое
+    # значение затирало список по умолчанию, роняя прогон трассировкой.
+    config.update({k: v for k, v in user.items()
+                   if not (v is None and k in PROJECT_DEFAULTS)})
     config["_path"] = path
+    config["_user_keys"] = sorted(user)
     return config
 
 
@@ -241,3 +284,88 @@ def resolve(root: str, pages: list = None, rows: list = None,
     config["language"] = language
 
     return config
+
+
+# ── проверка того, что вписано руками ─────────────────────────────────────────
+
+# Поля верхнего уровня, которые кто-то читает. Опечатка в имени раздела
+# (`chekcs`, `profil`) раньше тихо не действовала: пороги и профиль
+# оставались по умолчанию, и в отчёте об этом не было ни слова.
+KNOWN_KEYS = ("profile", "site", "pages", "dataset", "home", "checks", "content", "aeo",
+              "freshness", "ignore", "cite", "fact_units", "extra_fact_units",
+              "vague_anchors", "language")
+
+# Пороги-доли в разделах; остальные пороги — счёт (не меньше 1). У каждой
+# пары: можно ли ноль.
+_SHARES = {"template_share": False, "match_min_score": False,
+           "question_share": True, "min_dated_share": True}
+_ZERO_OK = {"min_anchor_chars", "grace_days"}
+
+
+def _section_defaults(section: str) -> dict:
+    if section == "content":
+        from .content import CONFIG
+    elif section == "aeo":
+        from .aeo import CONFIG
+    else:
+        from .freshness import CONFIG
+    return CONFIG
+
+
+def check_section(section: str, values) -> list:
+    """
+    Пороги разделов `content`, `aeo` и `freshness` — так же, как `checks`.
+
+    `template_share: 70` вместо `0.7` молча убирало все находки о скелете
+    шаблона, а число строкой роняло прогон трассировкой. Возвращает заметки
+    о незнакомых ключах; на невозможное значение отвечает ошибкой со словами.
+    """
+    import difflib
+    if values is None:
+        return []
+    if not isinstance(values, dict):
+        raise SourceError(
+            tr("В настройках проекта раздел `{a0}` должен быть объектом с порогами, а не {a1}.\n    Путь к страницам записывается полем `pages`, не `content` — поправь indexgap.json.", a0=section, a1=type(values).__name__))
+    defaults = _section_defaults(section)
+    notes = []
+    for key, value in values.items():
+        if key.startswith("_"):
+            continue
+        name = f"{section}.{key}"
+        if key not in defaults:
+            close = difflib.get_close_matches(key, list(defaults), n=1, cutoff=0.7)
+            notes.append(tr("настройка «{a0}» мне не знакома и не действует", a0=name)
+                         + (tr(" — возможно, имелось в виду «{a0}»", a0=close[0]) if close else ""))
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SourceError(tr("настройка «{a0}» должна быть числом, а в конфиге стоит {a1}",
+                                 a0=name, a1=json.dumps(value, ensure_ascii=False)))
+        if key in _SHARES:
+            low_ok = _SHARES[key]
+            if not ((0 <= value if low_ok else 0 < value) and value <= 1):
+                raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
+                                     a2=tr("нужна доля от 0 до 1 — например 0.8, а не 80")))
+        elif value < (0 if key in _ZERO_OK else 1):
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
+                                 a2=tr("нужно целое число не меньше 1") if key not in _ZERO_OK
+                                 else tr("нужно число не меньше 0")))
+    if section == "aeo":
+        merged = {**defaults, **{k: v for k, v in values.items() if k in defaults}}
+        if merged["answer_min"] >= merged["answer_max"]:
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0="aeo.answer_max",
+                                 a1=merged["answer_max"],
+                                 a2=tr("верхняя граница должна быть больше нижней")))
+    return notes
+
+
+def unknown_keys(config: dict) -> list:
+    """Заметки о полях верхнего уровня, которых пакет не читает."""
+    import difflib
+    notes = []
+    for key in sorted(config.get("_user_keys") or ()):
+        if key.startswith("_") or key in KNOWN_KEYS:
+            continue
+        close = difflib.get_close_matches(key, list(KNOWN_KEYS), n=1, cutoff=0.7)
+        notes.append(tr("поле «{a0}» в indexgap.json мне не знакомо и не действует", a0=key)
+                     + (tr(" — возможно, имелось в виду «{a0}»", a0=close[0]) if close else ""))
+    return notes

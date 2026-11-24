@@ -188,10 +188,12 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
 
     urls = sorted({p.url for p in pages if words.get(p.url)})
     if len(urls) < 2:
-        return {"pairs": [], "notes": notes, "method": tr("нет данных"), "method_id": "none"}
+        return {"pairs": [], "notes": notes, "method": tr("нет данных"), "method_id": "none",
+                "sampled_urls": frozenset()}
 
     if len(urls) <= cfg["exact_below"]:
         method, method_id = tr("попарное сравнение"), "pairwise"
+        sampled = set()
         shingles = {u: shingle_set(u) for u in urls}
         get = shingles.__getitem__
         candidates = [(urls[i], urls[j])
@@ -229,7 +231,11 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
 
         cap = 200
         candidate_set = set()
-        clustered = set()
+        # Пары «образец — остальные» из переполненной корзины: предмет такой
+        # находки — образец, а он зависит от того, какой адрес первым по
+        # алфавиту. Удалили одну страницу — у тысячи сменился «близнец».
+        sampled = set()
+        overflow = set()
         for bucket in buckets.values():
             if len(bucket) < 2:
                 continue
@@ -238,18 +244,47 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
                     for j in range(i + 1, len(bucket)):
                         candidate_set.add((bucket[i], bucket[j]))
             else:
-                # Корзина такого размера — это не «шаблон, значит не дубли»,
-                # а наоборот: кластер почти одинаковых страниц. Полный перебор
-                # внутри неё квадратичен, поэтому сравниваем всех с образцом.
-                rep = bucket[0]
-                # Одна группа попадает в корзину каждой полосы: считаем группы,
-                # а не полосы — «8 групп» печаталось для одной.
-                clustered.add(frozenset(bucket))
-                for other in bucket[1:]:
-                    candidate_set.add((rep, other))
-        if clustered:
-            notes.append(
-                tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=len(clustered)))
+                # Одна группа попадает в корзину каждой полосы: разбираем
+                # группу, а не полосу.
+                overflow.add(tuple(bucket))
+        if overflow:
+            # Переполненная корзина — не обязательно кластер одинаковых
+            # страниц: полосы по множеству слов собирают в одну корзину
+            # всё, что написано одним словарём. Сравнение «все с образцом»
+            # теряло в такой корзине настоящие пары клонов. Корзина
+            # разбирается ещё раз — по полосам из пар слов: подстановка
+            # портит две пары, а не пять шинглов, и клоны совпадают на 0,85,
+            # тогда как разные тексты одного словаря — на десятые доли.
+            pair_sig = {}
+
+            def pair_signature(url):
+                if url not in pair_sig:
+                    own = words.get(url, [])
+                    pair_sig[url] = _minhash(_shingles(own, 4 if is_dense(own) else 2), perms)
+                return pair_sig[url]
+
+            for bucket in sorted(overflow):
+                sub = defaultdict(list)
+                for url in bucket:
+                    sig = pair_signature(url)
+                    for b in range(bands):
+                        band = sig[b * rows:(b + 1) * rows]
+                        sub[(b, hashlib.blake2b(repr(band).encode(), digest_size=8).digest())].append(url)
+                for part in sub.values():
+                    if len(part) < 2:
+                        continue
+                    if len(part) <= cap:
+                        for i in range(len(part)):
+                            for j in range(i + 1, len(part)):
+                                candidate_set.add((part[i], part[j]))
+                        continue
+                    # А такая корзина — уже кластер почти одинаковых страниц.
+                    # Полный перебор внутри неё квадратичен, поэтому
+                    # сравниваем всех с образцом.
+                    rep = part[0]
+                    for other in part[1:]:
+                        candidate_set.add((rep, other))
+                        sampled.add((rep, other))
         candidates = sorted(candidate_set)
 
     by_url = {p.url: p for p in pages}
@@ -269,8 +304,19 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         if j >= cfg["similar"]:
             out.append((by_url[a], by_url[b], round(j, 3)))
     out.sort(key=lambda t: (-t[2], t[0].url, t[1].url))
+    # Заметка — о группах, где сравнение с образцом действительно нашло
+    # похожие страницы. Корзина, переполненная словарём, а не сходством,
+    # ничего не утверждает: «группы оказались похожи» при нуле пар — неправда.
+    found = [(a.url, b.url) for a, b, _ in out if (a.url, b.url) in sampled]
+    groups = _clusters(found)
+    if groups:
+        notes.append(
+            tr("{a0} групп(ы) страниц оказались настолько похожи, что сравнивались с образцом группы, а не попарно — иначе счёт занял бы часы. Пары внутри такой группы показаны не все.", a0=len(groups)))
     # `method_id` — для машин: `method` переведён и на другом языке другой.
-    return {"pairs": out, "notes": notes, "method": method, "method_id": method_id}
+    # `sampled_urls` — страницы, чей «близнец» — образец группы: их предмет
+    # зависит от выборки, а не от сайта.
+    return {"pairs": out, "notes": notes, "method": method, "method_id": method_id,
+            "sampled_urls": frozenset(u for pair in found for u in pair)}
 
 
 def _slot_pattern(a: str, b: str) -> str:
@@ -560,8 +606,11 @@ def _cohort(page) -> str:
 _NEXT_REDIRECT = re.compile(r"NEXT_REDIRECT;(?:replace|push);([^;\"\\\s]+);30[1278]")
 _META_TAG = re.compile(r"<meta\b[^>]{0,2000}>", re.I)
 _REFRESH = re.compile(r"http-equiv\s*=\s*[\"']?refresh", re.I)
+# Кавычки у атрибута необязательны: минификатор HTML пишет
+# `content=0;url=/en/`, и главная-заглушка не узнавалась.
 _REFRESH_CONTENT = re.compile(
-    r"content\s*=\s*[\"']\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?([^\"'\s>]+)", re.I)
+    r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?"
+    r"([^\"'\s>]+)", re.I)
 # Где «редирект» — не редирект: его показывают, выключили или держат про запас.
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 
@@ -656,6 +705,9 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     unresolved = set()
     unresolved_from = defaultdict(set)
     unresolved_dirs = set()
+    soft = defaultdict(set)
+    soft_inbound = set()
+    landing_of = {}
     for p in pages:
         targets = set()
         for link in p.links:
@@ -677,6 +729,7 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         landing = by_key.get(url_key(raw_landing)) if raw_landing else None
         if landing and landing != p.url:
             targets.add(landing)
+            landing_of[p.url] = landing
         elif raw_landing and not landing:
             # Заглушка ведёт на страницу, которой в сборке нет: на живом сайте
             # это 404 за редиректом. Ссылкой <a> её могли и не продублировать.
@@ -684,6 +737,21 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             if key and urlsplit(key).netloc == urlsplit(url_key(p.url)).netloc:
                 unresolved.add(key)
                 unresolved_from[p.url].add(key)
+        # `rel="nofollow"` у ссылки: входящей она остаётся — страница не
+        # сирота, — но по ней не идут. Битая такая ссылка — 404 для человека;
+        # из корня сайта она обычно ведёт на /login или /cart, которых в
+        # статической сборке нет, поэтому битой считается только внутри раздела.
+        for link in p.__dict__.get("_nofollow_links", ()):
+            key = url_key(link)
+            target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
+            if target and target != p.url:
+                soft[p.url].add(target)
+                soft_inbound.add(target)
+            elif not target and key.split("?", 1)[0].count("/") >= 4:
+                unresolved.add(key)
+                unresolved_from[p.url].add(key)
+                if urlsplit(link).path.endswith("/"):
+                    unresolved_dirs.add(key)
         outbound[p.url] = targets
         if getattr(p, "nofollow", False):
             nofollow.add(p.url)
@@ -721,6 +789,9 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     urls = sorted(by_key.values())
 
     def walk(edges):
+        # Редирект заглушки — не клик: шаг к цели бесплатный (обход 0-1).
+        # Раньше `/go/` с meta refresh посреди пути добавлял уровень, и
+        # `deep` срабатывал на клик раньше.
         found = {}
         if home:
             found[home] = 0
@@ -728,9 +799,14 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             while queue:
                 cur = queue.popleft()
                 for nxt in sorted(edges(cur)):
-                    if nxt not in found:
-                        found[nxt] = found[cur] + 1
-                        queue.append(nxt)
+                    free = landing_of.get(cur) == nxt
+                    step = found[cur] + (0 if free else 1)
+                    if nxt not in found or step < found[nxt]:
+                        found[nxt] = step
+                        if free:
+                            queue.appendleft(nxt)
+                        else:
+                            queue.append(nxt)
         return found
 
     by_links = walk(lambda u: () if u in blocked else followed.get(u, ()))
@@ -741,9 +817,10 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         anyway = walk(lambda u: set(followed.get(u, ())) | by_hreflang.get(u, set()))
         behind_robots = sorted(u for u in anyway if u not in depth)
     behind_nofollow = []
-    if nofollow and home:
+    if (nofollow or soft) and home:
         loose = walk(lambda u: set() if u in blocked
-                     else set(outbound.get(u, ())) | by_hreflang.get(u, set()))
+                     else set(outbound.get(u, ())) | soft.get(u, set())
+                     | by_hreflang.get(u, set()))
         behind_nofollow = sorted(u for u in loose if u not in depth)
     # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
     only_hreflang = sorted(set(depth) - set(by_links))
@@ -767,7 +844,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         # никуда не нужно доходить.
         "only_hreflang": only_hreflang,
         "orphans": sorted(u for u in urls if not inbound.get(u) and u != home
-                          and u != redirected_from and not hreflang_inbound.get(u)),
+                          and u != redirected_from and not hreflang_inbound.get(u)
+                          and u not in soft_inbound),
         "dead_ends": sorted(u for u in urls if not outbound.get(u)),
         "unreachable": sorted(u for u in urls if u not in depth
                               and u != redirected_from) if home else [],
@@ -850,6 +928,46 @@ def _is_file_link(key: str, dirs: set) -> bool:
     if "." not in last or key in dirs:
         return False
     return last.rsplit(".", 1)[-1].lower() in ASSET_EXTS
+
+
+def missing_sections(pages: list, graph: dict, base_path: str = "",
+                     least: int = 10) -> list:
+    """
+    Разделы, на страницы которых сайт ссылается, а в сборке их нет вовсе:
+    [(раздел, сколько разных адресов)].
+
+    Битой такая ссылка не считается — другая часть домена бывает отдана
+    другим приложением. Но когда генератор раздела упал, двенадцать ссылок
+    главной на /rent/… молчали, и отчёт выходил чистым. Порог — `least`
+    разных адресов в одном разделе: одна-две ссылки на /login — это не раздел.
+    """
+    base = "/" + base_path.strip("/") if base_path.strip("/") else ""
+    dirs = set(graph.get("unresolved_dirs") or ())
+
+    def local_of(key):
+        local = "/" + key.split("/", 3)[-1] if key.count("/") >= 3 else "/"
+        if base:
+            if local != base and not local.startswith(base + "/"):
+                return None
+            local = local[len(base):] or "/"
+        return local
+
+    present = set()
+    for p in pages:
+        local = local_of(p.key)
+        if local:
+            present.add(local.strip("/").split("/", 1)[0])
+    targets = defaultdict(set)
+    for key in graph.get("unresolved") or ():
+        path = key.split("?", 1)[0]
+        if _is_file_link(path, dirs):
+            continue
+        local = local_of(path)
+        segs = [x for x in (local or "").strip("/").split("/") if x]
+        if len(segs) >= 2 and segs[0] not in present:
+            targets[segs[0]].add(path)
+    return sorted(((section, len(found)) for section, found in targets.items()
+                   if len(found) >= least), key=lambda x: (-x[1], x[0]))
 
 
 def broken_links(pages: list, graph: dict, base_path: str = "",
@@ -1479,15 +1597,24 @@ def template_risk(issues: list, pages: list, min_pages: int = RISK_MIN_PAGES) ->
     worst = defaultdict(float)
     levels = defaultdict(set)
     codes = defaultdict(Counter)
-    for level, url, code, _ in issues:
+    for level, url, code, message in issues:
         if level not in ("critical", "warning") or not url:
             continue
-        own = by_url.get(url) or by_url.get(url_key(url))
-        if own is None:
-            continue
-        worst[own] = max(worst[own], _severity(level, code))
-        levels[own].add(level)
-        codes[template_of[own]][code] += 1
+        owners = [by_url.get(url) or by_url.get(url_key(url))]
+        if code == "noindex-group":
+            # Находка о разделе стоит на пути `/visa/`, а закрыты страницы её
+            # веток: их собственный noindex понижен до сведений, и риск шаблона
+            # иначе обнулялся тем вернее, чем больше веток закрыто.
+            owners = [by_url.get(k) for k in getattr(message, "subject", None) or ()]
+        seen = set()
+        for own in owners:
+            if own is None:
+                continue
+            worst[own] = max(worst[own], _severity(level, code))
+            levels[own].add(level)
+            if template_of[own] not in seen:
+                seen.add(template_of[own])
+                codes[template_of[own]][code] += 1
 
     members = defaultdict(list)
     for url, name in template_of.items():
@@ -1680,6 +1807,18 @@ KEEP_ON_CLOSED = {"noindex", "canonical-elsewhere", "nosnippet", "stale-closed",
 CLOSED_SECTION_MIN = 20
 
 
+class _SectionNote(str):
+    """Заметка о закрытом разделе: помнит раздел, чтобы её можно было снять."""
+
+    def __new__(cls, section, text):
+        self = super().__new__(cls, text)
+        self.section = section
+        return self
+
+    def __reduce__(self):
+        return (_SectionNote, (self.section, str(self)))
+
+
 def _closed_sections(issues: list, notes: list, pages: list) -> list:
     """
     Закрытый раздел — решение, а не четыре тысячи ошибок.
@@ -1700,9 +1839,15 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
             total[prefix] += 1
             if p.noindex:
                 closed[prefix] += 1
+    # Ветки каталога, закрытые рядом с такими же открытыми, — не старая
+    # версия документации, а `noindex-group`: двадцать вопросов на страну
+    # тихо уходили в сведения, и большая авария выглядела зеленее малой.
+    branches = _catalogue_branches(
+        {i[1] for i in issues if i[2] == "noindex" and i[0] == "critical"}, pages)
     sections = sorted(
         (prefix for prefix, n in total.items()
-         if n >= CLOSED_SECTION_MIN and closed[prefix] >= 0.9 * n and n < 0.5 * len(pages)),
+         if n >= CLOSED_SECTION_MIN and closed[prefix] >= 0.9 * n and n < 0.5 * len(pages)
+         and not any(prefix.startswith(b) or b.startswith(prefix) for b in branches)),
         key=lambda s: (s.count("/"), s))
     chosen = []
     for prefix in sections:
@@ -1711,11 +1856,11 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
     if not chosen:
         return issues
     for prefix in chosen:
-        notes.append(tr(
+        notes.append(_SectionNote(prefix, tr(
             "раздел {a0}: закрыто от индекса {a1} страниц из {a2}. Похоже на решение, а "
             "не на ошибку — старые версии документации, черновики, служебные копии. "
             "Если так и задумано, делать ничего не нужно; находки noindex там понижены "
-            "до сведений", a0=prefix, a1=closed[prefix], a2=total[prefix]))
+            "до сведений", a0=prefix, a1=closed[prefix], a2=total[prefix])))
 
     def inside(url):
         path = urlsplit(url).path
@@ -1727,6 +1872,63 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
 
 
 CLOSED_GROUP_ENTITIES = 3
+
+# Имена веток, которые выдают версии документации: `/docs/1.2/`, `/v3/`, `/next/`.
+_VERSION_BRANCH = re.compile(
+    r"^(v?\d+(?:[._-]\d+)*(?:[._-]x)?|next|dev|nightly|canary|legacy|archive|old)$", re.I)
+
+
+def _closed_groups(closed: set, pages: list) -> tuple:
+    """
+    Разделы, в которых закрыты целиком три ветки и больше: {раздел: [ветки]},
+    а ещё ветки каждого раздела и размеры веток (всех и закрытых страниц).
+    """
+    size, shut = Counter(), Counter()
+    by_parent = defaultdict(list)
+    if len(closed) < CLOSED_SECTION_MIN:
+        return {}, by_parent, size, shut
+    for p in pages:
+        path = [x for x in urlsplit(p.url).path.split("/") if x]
+        for depth in range(2, len(path) + 1):
+            entity = tuple(path[:depth])
+            size[entity] += 1
+            if p.url in closed:
+                shut[entity] += 1
+    for entity in size:
+        by_parent[entity[:-1]].append(entity)
+    chosen = {}
+    for parent, entities in by_parent.items():
+        full = [e for e in entities
+                if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
+        pages_closed = sum(shut[e] for e in full)
+        if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
+                and len(full) * 2 < len(entities)):
+            chosen[parent] = sorted(full)
+    # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
+    for parent in sorted(chosen, key=len):
+        for other in list(chosen):
+            if other != parent and other[:len(parent)] == parent and other in chosen:
+                if any(other[:len(e)] == e for e in chosen[parent]):
+                    del chosen[other]
+    return chosen, by_parent, size, shut
+
+
+def _catalogue_branches(closed: set, pages: list) -> set:
+    """
+    Закрытые ветки, которые `noindex-group` должен увидеть, даже если каждая
+    сама по себе — большой закрытый раздел: рядом стоят такие же открытые
+    ветки (не меньше трёх страниц, и их больше, чем закрытых), и ни одна
+    закрытая не названа как версия документации. Пути веток — `/visa/alpha/`.
+    """
+    chosen, by_parent, size, _ = _closed_groups(closed, pages)
+    out = set()
+    for parent, full in chosen.items():
+        if any(_VERSION_BRANCH.match(e[-1]) for e in full):
+            continue
+        shaped = sum(1 for e in by_parent[parent] if e not in full and size[e] >= 3)
+        if shaped > len(full):
+            out |= {"/" + "/".join(e) + "/" for e in full}
+    return out
 
 
 def collapse_closed_groups(issues: list, pages: list) -> list:
@@ -1743,39 +1945,13 @@ def collapse_closed_groups(issues: list, pages: list) -> list:
     до сведений. sitemap, из которого ветки убраны, понижает и саму находку.
     """
     closed = {i[1] for i in issues if i[2] == "noindex" and i[0] == "critical"}
-    if len(closed) < CLOSED_SECTION_MIN:
+    chosen, by_parent, _, _ = _closed_groups(closed, pages)
+    if not chosen:
         return issues
 
     def parts(url):
         return [x for x in urlsplit(url).path.split("/") if x]
 
-    size, shut = Counter(), Counter()
-    for p in pages:
-        path = parts(p.url)
-        for depth in range(2, len(path) + 1):
-            entity = tuple(path[:depth])
-            size[entity] += 1
-            if p.url in closed:
-                shut[entity] += 1
-    by_parent = defaultdict(list)
-    for entity, n in size.items():
-        by_parent[entity[:-1]].append(entity)
-    chosen = {}
-    for parent, entities in by_parent.items():
-        full = [e for e in entities
-                if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
-        pages_closed = sum(shut[e] for e in full)
-        if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
-                and len(full) * 2 < len(entities)):
-            chosen[parent] = sorted(full)
-    if not chosen:
-        return issues
-    # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
-    for parent in sorted(chosen, key=len):
-        for other in list(chosen):
-            if other != parent and other[:len(parent)] == parent and other in chosen:
-                if any(other[:len(e)] == e for e in chosen[parent]):
-                    del chosen[other]
     member = {}
     for parent, full in chosen.items():
         for e in full:
@@ -1825,11 +2001,13 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
     """
     if not sitemap_urls:
         return issues
-    listed = set()
-    for u in sitemap_urls:
-        key = url_key(u)
-        # `/a/?utm_source=feed` в sitemap — это страница `/a/`, как и в воронке.
-        listed |= {key, key.split("?", 1)[0]}
+    listed = _listed_keys(sitemap_urls)
+    # Страницы, которые уже представлены находкой `noindex-group`: поднимать
+    # каждую обратно в критичные — считать одно правило шаблона дважды.
+    in_group = set()
+    for item in issues:
+        if item[2] == "noindex-group":
+            in_group.update(getattr(item[3], "subject", None) or ())
     out = []
     for item in issues:
         if item[2] == "noindex-group":
@@ -1837,8 +2015,9 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
             if (complete and item[0] == "critical" and subjects
                     and not any(k in listed for k in subjects)):
                 item = ("info", item[1], item[2], Said(
-                    str(item[3]) + " " + tr("В sitemap их нет — похоже на решение, а "
-                                             "не на ошибку шаблона."), subjects), *item[4:])
+                    str(item[3]).rstrip(". ") + ". "
+                    + tr("В sitemap их нет — похоже на решение, а "
+                         "не на ошибку шаблона."), subjects), *item[4:])
             out.append(item)
             continue
         key = url_key(item[1]) if item[1] else ""
@@ -1848,6 +2027,7 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
                 "страница закрыта от индексации и убрана из sitemap — похоже на "
                 "решение, а не на ошибку шаблона"), *item[4:])
         elif (item[0] == "info" and item[2] == "noindex" and key in listed
+              and key not in in_group
               and _slug(item[1]) not in _CLOSED_BY_DESIGN):
             # Закрытый раздел понижен до сведений ещё при разборе сборки, когда
             # sitemap не было видно. Раздел, который всё ещё отдан в sitemap,
@@ -1857,6 +2037,88 @@ def closed_off_map(issues: list, sitemap_urls, complete: bool = True) -> list:
                 "если закрытие не задумано, трафика не будет"), *item[4:])
         out.append(item)
     return out
+
+
+def _listed_keys(sitemap_urls) -> set:
+    listed = set()
+    for u in sitemap_urls or ():
+        key = url_key(u)
+        # `/a/?utm_source=feed` в sitemap — это страница `/a/`, как и в воронке.
+        listed |= {key, key.split("?", 1)[0]}
+    return listed
+
+
+SITEMAP_COVERAGE_MIN = 0.5
+
+
+def closed_against_sitemap(issues: list, notes: list, pages: list, sitemap_urls,
+                           complete: bool = True, build: bool = False) -> list:
+    """
+    `closed_off_map` с проверкой, что sitemap вообще можно верить, и с
+    заметками, которые совпадают с тем, что случилось.
+
+    «Нет в sitemap — значит убрана намеренно» верно только для полного
+    списка. Устаревший sitemap сборки с одной главной или собранный для
+    `localhost:3000` не называет и открытых страниц: по нему любой noindex
+    выглядел решением. Если в sitemap меньше половины открытых страниц,
+    noindex не понижается, и об этом сказано. Закрытая страница, которая в нём
+    стоит, по-прежнему противоречие. Заметка «раздел понижен до сведений»
+    снимается, если sitemap поднял его страницы обратно. `build` — sitemap
+    взят из сборки, без `--sitemap`.
+    """
+    if not sitemap_urls:
+        return issues
+    listed = _listed_keys(sitemap_urls)
+    open_keys = {url_key(p.url) for p in pages if indexable(p)}
+    covered = len(open_keys & listed)
+    sparse = not open_keys or covered < SITEMAP_COVERAGE_MIN * len(open_keys)
+    out = closed_off_map(issues, sitemap_urls, complete=complete and not sparse)
+
+    def lowered(after):
+        n = 0
+        for was, now in zip(issues, after):
+            if was[0] == "critical" and now[0] == "info":
+                if now[2] == "noindex":
+                    n += 1
+                elif now[2] == "noindex-group":
+                    n += len(getattr(now[3], "subject", None) or ())
+        return n
+
+    if complete and sparse and lowered(closed_off_map(issues, sitemap_urls)):
+        notes.append(tr(
+            "noindex не сверен с sitemap: в нём {a0} из {a1} открытых страниц — "
+            "список неполный, устарел или собран для другого адреса. «Нет в "
+            "sitemap» по нему не значит «убрана намеренно», и закрытые страницы "
+            "остаются критичными", a0=covered, a1=len(open_keys)))
+    down = lowered(out)
+    if build and down:
+        notes.append(tr(
+            "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет "
+            "— это решение, а не ошибка, и они понижены до сведений. Остальная "
+            "сверка с sitemap идёт только с --sitemap", a0=down))
+    raised = [now[1] for was, now in zip(issues, out)
+              if was[0] == "info" and now[0] == "critical" and now[2] == "noindex"]
+    if raised:
+        paths = []
+        for url in raised:
+            path = urlsplit(url).path
+            paths.append(path if path.endswith("/") else path + "/")
+        notes[:] = [n for n in notes if not (
+            isinstance(n, _SectionNote) and any(p.startswith(n.section) for p in paths))]
+    return out
+def stubs_in_sitemap(pages: list, sitemap_urls) -> list:
+    """
+    Заглушки-редиректы, которые стоят в sitemap. Как страницы они не
+    проверяются, поэтому и находки о них нет, а Search Console отметит такой
+    адрес как «страница с переадресацией»: в sitemap место цели.
+    """
+    if not sitemap_urls:
+        return []
+    listed = set()
+    for u in sitemap_urls:
+        key = url_key(u)
+        listed |= {key, key.split("?", 1)[0]}
+    return sorted(p.url for p in pages if p.key in listed and redirect_target(p))
 
 
 def drop_closed_noise(issues: list, pages: list) -> list:
@@ -1928,6 +2190,17 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
             path = path[len(base):]
         return path
 
+    def pattern_of(pattern):
+        # Адрес целиком или путь без ведущей косой черты не совпадали ни с чем:
+        # сравнивается путь, а он всегда начинается с «/».
+        if "://" in pattern:
+            pattern = path_of(pattern)
+        elif pattern and pattern[0] not in "/*?[":
+            pattern = "/" + pattern
+        return pattern
+
+    rules = {code: (rule if rule is True else [pattern_of(p) for p in rule])
+             for code, rule in rules.items()}
     kept, accepted = [], []
     for issue in issues:
         path = path_of(issue[1])
@@ -2001,6 +2274,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     boiler = boilerplate_profile(pages, cfg, words)
     dupes = find_near_duplicates(pages, cfg, words)
     shells = {p.url for p in pages if is_shell(p, cfg)}
+    by_url_all = {p.url: p for p in pages}
     # Страница из одного заголовка — тонкая, и об этом сказано. Сравнивать её с
     # другой такой же и сообщать «100% дубль» и «0% уникального» — та же
     # находка ещё дважды: сравнивать там нечего.
@@ -2017,13 +2291,16 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     from . import facts
     issues += facts.drift(pages)
     notes = list(dupes["notes"]) + list(multi["notes"]) + unknown
-    for url in sorted(shells):
+    # Заглушка-редирект без текста — тоже «пустой каркас» по виду, но о ней
+    # своя строка ниже: совет про серверный HTML к ней не относится.
+    real_shells = sorted(url for url in shells if not redirect_target(by_url_all[url]))
+    for url in real_shells:
         issues.append(("critical", url, "js-shell",
                        tr("в исходном HTML нет текста — его рисует JavaScript, а краулеры ИИ-поиска его не исполняют")))
-    if shells:
-        share = len(shells) / len(pages) if pages else 0
+    if real_shells:
+        share = len(real_shells) / len(pages) if pages else 0
         notes.append(
-            tr("пустых JS-каркасов: {a0} из {a1} ({a2:.0%}). На этих страницах не считались объём текста, уникальность, дубли и ссылки — в исходном HTML их неоткуда взять. Это одна беда, а не четыре: появится серверный HTML — проверки заработают.", a0=len(shells), a1=len(pages), a2=share))
+            tr("пустых JS-каркасов: {a0} из {a1} ({a2:.0%}). На этих страницах не считались объём текста, уникальность, дубли и ссылки — в исходном HTML их неоткуда взять. Это одна беда, а не четыре: появится серверный HTML — проверки заработают.", a0=len(real_shells), a1=len(pages), a2=share))
     if boiler["skipped"]:
         notes.append(tr("шаблонность не оценивалась: ") + boiler["skipped"])
     mismatch = root_mismatch(pages, graph, urlsplit(home_url).path if home_url else "")
@@ -2059,6 +2336,12 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                 "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. "
                 "На живом сайте это 404 за редиректом", a0=shown), subjects)))
         issues += wrong_form_issues(pages, twins)
+        for section, n in missing_sections(pages, graph, base_path):
+            notes.append(tr(
+                "в раздел {a0} ведут ссылки на {a1} разных страниц, а ни одной страницы "
+                "этого раздела в сборке нет. Если раздел собирает этот же генератор, он "
+                "выпал из сборки, и на живом сайте это 404; если его отдаёт другое "
+                "приложение, всё в порядке.", a0=base_path.rstrip("/") + "/" + section + "/", a1=n))
     if graph.get("home_redirected_from"):
         notes.append(tr(
             "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "
@@ -2106,8 +2389,9 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         issues.append(("critical", url, "unreachable",
                        tr("до страницы ведут только ссылки со страниц, закрытых в robots.txt, "
                           "а их поисковик не читает") if url in behind else
-                       tr("до страницы ведут только ссылки со страниц с meta robots "
-                          "nofollow, а по ним краулер не идёт") if url in unfollowed else
+                       tr("до страницы ведут только ссылки nofollow — со страниц с meta "
+                          "robots nofollow или с rel=\"nofollow\", — а по ним краулер "
+                          "не идёт") if url in unfollowed else
                        tr("до страницы нельзя дойти от главной по ссылкам")))
     for url, d in sorted(graph["depth"].items()):
         if url in shells or url in closed:
@@ -2137,7 +2421,10 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         found = sorted(partners[url], reverse=True)
         best, other = found[0]
         more = tr(" и ещё {a0}", a0=len(found) - 1) if len(found) > 1 else ""
-        twins = [url_key(u) for _, u in found]
+        # Близнец из сравнения с образцом группы — артефакт выборки: сменился
+        # образец, сменился и он, и --baseline считал новой каждую находку
+        # группы. У такой находки предмета нет — она сверяется по странице.
+        twins = [] if url in dupes.get("sampled_urls", ()) else [url_key(u) for _, u in found]
         if best >= cfg["near_duplicate"]:
             issues.append(("critical", url, "near-duplicate",
                            Said(tr("совпадает на {a0:.0%} со страницей {a1}{a2} — поисковик оставит в индексе одну", a0=best, a1=other, a2=more), twins)))
@@ -2145,7 +2432,11 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
             issues.append(("info", url, "similar",
                            Said(tr("похожа на {a0:.0%} на {a1}{a2}", a0=best, a1=other, a2=more), twins)))
 
-    issues += duplicate_risk(dupes["pairs"], cfg, skip=bare)
+    # Региональные версии одной страницы и не станут дублями: hreflang для того
+    # и нужен. Из near-duplicate они уже убраны — и из «вот-вот станут» тоже.
+    issues += duplicate_risk([(a, b, j) for a, b, j in dupes["pairs"]
+                              if tuple(sorted((a.url, b.url))) not in regional],
+                             cfg, skip=bare)
 
     # Дубли живут группами, а не парами. На живом каталоге виз 588 страниц
     # с кодом `near-duplicate` оказались 62 группами одинаковых по смыслу
@@ -2199,6 +2490,9 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         "duplicates": pairs,
         "duplicate_method": dupes["method_id"],
         "duplicate_method_label": dupes["method"],
+        # Пары крупных групп-клонов показаны выборкой: «похожих пар» тогда
+        # не сравнить с попарным прогоном — 399 клонов дают 79 401 пару.
+        "duplicates_sampled": bool(dupes.get("sampled_urls")),
         "issues": sort_issues(issues),
         "notes": notes,
         "config": cfg,

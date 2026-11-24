@@ -58,6 +58,11 @@ def request(url: str, **kwargs):
 # шаблона не существует, пока её не отрендерит скрипт.
 SKIP_TAGS = {"script", "style", "noscript", "template", "svg"}
 
+# Что может стоять в <head>. Любой другой открывающий тег начинает <body>, даже
+# если самого <body> нет: HTML5 разрешает его опускать, и минификаторы опускают.
+HEAD_TAGS = {"html", "head", "base", "basefont", "bgsound", "link", "meta",
+             "noframes", "script", "style", "template", "title", "noscript"}
+
 # Инлайновые теги не разрывают слово: «Виза<b>free</b>» — одно слово.
 # Ссылок и подписей здесь нет намеренно: два соседних <a> — это два разных
 # пункта, и склеивать их в «словослово» нельзя.
@@ -736,6 +741,9 @@ class _Extractor(HTMLParser):
         self.lang = ""
         self.base = ""
         self.hrefs = []
+        # `rel="nofollow"`: по ним краулер не идёт, но ссылка есть — и
+        # человек по битой попадает на 404.
+        self.nofollow_hrefs = []
         self.headings = []
         # Те же заголовки без врезок, подвала и меню. `no-question-headings`
         # считал колонки подвала и «Keep reading» заголовками статьи: на
@@ -901,7 +909,7 @@ class _Extractor(HTMLParser):
         # ссылка в <template> не ведёт никуда, пока её не отрендерит скрипт.
         if self._skip_depth:
             return
-        if tag == "body":
+        if tag == "body" or tag not in HEAD_TAGS:
             self._in_body = True
 
         if tag not in INLINE_TAGS:
@@ -1025,6 +1033,8 @@ class _Extractor(HTMLParser):
                 self.hrefs.append(a["href"].strip())
                 self._in_anchor = True
                 self._anchor_buf = ""
+            else:
+                self.nofollow_hrefs.append(a["href"].strip())
 
     def handle_startendtag(self, tag, attrs):
         # `<path/>` внутри пропускаемого <svg> ничего не открывал: starttag
@@ -1776,6 +1786,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             notes.append(tr("фронтматтер не распознан"))
         matches = _md_links(_strip_fences(body))
         hrefs = [href for _, href in matches]
+        nofollow_hrefs = []
         md_anchors = [text.strip() for text, _ in matches]
         md_headings = [(len(h), _clean(t)) for h, t in MD_HEADING.findall(_strip_fences(body))]
         base_href = ""
@@ -1817,6 +1828,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         ex.feed(raw)
         ex.close()
         hrefs = ex.hrefs
+        nofollow_hrefs = ex.nofollow_hrefs
         base_href = ex.base
         page = Page(
             path=path, url=url,
@@ -1858,6 +1870,13 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
     except ValueError:
         base_for_links = location
     if page.canonical:
+        # Записан ли canonical полным адресом. Относительный достраивается от
+        # --site, и его схема и хост — это --site, а не то, как пишет сам сайт.
+        try:
+            written = urlsplit(page.canonical)
+            page.__dict__["_canonical_absolute"] = bool(written.scheme and written.netloc)
+        except ValueError:
+            pass
         try:
             page.canonical = urljoin(base_for_links, page.canonical)
         except ValueError:
@@ -1871,9 +1890,17 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         own = urlsplit(page.canonical)
         if url_key(page.canonical) == page.key and not own.query:
             page.__dict__["_url_declared"] = True
-            if own.path != urlsplit(page.url).path:
+            # Путь из canonical берётся в той же форме, что и из имени файла:
+            # без `//` и с процент-кодированием. Сырой `/rent/köln/` или
+            # `/rent/new york/` уезжал в <loc> как есть — sitemap невалиден.
+            # Уже закодированное (`%C3%B6`) и разрешённые в пути знаки
+            # остаются как объявлены.
+            own_path = re.sub(r"/{2,}", "/", own.path or "/")
+            own_path = quote(unicodedata.normalize("NFC", own_path),
+                             safe="/~-._!$&'()*+,;=:@%")
+            if own_path != urlsplit(page.url).path:
                 site_parts = urlsplit(page.url)
-                page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own.path, "", ""))
+                page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own_path, "", ""))
     seen = set()
     forms = []
     foreign = []
@@ -1906,8 +1933,25 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         if key != page.key and key not in seen:
             seen.add(key)
             page.links.append(absolute)
-            forms.append((key, form))
+            forms.append((key, form, unquote(raw_path)))
     page.__dict__["_link_forms"] = forms
+    unfollowed = []
+    for href in nofollow_hrefs:
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
+            continue
+        try:
+            absolute, _ = urldefrag(urljoin(base_for_links, href))
+            if urlsplit(url_key(absolute)).netloc != host:
+                continue
+        except ValueError:
+            continue
+        absolute = normalize_url(absolute)
+        key = url_key(absolute)
+        if key != page.key and key not in seen:
+            seen.add(key)
+            unfollowed.append(absolute)
+    if unfollowed:
+        page.__dict__["_nofollow_links"] = unfollowed
     if foreign:
         page.__dict__["_foreign_links"] = foreign
 
@@ -2204,9 +2248,33 @@ def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
     `X-Robots-Tag: nosnippet` (или `max-snippet:0`) из `_headers`, `netlify.toml`
     и `vercel.json` действует так же, как мета-тег: раньше он не переносился
     на страницы, и запрет сниппета, отданный заголовком, был невидим.
+
+    Так же переносится `nofollow` (и `none`): ссылки страницы, закрытые
+    заголовком, краулер не проходит, а раньше граф шёл по ним, как по открытым.
     """
-    rules = [rule for rule in header_noindex_rules(root, urlsplit(base_url).netloc,
-                                                    _hides_snippet)
+    _apply_directive(pages, root, base_url, _hides_snippet, "nosnippet",
+                     lambda page: page.nosnippet)
+    _apply_directive(pages, root, base_url, _unfollows, "nofollow",
+                     lambda page: page.nofollow)
+
+
+def _unfollows(value: str) -> bool:
+    """`nofollow` или `none` в X-Robots-Tag — для всех или для Google."""
+    agent = ""
+    for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.endswith(":") and len(token) > 1:
+            agent = token[:-1]
+            continue
+        if ":" in token:
+            agent, _, token = token.partition(":")
+        if token in ("nofollow", "none") and agent in ("", "googlebot"):
+            return True
+    return False
+
+
+def _apply_directive(pages: list, root: str, base_url: str, test, directive: str,
+                     already) -> None:
+    rules = [rule for rule in header_noindex_rules(root, urlsplit(base_url).netloc, test)
              if rule[0] is not None]
     if not any(on for *_, on in rules):
         return
@@ -2216,11 +2284,12 @@ def _apply_snippet_rules(pages: list, root: str, base_url: str) -> None:
         matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
         reopened = {source for regex, source, _, on in rules if not on and matches(regex)}
         if any(on and source not in reopened and matches(regex)
-               for regex, source, _, on in rules) and not page.nosnippet:
-            page.robots = (page.robots + ",nosnippet").strip(",")
+               for regex, source, _, on in rules) and not already(page):
+            page.robots = (page.robots + "," + directive).strip(",")
 
 
 _TOML_FROM = re.compile(r"""^\s*from\s*=\s*["']([^"']+)["']""", re.M)
+_TOML_STATUS = re.compile(r"""^\s*status\s*=\s*["']?(\d{3})""", re.M)
 
 
 def host_redirect_rules(root: str) -> tuple:
@@ -2235,9 +2304,14 @@ def host_redirect_rules(root: str) -> tuple:
     """
     rules, rewrites_forms = [], False
 
-    def add(pattern):
+    def add(pattern, status=""):
         pattern = urlsplit(pattern).path if "://" in pattern else pattern
         regex = _route_regex(pattern) if pattern.startswith("/") else None
+        # Перезапись 200 на любой адрес (`/* /index.html 200`) — запасной вход
+        # SPA, а не редирект: по `/about/` хостинг отдаёт главную с кодом 200.
+        # Это мягкий 404, и неверная форма ссылки остаётся находкой.
+        if regex and str(status).startswith("200") and regex.match("/indexgap-probe/any/depth"):
+            return
         if regex:
             rules.append(regex)
 
@@ -2248,18 +2322,21 @@ def host_redirect_rules(root: str) -> tuple:
             return ""
 
     for line in text_of(os.path.join(root, "_redirects")).splitlines():
-        fields = line.split()
-        if len(fields) >= 2 and not fields[0].startswith("#"):
-            add(fields[0])
+        fields = line.split("#", 1)[0].split()
+        if len(fields) >= 2:
+            status = next((f for f in fields[1:] if re.match(r"^\d{3}!?$", f)), "301")
+            add(fields[0], status)
     near = [root, os.path.dirname(os.path.abspath(root))]
     for folder in near:
         text = text_of(os.path.join(folder, "netlify.toml"))
         if text:
             text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("#"))
             for block in text.split("[[redirects]]")[1:]:
-                found = _TOML_FROM.search(block.split("[[", 1)[0])
+                block = block.split("[[", 1)[0]
+                found = _TOML_FROM.search(block)
                 if found:
-                    add(found.group(1))
+                    status = _TOML_STATUS.search(block)
+                    add(found.group(1), status.group(1) if status else "301")
             break
     for folder in near:
         text = text_of(os.path.join(folder, "vercel.json"))
@@ -2274,7 +2351,7 @@ def host_redirect_rules(root: str) -> tuple:
             for section in ("redirects", "rewrites"):
                 for entry in data.get(section) or ():
                     if isinstance(entry, dict) and isinstance(entry.get("source"), str):
-                        add(entry["source"])
+                        add(entry["source"], "200" if section == "rewrites" else "301")
         break
     return rules, rewrites_forms
 
@@ -2301,10 +2378,10 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     for page in pages:
         forms = page.__dict__.pop("_link_forms", ())
         written.append((page, forms))
-        for key, form in forms:
+        for key, form, _written in forms:
             votes[key][form] += 1
     redirects, host_rewrites = host_redirect_rules(root)
-    kinds, flat = {}, []
+    kinds, flat, files = {}, [], {}
     for page in pages:
         name = os.path.basename(page.path or "").lower()
         kind = None
@@ -2315,6 +2392,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         # `a.html` рядом с `a/index.html`: какую форму отдаст хостинг, не понять.
         key = page.key
         kinds[key] = kind if kinds.get(key, kind) == kind else None
+        files[key] = os.path.basename(page.path or "")
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
     for page in flat:
@@ -2330,16 +2408,21 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     if host_rewrites:
         return
     base = urlsplit(base_url).path.rstrip("/")
-    suffix = {("folder", "file"): ".html", ("flat", "slash"): "/",
-              ("flat", "index"): "/index.html"}
+    always = {("folder", "file"), ("flat", "slash"), ("flat", "index")}
     for page, forms in written:
         wrong = []
-        for key, form in forms:
-            tail = suffix.get((kinds.get(key), form))
-            if not tail:
+        html = (page.path or "").lower().endswith((".html", ".htm"))
+        for key, form, path in forms:
+            kind = kinds.get(key)
+            # `/b/index.md`, `/c.htm` при `c.html`, `/d/INDEX.HTML`: `url_key`
+            # сводит их к странице, а хостинг отдаёт файл только под его
+            # точным именем. Ссылки из Markdown не трогаем: генератор
+            # переписывает `b.md` сам.
+            exact = (html and form in ("file", "index")
+                     and (kind, form) in (("folder", "index"), ("flat", "file"))
+                     and path.rsplit("/", 1)[-1] != files.get(key))
+            if (kind, form) not in always and not exact:
                 continue
-            path = "/" + key.split("/", 3)[-1] if key.count("/") >= 3 else "/"
-            path = path.rstrip("/") + tail
             local = path[len(base):] if base and path.startswith(base + "/") else path
             if not any(regex.match(local) for regex in redirects):
                 wrong.append((key, path))
@@ -2393,7 +2476,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
-    todo = []
+    todo, maybe_error = [], set()
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
@@ -2448,8 +2531,14 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             # Страница ошибки — не страница сайта: на неё никто не ссылается,
             # она короткая, и в sitemap ей не место. Её выдаёт почти любой
             # генератор, и каждая получала «сироту» и «тонкую».
-            if _ERROR_PAGE.search(os.path.relpath(path, root).replace(os.sep, "/")):
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
+            if _ERROR_FILE.search(rel) or _TOP_ERROR.match(rel):
                 continue
+            if _ERROR_PAGE.search(rel):
+                # `status/404/index.html` в глубине сборки — это может быть
+                # статья про код ответа, а не страница ошибки. Её судьбу
+                # решают ссылки: на страницу ошибки сайт не ссылается.
+                maybe_error.add(path)
             readme_home = (jekyll and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
@@ -2462,6 +2551,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             # Строки, пришедшие из разных процессов, — разные объекты.
             value.anchors = list(map(sys.intern, value.anchors))
             loaded.append(value)
+    if maybe_error:
+        linked = {url_key(link) for page in loaded if page.path not in maybe_error
+                  for link in page.links}
+        loaded = [page for page in loaded
+                  if page.path not in maybe_error or page.key in linked]
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
@@ -2598,6 +2692,17 @@ def _is_fragment(raw: str) -> bool:
 _ERROR_PAGE = re.compile(
     r"(^|/)(40[134]|50[0-4x]|5xx|4xx|offline|_not-found|not-found|_error)"
     r"(\.html?|/index\.html?)$", re.I)
+# Имена, которые генераторы дают только служебным файлам, на любой глубине:
+# `_not-found` и `_global-error` Next.js, оболочка gatsby-plugin-offline.
+_ERROR_FILE = re.compile(
+    r"(^|/)(5xx|4xx|_not-found|_error|_global-error|offline-plugin-app-shell-fallback)"
+    r"(\.html?|/index\.html?)$", re.I)
+# Коды и `200.html` (запасной вход SPA у Nuxt, SvelteKit, Surge) — служебные
+# только в корне сборки или в корне языка: `status/404/` в глубине — обычная
+# страница, если на неё ссылаются.
+_TOP_ERROR = re.compile(
+    r"^(?:[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*/)?"
+    r"(40[134]|50[0-4x]|200|offline|not-found)(\.html?|/index\.html?)$", re.I)
 
 
 # Каталоги вложений: `.md` в них — пример или ресурс (Docsify `_media`), а не страница.

@@ -464,8 +464,25 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     которые в этот раз не шли (`unchecked` — их коды), тоже не исчезли:
     их не искали.
     """
+    # Страница, чей noindex теперь представлен находкой `noindex-group`, не
+    # «исчезла» критичной и не «появилась» сведением: она закрыта, как и была.
+    grouped, accepted_group = set(), set()
+    for level, url, code, message in list(issues) + list(accepted or []):
+        if code == "noindex-group":
+            grouped.update(subject_of(message) or ())
+    for level, url, code, message in accepted or []:
+        if code == "noindex-group":
+            accepted_group.update(subject_of(message) or ())
+    # ignore принимает группу по пути раздела, и ветка, закрытая после базы,
+    # входила в неё молча. Страница, которой в базе не было среди закрытых,
+    # — новая критичная, даже если принятая группа её поглотила.
+    was_closed = {url_key(i.get("url") or "") for i in old if i.get("code") == "noindex"}
+
     def key(level, url, code):
-        return level, code, url_key(url or "")
+        address = url_key(url or "")
+        if code == "noindex" and address in grouped:
+            level = "grouped"
+        return level, code, address
 
     # База до 1.25 не хранит полный предмет: тогда обе стороны сравниваются
     # по тексту, иначе полный предмет новой стороны против укороченного
@@ -496,13 +513,15 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
         level, url, code, message, given = item
         k = key(level, url, code)
         mine = set(subject(code, message, given))
-        return k in other and bool(mine - other[k])
+        # Пустой предмет на той стороне — неизвестный, а не «никакой»: у дубля
+        # из группы, сравненной с образцом, близнец — артефакт выборки.
+        return k in other and bool(other[k]) and bool(mine - other[k])
 
     def moved(item, other):
         level, url, code, message, given = item
         k = key(level, url, code)
         mine = set(subject(code, message, given))
-        return k in other and bool(mine) and not (mine & other[k])
+        return k in other and bool(mine) and bool(other[k]) and not (mine & other[k])
 
     before = Counter(key(l, u, c) for l, u, c, _, _ in old_items)
     now = Counter(key(l, u, c) for l, u, c, _, _ in new_items)
@@ -512,6 +531,9 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
         k = key(level, url, code)
         seen[k] += 1
         if seen[k] > before[k] or changed(item, had):
+            if (code == "noindex" and k[2] in accepted_group
+                    and k[2] not in was_closed):
+                level = "critical"
             new.append({"level": level, "url": url, "code": code, "message": message})
     kept_items = [(level, url, code, message, subject_of(message))
                   for level, url, code, message in accepted or []]
@@ -606,7 +628,10 @@ def _analyse(args, pages=None):
         _warn_stale_skills(config_path)
         pages = _load(args)
     rows = _read_rows(args)
-    project = settings.resolve(args.root, pages, rows, args.keyword, args.config)
+    # Тот же файл, из которого взяты site, pages и профиль: иначе пороги и
+    # ignore читались из другого indexgap.json (или не читались вовсе).
+    project = settings.resolve(args.root, pages, rows, args.keyword,
+                               args.config or config_path)
     project = profiles.apply(project, args.profile or project.get("profile"))
     _describe_project(project, rows)
     print(tr("Профиль — {a0} ({a1})", a0=tr(project['_profile_title']),
@@ -627,7 +652,7 @@ def _analyse(args, pages=None):
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
-    notes = list(analysis.get("notes") or [])
+    notes = list(project.get("_config_notes") or []) + list(analysis.get("notes") or [])
 
     content_result = None
     if project["_skip_facts"]:
@@ -654,7 +679,7 @@ def _analyse(args, pages=None):
                          a0=len(orphan_rows), a1=", ".join(orphan_rows[:3])))
 
     if project["_checks_freshness"]:
-        fresh = freshness.check(pages)
+        fresh = freshness.check(pages, project.get("freshness"))
         analysis["issues"] += fresh["issues"]
         print(tr("Датировано страниц: {a0} из {a1}", a0=fresh['dated'], a1=len(pages))
               + (tr(", просрочено {a0}", a0=fresh['stale']) if fresh["stale"] else ""))
@@ -682,14 +707,8 @@ def _analyse(args, pages=None):
         # списка: такой noindex — решение. Остальное без --sitemap не сверяется.
         own = _build_sitemap_urls(args)
         if own:
-            before = sum(1 for i in analysis["issues"] if i[2] == "noindex" and i[0] == "critical")
-            analysis["issues"] = checks.closed_off_map(analysis["issues"], own)
-            after = sum(1 for i in analysis["issues"] if i[2] == "noindex" and i[0] == "critical")
-            if before != after:
-                notes.append(tr(
-                    "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет "
-                    "— это решение, а не ошибка, и они понижены до сведений. Остальная "
-                    "сверка с sitemap идёт только с --sitemap", a0=before - after))
+            analysis["issues"] = checks.closed_against_sitemap(
+                analysis["issues"], notes, pages, own, build=True)
     analysis["issues"] = checks.sort_issues(
         checks.drop_closed_noise(analysis["issues"], pages))
     analysis["issues"], accepted = checks.apply_ignore(
@@ -749,8 +768,8 @@ def cmd_check(args):
         if sm["urls"]:
             sitemap_urls = sm["urls"]
             analysis["issues"] = checks.sort_issues(
-                checks.closed_off_map(analysis["issues"], sitemap_urls,
-                                      complete=not sm["errors"]))
+                checks.closed_against_sitemap(analysis["issues"], notes, pages, sitemap_urls,
+                                              complete=not sm["errors"]))
             got["template_notes"] = checks.template_wide(analysis["issues"], len(pages),
                                                          pages=pages)
             got["templates"] = checks.template_risk(analysis["issues"], pages)
@@ -766,6 +785,13 @@ def cmd_check(args):
         segments = doctor.segments(funnel_result, pages)
 
     notes += got["template_notes"]
+    listed_stubs = checks.stubs_in_sitemap(pages, sitemap_urls)
+    if listed_stubs:
+        notes.append(tr(
+            "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как "
+            "страницы с переадресацией — в sitemap нужен адрес, куда они ведут.",
+            a0=len(listed_stubs), a1=", ".join(listed_stubs[:5])
+            + (tr(" и ещё {a0}", a0=len(listed_stubs) - 5) if len(listed_stubs) > 5 else "")))
 
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
@@ -795,6 +821,7 @@ def cmd_check(args):
                        for a, b, j in analysis["duplicates"]],
         "duplicate_method": analysis.get("duplicate_method"),
         "duplicate_method_label": analysis.get("duplicate_method_label"),
+        "duplicates_sampled": bool(analysis.get("duplicates_sampled")),
         "unique_share": analysis["unique_share"],
         "funnel": funnel_result,
         "causes": causes,
@@ -817,7 +844,12 @@ def cmd_check(args):
     # ни того, ни другого нет, поэтому показывать её в этих счётчиках —
     # значит четыре раза сообщить об одной беде.
     reported = sum(1 for i in analysis["issues"] if i[2] == "orphan")
-    print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
+    if analysis.get("duplicates_sampled"):
+        # Пары групп-клонов показаны выборкой: число не сравнить с попарным
+        # прогоном, где 399 клонов дают 79 401 пару.
+        print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3} (выборка: группы клонов сравнивались с образцом)", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
+    else:
+        print(tr("Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}", a0=crit, a1=warn, a2=reported, a3=len(analysis['duplicates'])))
     _print_first_things(analysis["issues"])
     _print_templates(got["templates"])
     print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
@@ -877,16 +909,7 @@ def _print_templates(templates: list, limit: int = 5) -> None:
 
 
 def _build_file(folder: str, name: str) -> str:
-    """
-    Файл сборки по имени. Next.js App Router кладёт `robots.txt` и
-    `sitemap.xml` маршрутами: `robots.txt/` — папка с route.js, а ответ лежит
-    рядом в `robots.txt.body`. Без этого живой сайт на Next получал «robots.txt
-    не найден» и сверку noindex без sitemap.
-    """
-    for path in (os.path.join(folder, name), os.path.join(folder, name + ".body")):
-        if os.path.isfile(path):
-            return path
-    return ""
+    return portfolio.build_file(folder, name)
 
 
 def _guess_robots(args):
@@ -898,22 +921,7 @@ def _guess_robots(args):
 
 
 def _build_sitemap_urls(args) -> list:
-    """
-    Адреса из sitemap.xml самой сборки — только если это список страниц, а не
-    индекс: дочерние файлы индекса пришлось бы качать из сети.
-    """
-    path = _build_file(args.root, "sitemap.xml")
-    if not path:
-        return []
-    try:
-        with open(path, "rb") as fh:
-            head = fh.read(4096).decode("utf-8", "replace")
-    except OSError:
-        return []
-    if "<urlset" not in head or "<sitemapindex" in head:
-        return []
-    sm = doctor.read_sitemaps([path])
-    return [] if sm["errors"] else list(sm["urls"] or ())
+    return portfolio.build_sitemap_urls(args.root)
 
 
 def _check_command(args) -> str:
@@ -1034,6 +1042,28 @@ def _first_run_note(manifest_path: str) -> None:
              "каждой сборке.", a0=manifest_path))
 
 
+def _warn_sitemap_blocked(args, pages) -> None:
+    """
+    Страницы в sitemap, которые robots.txt сборки не пускает обходить.
+
+    Из sitemap они не убираются: что неверно — правило или список, решает
+    человек. Но молча записать то, что `check` назовёт критичным, нельзя.
+    Как и в `check`, robots.txt сборки под подпутём (/repo/) не действует.
+    """
+    if urlsplit(args.site or "").path.strip("/"):
+        return
+    robots_path = _guess_robots(args)
+    if not robots_path:
+        return
+    blocked = aeo.blocked_urls(pages, aeo.read_robots(robots_path))
+    listed = sorted(p.url for p in pages if p.url in blocked and publish.indexable(p))
+    if listed:
+        print(tr("  ! {a0} адрес(ов) в sitemap закрыты в {a1} (Disallow) — поисковик их "
+                 "не обойдёт: {a2}. Открой раздел или закрой страницы noindex.",
+                 a0=len(listed), a1=robots_path, a2=", ".join(listed[:3])
+                 + (" …" if len(listed) > 3 else "")))
+
+
 def cmd_sitemap(args):
     config_path = apply_project_defaults(args)
     pages = _load(args)
@@ -1042,7 +1072,8 @@ def cmd_sitemap(args):
     manifest = load_manifest(manifest_path)
     if manifest.pop("_broken", False):
         print(tr("  ! манифест был повреждён и прочитан как пустой — у всех страниц будет сегодняшний lastmod"))
-    foreign = publish.foreign_sitemap(args.out_dir or args.root, manifest)
+    manifest_base = os.path.dirname(os.path.abspath(manifest_path))
+    foreign = publish.foreign_sitemap(args.out_dir or args.root, manifest, manifest_base)
     if foreign and not args.force:
         raise SourceError(tr(
             "{a0} уже существует, и написал его не indexgap. Заменять без спроса не "
@@ -1066,7 +1097,8 @@ def cmd_sitemap(args):
         _first_run_note(manifest_path)
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
-                                   public_prefix=args.public_prefix)
+                                   public_prefix=args.public_prefix,
+                                   base_dir=manifest_base)
     save_manifest(manifest_path, result["manifest"])
     print(tr("Включено: {a0}   Исключено (noindex, canonical, черновики): {a1}", a0=result['included'], a1=result['excluded']))
     if result["drafts"]:
@@ -1075,7 +1107,12 @@ def cmd_sitemap(args):
         print(f"  {path}")
     for path in result["removed"]:
         print(tr("  удалён устаревший шард: {a0}", a0=path))
-    if args.out_dir and not args.public_prefix and result["included"] > publish.MAX_URLS_PER_FILE:
+    _warn_sitemap_blocked(args, pages)
+    if result["too_long"]:
+        print(tr("  ! {a0} адрес(ов) длиннее {a1} символов — поисковик такой адрес из sitemap "
+                 "не примет, укороти slug: {a2}", a0=len(result["too_long"]),
+                 a1=publish.MAX_LOC_LENGTH - 1, a2=result["too_long"][0][:120] + "…"))
+    if args.out_dir and not args.public_prefix and result["shards"]:
         print(tr("  ! шардов больше одного: если ./public не корень сайта, укажи --public-prefix, иначе индекс будет ссылаться не туда"))
     return 0
 
@@ -1193,10 +1230,10 @@ def cmd_doctor(args):
     if previous is None and history_dir:
         previous = history.latest(history_dir)
         baseline_label = (previous or {}).get("_path", "")
-    apply_project_defaults(args)
+    config_path = apply_project_defaults(args)
     pages = _load(args)
     _sitemap_hreflang(args, pages)
-    project = settings.resolve(args.root, pages, explicit=args.config)
+    project = settings.resolve(args.root, pages, explicit=args.config or config_path)
     # Та же достижимость, что у check: ссылки закрытых в robots.txt страниц
     # поисковик не читает.
     robots_path = getattr(args, "robots", None) or _guess_robots(args)
@@ -1806,7 +1843,9 @@ def cmd_portfolio(args):
                                   out_path=report_pair(args.out)[0])
     json_path = report_pair(args.out)[1]
     _write_json(json_path, {
-        "projects": [{k: v for k, v in r.items() if k != "issues"} for r in results],
+        # Название профиля хранится русским ключом словаря, как и в HTML.
+        "projects": [{k: (tr(v) if k == "profile_title" and v else v)
+                      for k, v in r.items() if k != "issues"} for r in results],
         "patterns": patterns,
         "unique": uniques,
     })
@@ -2067,7 +2106,7 @@ def cmd_diff(args):
     print(tr("Стало — {a0}", a0=args.new))
     new_pages = _load(argparse.Namespace(root=args.new, site=site))
 
-    rules, redirect_files = diffs.read_redirects(args.new)
+    rules, redirect_files = diffs.read_redirects(args.new, urlsplit(site).netloc)
     if redirect_files:
         print(tr("Редиректы новой сборки: {a0} — правил {a1}",
                  a0=", ".join(redirect_files), a1=len(rules)))
@@ -2082,7 +2121,10 @@ def cmd_diff(args):
         args.profile = profile
         before = _build_findings(args.old, old_pages, site, args, config)
         after = _build_findings(args.new, new_pages, site, args, config)
-        delta = compare_baseline(after, _serialize_issues(before))
+        # Страница, уехавшая редиректом в новую сборку, уносит с собой и свои
+        # находки: в NEW они не новые.
+        delta = compare_baseline(after, diffs.moved_findings(
+            _serialize_issues(before), result, new_pages))
         said = {i[1] for i in items if i[2] in ("page-closed", "nosnippet-added")}
         shown = 0
         for item in delta["new"]:
@@ -2170,6 +2212,11 @@ def preset_language(argv=None):
             lang = item.split("=", 1)[1]
         elif item == "--lang" and i + 1 < len(argv):
             lang = argv[i + 1]
+    # Неизвестное значение (`--lang xx`) argparse всё равно отвергнет, но
+    # ошибка должна прийти на языке из INDEXGAP_LANG, а не на запасном
+    # английском.
+    if lang.strip().lower() not in i18n.LANGS:
+        lang = ""
     return i18n.set_lang(lang)
 
 

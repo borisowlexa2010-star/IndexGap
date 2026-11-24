@@ -121,7 +121,9 @@ class Diff(unittest.TestCase):
             "vercel.json")
         self.assertEqual(diff.redirect_for(rules, SITE + "/city/c3/"), "/towns/:slug")
         self.assertEqual(diff.redirect_for(rules, SITE + "/city/c3/deeper/"), "")
-        self.assertEqual(diff._netlify_lines("/old /new 404\n", "_redirects"), [])
+        # Правило 404 — не редирект: адрес отвечает ошибкой (и правила ниже не действуют).
+        self.assertEqual(diff.redirect_for(diff._netlify_lines("/old /new 404\n", "_redirects"),
+                                           SITE + "/old"), "")
 
     def test_a_page_that_gets_noindex_is_closed(self):
         self.new.write("city/c1/index.html",

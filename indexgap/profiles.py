@@ -180,6 +180,22 @@ def apply(config: dict, name: str) -> dict:
         merged = dict(profile.get(section) or {})
         merged.update(value or {})
         out[section] = merged
+    # Свой near_duplicate ниже профильного similar: «похожие» профиля
+    # опускаются следом, в той же пропорции. Иначе явная настройка падала
+    # с ошибкой о `similar`, которого человек не писал.
+    user_checks = (config or {}).get("checks") or {}
+    preset = profile.get("checks") or {}
+    nd, sim, p_nd = (user_checks.get("near_duplicate"), preset.get("similar"),
+                     preset.get("near_duplicate"))
+    if ("similar" not in user_checks and sim and p_nd
+            and isinstance(nd, (int, float)) and not isinstance(nd, bool)
+            and 0 < nd <= 1 and sim > nd):
+        out["checks"]["similar"] = round(nd * sim / p_nd, 2)
+    from . import settings
+    notes = settings.unknown_keys(out)
+    for section in ("content", "aeo", "freshness"):
+        notes += settings.check_section(section, out.get(section))
+    out["_config_notes"] = notes
     out["_profile"] = (name or DEFAULT_PROFILE).strip().lower()
     out["_profile_title"] = profile["title"]
     out["_profile_notes"] = profile["notes"]

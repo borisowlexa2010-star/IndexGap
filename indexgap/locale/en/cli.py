@@ -140,6 +140,12 @@ MESSAGES = {
     "  сайт       {a0}": "  site       {a0}",
     "  страницы   {a0}": "  pages      {a0}",
     "  тип        {a0}   ({a1})": "  type       {a0}   ({a1})",
+    "  ! {a0} адрес(ов) в sitemap закрыты в {a1} (Disallow) — поисковик их не обойдёт: {a2}. Открой раздел или закрой страницы noindex.":
+        "  ! {a0} address(es) in the sitemap are blocked in {a1} (Disallow) — the search "
+        "engine will not crawl them: {a2}. Open the section or close those pages with noindex.",
+    "  ! {a0} адрес(ов) длиннее {a1} символов — поисковик такой адрес из sitemap не примет, укороти slug: {a2}":
+        "  ! {a0} address(es) are longer than {a1} characters — a search engine will not "
+        "accept such an address from a sitemap; shorten the slug: {a2}",
     "  удалён устаревший шард: {a0}": "  removed a stale shard: {a0}",
     "  черновиков не опубликовано: {a0} (status: draft во фронтматтере)":
         "  drafts held back: {a0} (status: draft in the frontmatter)",
@@ -191,6 +197,9 @@ MESSAGES = {
         "Quality control for a programmatic SEO pipeline",
     "Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3}":
         "Critical: {a0}   Warnings: {a1}   Orphans: {a2}   Similar pairs: {a3}",
+    "Критично: {a0}   Внимание: {a1}   Сирот: {a2}   Похожих пар: {a3} (выборка: группы клонов сравнивались с образцом)":
+        "Critical: {a0}   Warnings: {a1}   Orphans: {a2}   Similar pairs: {a3} "
+        "(a sample: clone groups were compared against a representative)",
     "Не проверено проектов: {a0}": "Projects not checked: {a0}",
     "Не хватает данных о проекте.\n    Либо укажи их явно: indexgap check ./content --site https://example.com\n    Либо один раз выполни `indexgap init` в корне проекта — тогда\n    ежедневная команда станет просто `indexgap check`.":
         "Not enough is known about the project.\n"
@@ -631,4 +640,7 @@ MESSAGES = {
         '\nCited pages on another host ({a0}) — they are not part of this build:',
     "noindex сверен с sitemap.xml сборки: {a0} закрытых страниц в нём нет — это решение, а не ошибка, и они понижены до сведений. Остальная сверка с sitemap идёт только с --sitemap":
         "noindex was checked against the build's sitemap.xml: {a0} closed pages are not listed in it — that is a decision, not a mistake, and they are lowered to info. Everything else is checked against the sitemap only with --sitemap",
+    "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как страницы с переадресацией — в sitemap нужен адрес, куда они ведут.":
+        "the sitemap lists redirect stubs ({a0}): {a1}. Search engines will report them as pages with redirect — the sitemap needs the address they lead to.",
+    " и ещё {a0}": " and {a0} more",
 }
