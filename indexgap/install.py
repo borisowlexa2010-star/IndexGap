@@ -150,8 +150,38 @@ def _declared_site(path: str) -> str:
             if found and found.group(1).startswith(("http://", "https://")):
                 origin = _origin(found.group(1))
                 if origin and not any(bad in origin for bad in _NOT_A_SITE):
-                    return origin
+                    return _with_home_path(origin, found.group(1), text)
     return ""
+
+
+_LOCALE_SEGMENT = re.compile(r"^[a-z]{2,3}([-_][a-z0-9]{2,4})?$", re.I)
+
+
+def _with_home_path(origin: str, declared: str, text: str) -> str:
+    """
+    Адрес сайта вместе с путём, который главная объявляет своим.
+
+    Сайт под `/docs/` объявляет canonical `https://host/docs/`; раньше путь
+    отбрасывался, и в indexgap.json уезжал корень хоста — тогда каждая
+    страница выглядела «canonical на другую», а sitemap не писался вовсе.
+    Путь не берётся, если главная — переадресация (meta refresh) или
+    смотрит на языковую версию (`/en/`): там корень сайта всё-таки корень.
+    """
+    from urllib.parse import unquote, urlsplit
+    path = unquote(urlsplit(declared).path or "/")
+    path = re.sub(r"/{2,}", "/", path)
+    path = re.sub(r"(^|/)index\.html?$", r"\1", path, flags=re.I)
+    segments = [seg for seg in path.split("/") if seg]
+    if not segments:
+        return origin
+    if re.search(r'http-equiv=["\']?refresh', text[:20000], re.I):
+        return origin
+    if _LOCALE_SEGMENT.match(segments[-1]) or not all(_SAFE_SEGMENT.match(seg) for seg in segments):
+        return origin
+    return origin + "/".join(segments) + "/"
+
+
+_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._~-]+$")
 
 
 def detect_site(root: str, content_dir: str = "") -> str:
@@ -220,7 +250,7 @@ def _origin(url: str) -> str:
 
 def detect_dataset(root: str) -> str:
     """CSV с семантикой: ищем колонку с ключом, а не просто любой csv."""
-    best = ""
+    best, best_rank = "", (0, 0)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames
                        if not d.startswith(".") and d not in SKIP_DIRS]
@@ -235,11 +265,31 @@ def detect_dataset(root: str) -> str:
             except SourceError:
                 continue
             header = (text.splitlines() or [""])[0].lower()
-            if any(col in header for col in KEYWORD_COLUMNS):
-                rel = os.path.relpath(path, root)
-                if not best or len(rel) < len(best):
-                    best = os.path.join(".", rel)
+            score = _keyword_header(header)
+            if score:
+                rel = os.path.join(".", os.path.relpath(path, root))
+                rank = (score, -len(rel))
+                if not best or rank > best_rank:
+                    best, best_rank = rel, rank
     return best
+
+
+def _keyword_header(header: str) -> int:
+    """
+    2 — колонка ключа названа точно (`keyword`), 1 — словом в имени
+    (`search_query`, «ключевое слово»), 0 — ключа нет.
+
+    Подстрока не годится: `term` находился в `payment_terms`, и датасетом
+    объявлялся список счетов рядом с настоящим keywords.csv.
+    """
+    columns = [c.strip().strip('"\'').strip() for c in re.split(r"[,;\t|]", header.lstrip("\ufeff"))]
+    if any(c in KEYWORD_COLUMNS for c in columns):
+        return 2
+    for column in columns:
+        words = re.findall(r"[^\W_]+", column, flags=re.UNICODE)
+        if any(w in KEYWORD_COLUMNS or w.startswith("ключев") for w in words):
+            return 1
+    return 0
 
 
 def detect_profile(root: str, content_dir: str, dataset: str) -> tuple:

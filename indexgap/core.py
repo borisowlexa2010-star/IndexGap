@@ -1871,9 +1871,17 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         own = urlsplit(page.canonical)
         if url_key(page.canonical) == page.key and not own.query:
             page.__dict__["_url_declared"] = True
-            if own.path != urlsplit(page.url).path:
+            # Путь из canonical берётся в той же форме, что и из имени файла:
+            # без `//` и с процент-кодированием. Сырой `/rent/köln/` или
+            # `/rent/new york/` уезжал в <loc> как есть — sitemap невалиден.
+            # Уже закодированное (`%C3%B6`) и разрешённые в пути знаки
+            # остаются как объявлены.
+            own_path = re.sub(r"/{2,}", "/", own.path or "/")
+            own_path = quote(unicodedata.normalize("NFC", own_path),
+                             safe="/~-._!$&'()*+,;=:@%")
+            if own_path != urlsplit(page.url).path:
                 site_parts = urlsplit(page.url)
-                page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own.path, "", ""))
+                page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own_path, "", ""))
     seen = set()
     forms = []
     foreign = []
