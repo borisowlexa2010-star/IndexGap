@@ -19,7 +19,7 @@
  "@context":"https://schema.org","@type":"TechArticle",
  "headline":"canonical elsewhere \u2014 indexgap check","description":"canonical elsewhere: what indexgap reports, why it matters and how to fix it. Reported as critical.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/canonical-elsewhere.html","inLanguage":"en",
- "datePublished":"2026-08-29","dateModified":"2026-11-24",
+ "datePublished":"2026-08-29","dateModified":"2026-11-25",
  "author":{"@type":"Person","name":"Alexey Borisov"},
  "publisher":{"@type":"Organization","name":"indexgap"},
  "isPartOf":{"@type":"WebSite","name":"indexgap","url":"https://borisowlexa2010-star.github.io/IndexGap"}
@@ -95,7 +95,7 @@ font-size:.85rem;color:var(--ink3)}
   <span class="tag">canonical-elsewhere</span>
   <span class="tag acc">Indexing and reachability</span>
 </div>
-<p class="lede">The page hands its accumulated weight to a different URL and drops out of the index itself. On a generated site this is nearly always one wrong line in the template, repeated across every page it produced. A copy — a print version under the page, the same name in an older version, the same text at another address — pointed at an open page of its language is only a note. A page with another name and almost no text in common is not a copy: one is a warning, several pointed at the same page are critical (the template took the address from the wrong variable), and the page keeps its other findings.</p>
+<p class="lede">The page hands its accumulated weight to a different URL and drops out of the index itself. On a generated site this is nearly always one wrong line in the template, repeated across every page it produced. A copy — a print version under the page, the same name in an older version, the same text at another address — pointed at an open page of its language is only a note. A page with another name and almost no text in common is not a copy: one is a warning, several pointed at the same page are critical (the template took the address from the wrong variable), and the page keeps its other findings. A canonical naming the same page on another scheme or host (`http://`, `www.`) is a warning and leaves the page out of the sitemap; it is compared with the address most pages use in their own canonical, not with `--site`, so a site written wholly on another address gets one note instead.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
@@ -116,13 +116,13 @@ every finding on this page into a work order in <code>indexgap-briefs/</code>,
 with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in indexing and reachability</h2>
-<ul class="plain"><li><a href="noindex.html">noindex</a><span>noindex</span></li><li><a href="noindex-group.html">noindex-group</a><span>noindex group</span></li><li><a href="nosnippet.html">nosnippet</a><span>nosnippet</span></li><li><a href="orphan.html">orphan</a><span>orphan</span></li><li><a href="unreachable.html">unreachable</a><span>unreachable</span></li><li><a href="broken-link.html">broken-link</a><span>broken link</span></li><li><a href="wrong-link-form.html">wrong-link-form</a><span>wrong link form</span></li><li><a href="hub-missing-links.html">hub-missing-links</a><span>hub missing links</span></li><li><a href="deep.html">deep</a><span>deep</span></li><li><a href="js-shell.html">js-shell</a><span>js shell</span></li><li><a href="heavy-html.html">heavy-html</a><span>heavy html</span></li></ul>
+<ul class="plain"><li><a href="noindex.html">noindex</a><span>noindex</span></li><li><a href="noindex-group.html">noindex-group</a><span>noindex group</span></li><li><a href="nosnippet.html">nosnippet</a><span>nosnippet</span></li><li><a href="orphan.html">orphan</a><span>orphan</span></li><li><a href="unreachable.html">unreachable</a><span>unreachable</span></li><li><a href="broken-link.html">broken-link</a><span>broken link</span></li><li><a href="wrong-link-form.html">wrong-link-form</a><span>wrong link form</span></li><li><a href="canonical-form.html">canonical-form</a><span>canonical form</span></li><li><a href="hub-missing-links.html">hub-missing-links</a><span>hub missing links</span></li><li><a href="deep.html">deep</a><span>deep</span></li><li><a href="js-shell.html">js-shell</a><span>js shell</span></li><li><a href="heavy-html.html">heavy-html</a><span>heavy html</span></li></ul>
 <p><a href="index.html">All checks</a> · <a href="index.html#indexing">Indexing and reachability</a></p>
 
 <footer>
-  <p>By Alexey Borisov. Updated <time datetime="2026-11-24">2026-11-24</time>,
-  for indexgap 1.27.0.</p>
-  <p>indexgap 1.27.0 — quality control for programmatic SEO pipelines.
+  <p>By Alexey Borisov. Updated <time datetime="2026-11-25">2026-11-25</time>,
+  for indexgap 1.28.0.</p>
+  <p>indexgap 1.28.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

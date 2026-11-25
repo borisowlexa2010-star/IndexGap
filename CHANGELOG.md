@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.28.0 — 2026-11-25
+
+This release covers the five findings 1.27 deferred because the fix needed new
+machinery. Each fix was measured on the demo site and on a large real
+multilingual build: neither report changed. On the adversarial test sites only
+the intended cases changed.
+
+* **Hidden text is not visible text.** An FAQ question, a price or a rating
+  hidden by the `hidden` attribute or by an inline
+  `display:none` / `visibility:hidden` no longer counts as shown. This feeds
+  `jsonld-faq-invisible` and `jsonld-mismatch`. These still count as visible:
+  * `<details>` content and `hidden="until-found"`;
+  * tab and accordion panels, and `aria-hidden` content;
+  * React streaming placeholders;
+  * an anti-flicker `<html>`/`<body>` hide.
+
+  The text used by every other check is unchanged.
+* **New `microdata-mismatch` warning.** A price, `lowPrice` or `highPrice` set
+  in a microdata or RDFa attribute (`<meta itemprop="price" content="999">`)
+  is now compared with the visible text, the same way JSON-LD is.
+* **A template's shared text is not the site footer.** When one template is
+  90% or more of the pages without `<main>`, its common body tail is now kept
+  in duplicate comparison. So clones are near-duplicates whether or not other
+  pages sit beside them. A real header or footer is still cut when:
+  * it also appears outside the template;
+  * it is marked up as a header or footer, or with the matching ARIA role;
+  * it is made of links.
+* **New `canonical-form` warning.** It covers a self-canonical in a form the
+  file does not have:
+  * `about.html` with canonical `/about/`, a 404 on static hosts;
+  * `a/index.html` with canonical `/a`, which is a redirect.
+
+  Host settings that make the form correct keep it quiet: `cleanUrls`,
+  `trailingSlash`, or matching redirect rules.
+* **A canonical to the http:// or www. variant is no longer "self".** Such a
+  page gets `canonical-elsewhere` and is left out of the sitemap. It is
+  compared with the address most pages use in their own canonicals, not with
+  `--site`. A site written entirely on another address gets one note that
+  suggests the right `--site`.
+
 ## 1.27.0 — 2026-11-24
 
 A second adversarial round: ten testers built sites to fool 1.26 and reported

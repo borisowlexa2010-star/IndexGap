@@ -309,6 +309,7 @@ class Page:
     robots: str = ""
     text: str = ""                 # основной текст без разметки, без меню и подвала
     chrome: str = ""               # то, что осталось за пределами основного текста
+    framed: str = ""               # без <main>: текст внутри <header>, <footer>, <nav>, <aside>
     links: list = field(default_factory=list)   # внутренние ссылки (абсолютные URL)
     lang: str = ""
     meta: dict = field(default_factory=dict)   # фронтматтер целиком, если он был
@@ -325,6 +326,14 @@ class Page:
     outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
     slots: list = None                             # следы незаполненного шаблона: (вид, образец)
     alts: list = field(default_factory=list)       # непустые alt картинок: (текст, src)
+    # Текст, который читатель видит: без блоков с `hidden` и `display:none`.
+    # None — скрытых блоков нет, видно всё, что в text и chrome.
+    shown: str = None
+    # Цены микроданных и RDFa с машинным значением: (поле, значение). Только
+    # те, где значение задано атрибутом (`content`, `value`), а не текстом
+    # элемента: текст элемента и так виден. Только внутри `itemscope`,
+    # `typeof` или `vocab`: вне элемента-сущности поисковик их не читает.
+    microdata: list = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -731,6 +740,12 @@ def open_text(path: str):
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
+# Поля цены, которые сверяются с текстом. Рейтинги в микроданных почти всегда
+# стоят текстом элемента (`<span itemprop="ratingValue">4.8</span>`), а не
+# атрибутом; цена атрибутом — норма WooCommerce и тем Shopify.
+_MICRODATA_PRICES = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice"}
+
+
 class _Extractor(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -750,6 +765,11 @@ class _Extractor(HTMLParser):
         # a live events site это 40% подзаголовков медианной страницы.
         self.outline = []
         self._chrome_stack = []
+        # Шапка, подвал, меню и врезки страницы без <main>: их текст остаётся
+        # в основном, но `trimmed_words` должен отличить подвал сайта от
+        # общего хвоста шаблона, а другого признака у него нет.
+        self._frame_stack = []
+        self._framed = []
         # Видимый текст без кода — для поиска швов шаблона. Собирается тем же
         # проходом: второй разбор исходника стоил пятую часть времени загрузки.
         self._code_stack = []
@@ -763,6 +783,8 @@ class _Extractor(HTMLParser):
         self.alternates_in_body = 0
         self._in_body = False
         self.alts = []
+        self.microdata = []        # (поле, значение) цен микроданных и RDFa
+        self._scope_stack = []     # глубины открытых itemscope / typeof / vocab
         self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0, "img_empty_alt": 0,
                        "script": 0, "p": 0}
         self.meta = {}             # author, datePublished и прочее из <meta>
@@ -807,6 +829,17 @@ class _Extractor(HTMLParser):
         # закрывающий тег просматривал весь стек: 240 КБ `</span>` разбирались
         # 77 секунд.
         self._open_count = Counter()
+        # Скрытые блоки: `hidden` и `display:none` / `visibility:hidden` в
+        # style. Текст их остаётся в text — по нему работают все проверки, —
+        # но сверка разметки с видимым ведётся без него. Стек — (глубина, id).
+        self._hidden_stack = []
+        self._hidden_ids = ()
+        self._any_hidden = False
+        # Весь текст по порядку: (кусок, приклеивать ли, id скрытых предков).
+        self._shown_chunks = []
+        # id, которыми управляют кнопки и ссылки: вкладки и раскрывашки,
+        # скрытые до щелчка. Google считает их содержимое видимым.
+        self._controls = set()
 
     # -- служебное ------------------------------------------------------------
 
@@ -817,6 +850,11 @@ class _Extractor(HTMLParser):
     def _emit(self, text: str):
         target = self._main_chunks if self._in_main else self._chunks
         target.append((text, self._glue))
+        self._shown_chunks.append((text, self._glue, self._hidden_ids))
+        if self._hidden_ids:
+            self._any_hidden = True
+        if self._frame_stack:
+            self._framed.append((text, self._glue))
         # Абзацы собираются только внутри основного блока: иначе первым абзацем
         # страницы оказывался пункт меню, и проверка прямого ответа выносила
         # вердикт по хлебным крошкам.
@@ -848,8 +886,16 @@ class _Extractor(HTMLParser):
             self._main_stack.pop()
         while self._chrome_stack and self._chrome_stack[-1] > self._depth:
             self._chrome_stack.pop()
+        while self._frame_stack and self._frame_stack[-1] > self._depth:
+            self._frame_stack.pop()
         while self._code_stack and self._code_stack[-1] > self._depth:
             self._code_stack.pop()
+        if self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
+            while self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
+                self._hidden_stack.pop()
+            self._hidden_ids = tuple(i for _, i in self._hidden_stack)
+        while self._scope_stack and self._scope_stack[-1] > self._depth:
+            self._scope_stack.pop()
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -861,6 +907,42 @@ class _Extractor(HTMLParser):
                 self._flush_paragraph()
                 while self._data_stack and self._data_stack[-1] > self._depth:
                     self._data_stack.pop()
+
+    def _microdata_price(self, tag: str, a: dict):
+        """
+        Цена предложения в микроданных или RDFa, если её значение задано
+        атрибутом: `<meta itemprop="price" content="999">`,
+        `<span property="schema:price" content="16.99">`. Значение атрибута
+        видно только поисковику — его и есть смысл сверять с текстом.
+        """
+        if "itemscope" in a:
+            return                 # `itemprop` на сущности — ссылка на объект, не число
+        if "content" in a:
+            value = a["content"]
+        elif tag in ("data", "meter") and "value" in a:
+            value = a["value"]
+        else:
+            return
+        value = (value or "").strip()
+        if not value:
+            return
+        names = (a.get("itemprop", "") + " " + a.get("property", "")).split()
+        for name in names:
+            key = name.lower()
+            if "/" in key:
+                # Полное имя свойства — только словаря schema.org.
+                if "schema.org/" not in key:
+                    continue
+                key = key.rsplit("/", 1)[-1]
+            elif ":" in key:
+                # `schema:price` — да, `og:price:amount` и `product:price` — нет.
+                prefix, _, key = key.partition(":")
+                if prefix != "schema":
+                    continue
+            field_name = _MICRODATA_PRICES.get(key)
+            if field_name:
+                self.microdata.append((field_name, value))
+                return
 
     def _imply_end(self, tag: str):
         """
@@ -915,11 +997,26 @@ class _Extractor(HTMLParser):
         if tag not in INLINE_TAGS:
             self._glue = False
 
+        for name in ("aria-controls", "data-target", "data-bs-target", "href"):
+            value = a.get(name)
+            if value:
+                if name == "aria-controls":
+                    self._controls.update(value.split())
+                elif value.startswith("#") and len(value) > 1:
+                    self._controls.add(value[1:])
+
         if tag not in VOID_TAGS:
             self._imply_end(tag)
+            # `<body style="display:none">` — защита от мигания до загрузки
+            # стилей: скрипт показывает страницу сразу, и скрыта она не вся.
+            hides = (tag not in ("html", "body") and not self._open_count["details"]
+                     and _hides(a))
             self._open.append(tag)
             self._open_count[tag] += 1
             self._depth = len(self._open)
+            if hides:
+                self._hidden_stack.append((self._depth, a.get("id", "").strip()))
+                self._hidden_ids = tuple(i for _, i in self._hidden_stack)
         if tag not in VOID_TAGS and (tag in MAIN_TAGS
                                      or a.get("role", "").lower() == "main"):
             self._main_stack.append((tag, self._depth))
@@ -932,6 +1029,13 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and (tag in _CHROME_TAGS
                                      or a.get("role", "").lower() in _CHROME_ROLES):
             self._chrome_stack.append(self._depth)
+        if self._scope_stack and ("itemprop" in a or "property" in a):
+            self._microdata_price(tag, a)
+        if tag not in VOID_TAGS and ("itemscope" in a or "typeof" in a or "vocab" in a):
+            self._scope_stack.append(self._depth)
+        if tag not in VOID_TAGS and (tag in _FRAME_TAGS
+                                     or a.get("role", "").lower() in _FRAME_ROLES):
+            self._frame_stack.append(self._depth)
         # Два <br> подряд — граница абзаца: так верстают тексты, собранные
         # из CMS без <p>. Один <br> — перенос строки внутри абзаца.
         if tag == "br":
@@ -1152,6 +1256,25 @@ class _Extractor(HTMLParser):
         return ""
 
     @property
+    def shown_text(self):
+        """Видимый текст страницы; None — скрытых блоков нет."""
+        if not self._any_hidden:
+            return None
+        controls = self._controls
+        shown = [(text, glue) for text, glue, ids in self._shown_chunks
+                 if not ids or all(i and i in controls for i in ids)]
+        # Всё скрытое оказалось вкладками: отдельная копия текста не нужна.
+        if len(shown) == len(self._shown_chunks):
+            return None
+        return self._join(shown)
+
+    @property
+    def framed_text(self) -> str:
+        if self._saw_main and self._main_chunks:
+            return ""
+        return self._join(self._framed)
+
+    @property
     def paragraphs(self) -> list:
         self._flush_paragraph()
         found = self._paragraphs
@@ -1190,6 +1313,8 @@ _DATA_TAGS = {"table", "pre"}
 _CHROME_TAGS = {"aside", "footer", "nav"}
 _CODE_TAGS = {"code", "pre", "kbd", "samp", "textarea"}
 _CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
+_FRAME_TAGS = _CHROME_TAGS | {"header"}
+_FRAME_ROLES = _CHROME_ROLES | {"banner"}
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _BREAKOUT = {"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
              "dl", "dt", "em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head",
@@ -1210,6 +1335,28 @@ _IMPLIED_END = {name: {"p"} for name in _BLOCKS}
 _IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
                      "tr": {"tr", "td", "th"}, "td": {"td", "th"},
                      "th": {"td", "th"}, "option": {"option"}})
+
+
+# Скрыто до щелчка или до скрипта — а значит, видно. `hidden="until-found"`
+# раскрывается поиском по странице; `role="tabpanel"`, `aria-labelledby` и
+# `data-state` (Radix, Headless UI) — неактивная вкладка или свёрнутая
+# панель; `S:0`, `P:0` — потоковый рендер React: скрипт переносит блок на
+# место сразу после загрузки.
+_STYLE_HIDDEN = re.compile(r"(?<![\w-])(?:display\s*:\s*none|visibility\s*:\s*hidden)(?![\w-])", re.I)
+_STREAMED_ID = re.compile(r"^[SP]:\d+$")
+
+
+def _hides(attrs: dict) -> bool:
+    """Прячет ли элемент своё содержимое от читателя — без щелчка и скрипта."""
+    if "hidden" in attrs:
+        if attrs["hidden"].strip().lower() == "until-found":
+            return False
+    elif not ("style" in attrs and _STYLE_HIDDEN.search(attrs["style"])):
+        return False
+    if attrs.get("role", "").lower() == "tabpanel" or "aria-labelledby" in attrs \
+            or "data-state" in attrs:
+        return False
+    return not _STREAMED_ID.match(attrs.get("id", "").strip())
 
 
 def _is_aside(tag: str, attrs: dict) -> bool:
@@ -1840,6 +1987,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             meta=ex.meta,
             text=ex.main_text,
             chrome=ex.chrome_text,
+            framed=ex.framed_text,
             headings=ex.headings,
             outline=ex.outline,
             slots=find_slots(" ".join(ex.visible)),
@@ -1853,6 +2001,8 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             paragraphs=ex.paragraphs,
             blocks=ex.blocks,
             alts=ex.alts,
+            shown=ex.shown_text,
+            microdata=ex.microdata,
         )
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что
@@ -2405,6 +2555,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             file_url = _EXT_RE.sub("", file_url)
         parts = urlsplit(file_url)
         page.url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    _mark_canonical_forms(pages, root, base_url, redirects, host_rewrites)
     if host_rewrites:
         return
     base = urlsplit(base_url).path.rstrip("/")
@@ -2428,6 +2579,101 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
                 wrong.append((key, path))
         if wrong:
             page.__dict__["_wrong_forms"] = wrong
+
+
+def _host_serves_any_form(root: str) -> tuple:
+    """
+    (сводит ли хостинг формы адресов сам, отдаёт ли он `/a` без редиректа
+    на `/a/`) — то, что не видно по раскладке файлов.
+
+    Сборка `.next/server/app` — это не файлы для статического хостинга: её
+    отдаёт сервер Next.js по своим маршрутам, и `about.html` там выходит по
+    `/about/`, если в конфиге `trailingSlash: true`. Каталог, скачанный
+    `indexgap fetch`, исходники (Jekyll, Eleventy) и `firebase.json` с
+    `cleanUrls` или `trailingSlash` — тоже не та раскладка, которую отдаст
+    хостинг. Vercel и Azure Static Web Apps без настроек отдают
+    `a/index.html` и по `/a`, без редиректа.
+    """
+    real = os.path.abspath(root).replace(os.sep, "/").rstrip("/")
+    up = os.path.dirname(os.path.dirname(os.path.abspath(root)))
+    if (re.search(r"/\.next/server/(app|pages)$", real)
+            or os.path.isfile(os.path.join(up, "routes-manifest.json"))
+            or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
+            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)):
+        return True, True
+    near = [root, os.path.dirname(os.path.abspath(root))]
+    for folder in near:
+        try:
+            with open(os.path.join(folder, "firebase.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError, RecursionError):
+            continue
+        hosting = data.get("hosting") if isinstance(data, dict) else None
+        for entry in hosting if isinstance(hosting, list) else [hosting]:
+            if isinstance(entry, dict) and ("cleanUrls" in entry or "trailingSlash" in entry):
+                return True, True
+        break
+    bare = any(os.path.isfile(os.path.join(folder, name)) for folder in near
+               for name in ("vercel.json", "staticwebapp.config.json"))
+    return False, bare
+
+
+def _mark_canonical_forms(pages: list, root: str, base_url: str,
+                          redirects: list, host_rewrites: bool) -> None:
+    """
+    Отмечает страницы, чей canonical объявляет её же адрес, но в форме,
+    которой раскладка файлов не отдаёт (`_canonical_form` страницы).
+
+    Свой canonical страница сохраняет: адрес из него уезжает в sitemap и
+    hreflang, а ссылки в той же форме не отмечаются, — так и задумано, на
+    хостинге, который эту форму отдаёт, всё сходится. Но `about.html` с
+    canonical `/about/` и `a/index.html` с canonical `/a.html` — это 404 на
+    GitHub Pages, S3 и nginx, а `a/index.html` с canonical `/a` — редирект
+    на `/a/`. Раньше такое проходило молча.
+
+    Не отмечается то, что хостинг сводит сам: `cleanUrls` и `trailingSlash`
+    в vercel.json, правило перенаправления, которое ловит этот путь, и
+    раскладки, по которым форму не узнать (`_host_serves_any_form`).
+    """
+    if host_rewrites:
+        return
+    declared = [p for p in pages if p.__dict__.get("_url_declared")
+                and (p.path or "").lower().endswith((".html", ".htm"))]
+    if not declared:
+        return
+    any_form, bare_ok = _host_serves_any_form(root)
+    if any_form:
+        return
+    base = urlsplit(base_url).path.rstrip("/")
+    for page in declared:
+        path = urlsplit(page.url).path or "/"
+        local = path[len(base):] if base and path.startswith(base + "/") else path
+        if local in ("", "/") or local == base:
+            continue
+        name = os.path.basename(page.path).lower()
+        last = local.rstrip("/").rsplit("/", 1)[-1].lower()
+        if name.startswith("index."):
+            # `a/index.html`: отдаётся по /a/ и /a/index.html.
+            if local.endswith("/") or last.startswith("index."):
+                continue
+            form = "file" if _EXT_RE.search(last) else "bare"
+            if form == "bare" and bare_ok:
+                continue
+        else:
+            # `about.html`: отдаётся по /about.html и /about.
+            if local.endswith("/"):
+                form = "slash"
+            elif last.startswith("index.") and _EXT_RE.search(last):
+                form = "index"
+            else:
+                continue
+        if any(regex.match(local) for regex in redirects):
+            continue
+        # Форма, которую раскладка отдаёт: /a/ для папки, /about.html для файла.
+        served = urlsplit(_file_url(page.path, root, base_url)).path
+        if name.startswith("index."):
+            served = served.rsplit("/", 1)[0] + "/"
+        page.__dict__["_canonical_form"] = (form, served)
 
 
 FETCH_MANIFEST = "fetch.json"
@@ -2596,8 +2842,74 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт "
             "как есть, а не страницы; не проверялись: {a1}",
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
+    _settle_canonical_origins(pages, base_url, problems)
     pages.sort(key=lambda p: p.url)
     return pages, problems
+
+
+def _origin(url: str):
+    """
+    (схема, хост) адреса: порт по умолчанию и punycode не различаются,
+    `www.` — различается: это другой хост и настоящий редирект.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    scheme, host = parts.scheme.lower(), parts.netloc.lower()
+    default = {"https": ":443", "http": ":80"}.get(scheme)
+    if default and host.endswith(default):
+        host = host[: -len(default)]
+    if not host.isascii():
+        try:
+            name, colon, rest = host.partition(":")
+            host = name.encode("idna").decode("ascii") + colon + rest
+        except UnicodeError:
+            pass
+    return scheme, host
+
+
+def _settle_canonical_origins(pages: list, base_url: str, problems: list) -> None:
+    """
+    Canonical на `http://` или `www.`-версию той же страницы — это canonical
+    на другой адрес: поисковик считает страницу копией того адреса. Ключ
+    `url_key` схему и `www.` снимает (так сравниваются ссылки), и такая
+    страница считалась «сама на себя» и уезжала в sitemap.
+
+    Сверяется не с --site, а с тем, как называет себя сам сайт: адрес,
+    которым пишет canonical большинство страниц. Неверный --site не делает
+    каждую страницу находкой — о нём одна заметка. Голосуют только canonical,
+    записанные полным адресом: относительный достроен от --site и о сайте
+    ничего не говорит. Если большинства нет, мерило — --site.
+    """
+    votes = []
+    for page in pages:
+        if (page.canonical and page.__dict__.get("_canonical_absolute")
+                and url_key(page.canonical) == page.key):
+            origin = _origin(page.canonical)
+            if origin:
+                votes.append((page, origin))
+    if not votes:
+        return
+    site = _origin(base_url)
+    counts = Counter(origin for _, origin in votes)
+    top, count = max(counts.items(),
+                     key=lambda item: (item[1], item[0] == site, item[0][0] == "https"))
+    total = len(votes)
+    home = top if count * 2 > total else site
+    if home is None:
+        return
+    for page, origin in votes:
+        if origin != home:
+            page.__dict__["_canonical_origin"] = "%s://%s" % home
+    if site is not None and home != site:
+        problems.append(tr(
+            "canonical {a0} из {a1} страниц называют сайт адресом {a2}, а --site — {a3}. "
+            "Страницы сверены с {a2}; адреса в sitemap и в отчёте строятся от --site — "
+            "если сайт живёт по {a2}, укажи --site {a2}",
+            a0=count, a1=total, a2="%s://%s" % home, a3="%s://%s" % site))
 
 
 def _parse_one(job):

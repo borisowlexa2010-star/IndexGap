@@ -75,6 +75,14 @@ MESSAGES = {
         "forms only by its own rules: GitHub Pages and S3 serve `about/index.html` "
         "at /about/ but not at /about.html, and `faq.html` at /faq.html but not at "
         "/faq/; such links get a 404",
+    "canonical объявляет адрес {a0}, а страница лежит как {a1}: GitHub Pages, Netlify, Cloudflare Pages, S3 и nginx отвечают на {a0} редиректом на {a1}. Тот же адрес уходит в sitemap и hreflang":
+        "the canonical declares {a0}, but the page is laid out as {a1}: GitHub "
+        "Pages, Netlify, Cloudflare Pages, S3 and nginx answer {a0} with a redirect "
+        "to {a1}. The same address goes into the sitemap and hreflang",
+    "canonical объявляет адрес {a0}, а страница лежит как {a1}: этой формы сборка не отдаёт, и GitHub Pages, S3 и nginx отвечают на {a0} 404. Тот же адрес уходит в sitemap и hreflang":
+        "the canonical declares {a0}, but the page is laid out as {a1}: the build "
+        "does not serve that form, and GitHub Pages, S3 and nginx answer {a0} with "
+        "a 404. The same address goes into the sitemap and hreflang",
     "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404, если сервер их не перенаправляет":
         "links to pages that are not in the build: {a0} — {a1}{a2}. On the live "
         "site they are 404s unless the server redirects them",
@@ -298,4 +306,6 @@ MESSAGES = {
         "pages of that section at all. If this generator builds the section, it dropped "
         "out of the build and these are 404s on the live site; if another application "
         "serves it, all is well.",
+    'canonical указывает на {a0} — та же страница, но по другому адресу, а сайт живёт по {a1}. Поисковик считает эту страницу копией того адреса, в sitemap она не идёт':
+        'canonical points at {a0}: the same page, but on another address, and the site lives at {a1}. A search engine treats this page as a copy of that address; it is left out of the sitemap',
 }

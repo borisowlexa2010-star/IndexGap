@@ -488,6 +488,18 @@ def trimmed_words(pages: list) -> dict:
     if not head and not tail:
         return words
     tail.reverse()
+    # Общее у девяти страниц из десяти — не всегда шапка и подвал. Когда один
+    # шаблон занимает 90% сайта, общим становится и его неизменный текст, и он
+    # отрезался как подвал: пятьдесят клонов теряли половину слов и выходили
+    # «похожими», а стоило добавить пять постов блога — «дублями».
+    if head:
+        head = _site_frame(head, [p for p in plain if words[p.url][:len(head)] == head],
+                           pages, False)
+    if tail:
+        tail = _site_frame(tail, [p for p in plain if words[p.url][-len(tail):] == tail],
+                           pages, True)
+    if not head and not tail:
+        return words
     for p in plain:
         w = words[p.url]
         if head and w[:len(head)] == head:
@@ -496,6 +508,67 @@ def trimmed_words(pages: list) -> dict:
             w = w[:-len(tail)]
         words[p.url] = w
     return words
+
+
+def _template_group(page) -> tuple:
+    """Каталог страницы внутри языка; главная языка — своя группа."""
+    _, lang, rest = _locale_split(page.url)
+    if not rest:
+        return lang, None
+    return lang, rest.rsplit("/", 1)[0] if "/" in rest else ""
+
+
+def _site_frame(run: list, bearers: list, pages: list, at_end: bool) -> list:
+    """
+    Часть общего начала или конца `run`, которая — обвязка сайта, а не текст
+    шаблона.
+
+    Обвязка сайта стоит и вне шаблона: на главной, «О нас», в другом разделе —
+    у страницы без `<main>` в тексте, у страницы с `<main>` вокруг него. Или
+    она размечена: `<header>`, `<footer>`, `<nav>`, `<aside>`, или состоит из
+    текстов ссылок. Что общее только у страниц одного каталога и ничем таким
+    не отмечено, — текст шаблона, и сравнивать страницы надо вместе с ним.
+    Если вне каталога шаблона страниц нет вовсе, сравнить не с чем, и общее
+    по-прежнему считается обвязкой: молчать безопаснее, чем ошибиться.
+    """
+    if not bearers:
+        return run
+    home = Counter(_template_group(p) for p in bearers).most_common(1)[0][0]
+    outside = [p for p in pages if _template_group(p) != home]
+    if not outside:
+        return run
+    seq = run[::-1] if at_end else run         # от края страницы внутрь
+    size = len(seq)
+    support = 0
+    for p in outside[:2000]:
+        own = tokenize(p.chrome) if p.chrome else p.words
+        n, limit = 0, min(size, len(own))
+        if at_end:
+            while n < limit and own[-1 - n] == seq[n]:
+                n += 1
+        else:
+            while n < limit and own[n] == seq[n]:
+                n += 1
+        support = max(support, n)
+        if support == size:
+            return run
+    # Дальше — только разметка и ссылки. Слово считается служебным, если оно
+    # такое у половины страниц шаблона: одна ссылка в тексте не решает.
+    sample = bearers[:20]
+    votes = Counter()
+    for p in sample:
+        votes.update(set(tokenize(getattr(p, "framed", "") or "")) | _anchor_words(p))
+    marked = {w for w, c in votes.items() if c * 2 >= len(sample)}
+    keep = support
+    hits = 0
+    for i, word in enumerate(seq[support:], 1):
+        if word in marked:
+            hits += 1
+            if hits >= 0.8 * i:
+                keep = support + i
+    if keep == size:
+        return run
+    return run[size - keep:] if at_end else run[:keep]
 
 
 def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> dict:
@@ -1075,6 +1148,34 @@ def wrong_form_issues(pages: list, case_twins: dict) -> list:
     return issues
 
 
+def canonical_form_issues(pages: list) -> list:
+    """
+    Canonical на саму страницу, но в форме, которой раскладка файлов не
+    отдаёт (её отмечает разбор, `_canonical_form` страницы): `about.html`
+    с canonical `/about/`, `a/index.html` с `/a.html` — это 404, а
+    `a/index.html` с `/a` — редирект на `/a/`. Страница закрытая или
+    заглушка-редирект не в счёт: в индекс её canonical не идёт.
+    """
+    issues = []
+    for page in pages:
+        mark = page.__dict__.get("_canonical_form")
+        if not mark or not indexable(page) or redirect_target(page):
+            continue
+        form, served = mark
+        own = urlsplit(page.url).path
+        if form != "bare":
+            issues.append(("warning", page.url, "canonical-form", tr(
+                "canonical объявляет адрес {a0}, а страница лежит как {a1}: этой формы "
+                "сборка не отдаёт, и GitHub Pages, S3 и nginx отвечают на {a0} 404. "
+                "Тот же адрес уходит в sitemap и hreflang", a0=own, a1=served)))
+            continue
+        issues.append(("warning", page.url, "canonical-form", tr(
+            "canonical объявляет адрес {a0}, а страница лежит как {a1}: GitHub Pages, "
+            "Netlify, Cloudflare Pages, S3 и nginx отвечают на {a0} редиректом на {a1}. "
+            "Тот же адрес уходит в sitemap и hreflang", a0=own, a1=served)))
+    return issues
+
+
 def _other_host(pages: list) -> str:
     """Хост, под которым сайт ссылается на собственные страницы, если такой есть."""
     keys = {p.key.split("/", 3)[3] if p.key.count("/") >= 3 else "" for p in pages}
@@ -1386,6 +1487,15 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
                 issues.append(("critical", p.url, "canonical-elsewhere",
                                tr("canonical указывает на {a0} — страница отдаёт вес другой",
                                   a0=p.canonical)))
+        elif p.__dict__.get("_canonical_origin") and not p.noindex:
+            # Та же страница, но по другому адресу: `http://` или `www.` там,
+            # где остальной сайт называет себя иначе. Сверено с сайтом, а не с
+            # --site (`core._settle_canonical_origins`).
+            issues.append(("warning", p.url, "canonical-elsewhere",
+                           tr("canonical указывает на {a0} — та же страница, но по другому "
+                              "адресу, а сайт живёт по {a1}. Поисковик "
+                              "считает эту страницу копией того адреса, в sitemap она не идёт",
+                              a0=p.canonical, a1=p.__dict__["_canonical_origin"])))
         volume = text_volume(p, language)
         if volume < cfg["thin_words"]:
             issues.append(("warning", p.url, "thin",
@@ -1419,10 +1529,10 @@ CODE_WEIGHT = {
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
     "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
-    "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
+    "jsonld-mismatch": 9, "microdata-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -2133,7 +2243,10 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     # Закрыта и страница с canonical на другую: печатная копия Hugo
     # получала «тонкая», «нет описания» и «глубоко» — 800 находок на сайте.
     # Страница с ошибочным canonical закрыта не намеренно: о ней важно всё.
-    closed = {p.url for p in pages if not indexable(p)} - set(misdirected(pages))
+    # Так же и canonical на `http://`/`www.`-версию самой страницы.
+    closed = ({p.url for p in pages if not indexable(p)} - set(misdirected(pages))
+              - {p.url for p in pages if p.__dict__.get("_canonical_origin")
+                 and indexable(p, origin=False)})
     if not closed:
         return issues
     # Заглушка-редирект с canonical на цель тоже «закрыта», но редирект в
@@ -2286,6 +2399,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # пары не идут в дубли вовсе.
     regional = {tuple(sorted(pair)) for pair in multi["regional_pairs"]}
     issues = technical_issues(pages, cfg, language, shells=shells)
+    issues += canonical_form_issues(pages)
     issues += issues_hreflang
     # Цифры, разошедшиеся между языковыми версиями одной страницы.
     from . import facts

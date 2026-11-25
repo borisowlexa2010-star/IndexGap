@@ -702,7 +702,7 @@ def check_jsonld(page) -> list:
             # расхождение давало находку с угрозой ручных санкций.
             # Сверяется весь вопрос, а не первые 40 символов: в программном
             # FAQ отличается как раз хвост — город или товар.
-            haystack = _plain((page.text or "") + " " + (getattr(page, "chrome", "") or ""))
+            haystack = _plain(_shown_text(page))
             missing = []
             entities = item.get("mainEntity") or []
             if isinstance(entities, dict):
@@ -826,8 +826,20 @@ def _ld_value(value):
     return round(number, 4) if math.isfinite(number) else None
 
 
+def _shown_text(page) -> str:
+    """
+    Текст, который видит читатель. Блоки с `hidden` и `display:none` в него
+    не входят: вопрос FAQ или цена, спрятанные так, для Google не видны, а
+    спрятать совпадающую копию — обычный способ разойтись с разметкой.
+    """
+    shown = getattr(page, "shown", None)
+    if shown is not None:
+        return shown
+    return (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+
+
 def _ld_numbers_missing(data, page) -> list:
-    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    text = _shown_text(page)
     values, digits, thousands = _visible_numbers(text)
     out = []
     for field, value in _ld_numbers(data):
@@ -838,6 +850,48 @@ def _ld_numbers_missing(data, page) -> list:
         if shown not in out:
             out.append(shown)
     return out
+
+
+def check_microdata(page) -> list:
+    """
+    Цена микроданных и RDFa против видимого текста — то же, что
+    `jsonld-mismatch` делает для JSON-LD. `<meta itemprop="price" content="999">`
+    рядом с видимыми «$1,600» Google читает так же, как JSON-LD, и так же
+    считает расхождением со страницей.
+
+    Сверяются только значения из атрибутов (`content`, `value`): цена, стоящая
+    текстом элемента, видна по определению. Число, которое уже есть в JSON-LD
+    страницы, сверяет `jsonld-mismatch` — второй находки о нём не будет.
+    """
+    prices = getattr(page, "microdata", None) or ()
+    if not prices:
+        return []
+    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    values, digits, thousands = _visible_numbers(text)
+    in_ld = set()
+    for raw in page.jsonld or ():
+        try:
+            data = _load_ld(raw)
+        except (ValueError, RecursionError):
+            continue
+        for _, value in _ld_numbers(data):
+            number = _ld_value(value)
+            if number is not None:
+                in_ld.add(number)
+    out = []
+    for field, value in prices:
+        number = _ld_value(value)
+        if number is None or number <= 0 or number in in_ld \
+                or _shown(number, values, digits, thousands, text):
+            continue
+        shown = f"{field} {value}"
+        if shown not in out:
+            out.append(shown)
+    if not out:
+        return []
+    return [("warning", page.url, "microdata-mismatch", tr(
+        "в микроданных {a0}, а на странице таких чисел нет — разметка должна повторять "
+        "видимое, иначе это риск ручных санкций", a0=", ".join(out[:3])))]
 
 
 _TYPOGRAPHY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "«": '"', "»": '"',
@@ -963,6 +1017,7 @@ def run(pages: list, robots_path: str = "", cfg: dict = None) -> dict:
         issues += check_answer(page, cfg)
         issues += check_extractable(page, cfg)
         issues += check_jsonld(page)
+        issues += check_microdata(page)
         issues += check_provenance(page)
     return {
         "issues": issues,

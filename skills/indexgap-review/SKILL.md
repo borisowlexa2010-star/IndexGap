@@ -92,6 +92,7 @@ by one.
 | `orphan`, `unreachable` | no inbound links / cannot be reached from home | link from the section's hubs; if the hubs are generated, fix the link list in the generator |
 | `broken-link` | an internal link to a page the build does not have | remove the link from the template or generate the page |
 | `wrong-link-form` | a link to a page of the build in a form the host does not serve: other case, `/about.html` for `about/index.html`, `/faq/` for `faq.html` | write the link in the page's own form, or add a redirect rule |
+| `canonical-form` | a canonical to the page itself in a form the layout does not serve: `/about/` for `about.html`, `/a.html` or `/a` for `a/index.html` (a 404 or a redirect; the same address goes into the sitemap) | make the generator's trailingSlash match its output format, or configure the host |
 | `hub-missing-links` | a section page does not link to some of its pages (one finding per section) | make the section template list every page: a list, alphabetical, or paginated |
 | `jsonld-mismatch` | a price, rating or review count in JSON-LD that the page does not show | take markup and text from the same data field |
 | `stale-year` | a past year in the title or H1, presented as freshness | drop the year from the template or fill in the current one |
