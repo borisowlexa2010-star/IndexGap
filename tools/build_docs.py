@@ -158,7 +158,11 @@ WHY = {
    "another address — pointed at an open page of its language is only a note. A "
    "page with another name and almost no text in common is not a copy: one is a "
    "warning, several pointed at the same page are critical (the template took the "
-   "address from the wrong variable), and the page keeps its other findings.",
+   "address from the wrong variable), and the page keeps its other findings. "
+   "A canonical naming the same page on another scheme or host (`http://`, "
+   "`www.`) is a warning and leaves the page out of the sitemap; it is compared "
+   "with the address most pages use in their own canonical, not with `--site`, "
+   "so a site written wholly on another address gets one note instead.",
  "jsonld-mismatch":
    "Structured data that disagrees with the page: an Offer price, an aggregate rating or a review count in the JSON-LD that the visible text does not contain, in any spelling (`1,600`, `1 600`, `1600.00` are one number). Google's guidelines require markup to describe what the reader sees; on a generated site the two drift apart when the template takes the markup from one dataset column and the text from another. Ratings of individual reviews are not judged.",
  "hub-missing-links":

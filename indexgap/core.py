@@ -2596,8 +2596,74 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт "
             "как есть, а не страницы; не проверялись: {a1}",
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
+    _settle_canonical_origins(pages, base_url, problems)
     pages.sort(key=lambda p: p.url)
     return pages, problems
+
+
+def _origin(url: str):
+    """
+    (схема, хост) адреса: порт по умолчанию и punycode не различаются,
+    `www.` — различается: это другой хост и настоящий редирект.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    scheme, host = parts.scheme.lower(), parts.netloc.lower()
+    default = {"https": ":443", "http": ":80"}.get(scheme)
+    if default and host.endswith(default):
+        host = host[: -len(default)]
+    if not host.isascii():
+        try:
+            name, colon, rest = host.partition(":")
+            host = name.encode("idna").decode("ascii") + colon + rest
+        except UnicodeError:
+            pass
+    return scheme, host
+
+
+def _settle_canonical_origins(pages: list, base_url: str, problems: list) -> None:
+    """
+    Canonical на `http://` или `www.`-версию той же страницы — это canonical
+    на другой адрес: поисковик считает страницу копией того адреса. Ключ
+    `url_key` схему и `www.` снимает (так сравниваются ссылки), и такая
+    страница считалась «сама на себя» и уезжала в sitemap.
+
+    Сверяется не с --site, а с тем, как называет себя сам сайт: адрес,
+    которым пишет canonical большинство страниц. Неверный --site не делает
+    каждую страницу находкой — о нём одна заметка. Голосуют только canonical,
+    записанные полным адресом: относительный достроен от --site и о сайте
+    ничего не говорит. Если большинства нет, мерило — --site.
+    """
+    votes = []
+    for page in pages:
+        if (page.canonical and page.__dict__.get("_canonical_absolute")
+                and url_key(page.canonical) == page.key):
+            origin = _origin(page.canonical)
+            if origin:
+                votes.append((page, origin))
+    if not votes:
+        return
+    site = _origin(base_url)
+    counts = Counter(origin for _, origin in votes)
+    top, count = max(counts.items(),
+                     key=lambda item: (item[1], item[0] == site, item[0][0] == "https"))
+    total = len(votes)
+    home = top if count * 2 > total else site
+    if home is None:
+        return
+    for page, origin in votes:
+        if origin != home:
+            page.__dict__["_canonical_origin"] = "%s://%s" % home
+    if site is not None and home != site:
+        problems.append(tr(
+            "canonical {a0} из {a1} страниц называют сайт адресом {a2}, а --site — {a3}. "
+            "Страницы сверены с {a2}; адреса в sitemap и в отчёте строятся от --site — "
+            "если сайт живёт по {a2}, укажи --site {a2}",
+            a0=count, a1=total, a2="%s://%s" % home, a3="%s://%s" % site))
 
 
 def _parse_one(job):

@@ -513,7 +513,8 @@ def _why_closed(page) -> tuple:
         return "noindex", page.robots
     if is_draft(page):
         return "draft", ""
-    if page.canonical and url_key(page.canonical) != page.key:
+    if page.canonical and (url_key(page.canonical) != page.key
+                           or page.__dict__.get("_canonical_origin")):
         return "canonical", page.canonical
     return "other", ""
 

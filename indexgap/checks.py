@@ -1386,6 +1386,15 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
                 issues.append(("critical", p.url, "canonical-elsewhere",
                                tr("canonical указывает на {a0} — страница отдаёт вес другой",
                                   a0=p.canonical)))
+        elif p.__dict__.get("_canonical_origin") and not p.noindex:
+            # Та же страница, но по другому адресу: `http://` или `www.` там,
+            # где остальной сайт называет себя иначе. Сверено с сайтом, а не с
+            # --site (`core._settle_canonical_origins`).
+            issues.append(("warning", p.url, "canonical-elsewhere",
+                           tr("canonical указывает на {a0} — та же страница, но по другому "
+                              "адресу, а сайт живёт по {a1}. Поисковик "
+                              "считает эту страницу копией того адреса, в sitemap она не идёт",
+                              a0=p.canonical, a1=p.__dict__["_canonical_origin"])))
         volume = text_volume(p, language)
         if volume < cfg["thin_words"]:
             issues.append(("warning", p.url, "thin",
@@ -2133,7 +2142,10 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     # Закрыта и страница с canonical на другую: печатная копия Hugo
     # получала «тонкая», «нет описания» и «глубоко» — 800 находок на сайте.
     # Страница с ошибочным canonical закрыта не намеренно: о ней важно всё.
-    closed = {p.url for p in pages if not indexable(p)} - set(misdirected(pages))
+    # Так же и canonical на `http://`/`www.`-версию самой страницы.
+    closed = ({p.url for p in pages if not indexable(p)} - set(misdirected(pages))
+              - {p.url for p in pages if p.__dict__.get("_canonical_origin")
+                 and indexable(p, origin=False)})
     if not closed:
         return issues
     # Заглушка-редирект с canonical на цель тоже «закрыта», но редирект в
