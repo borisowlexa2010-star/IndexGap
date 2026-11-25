@@ -133,8 +133,11 @@ def is_expired(page, today: str = None) -> bool:
     return False
 
 
-def indexable(page) -> bool:
-    """Страница, которую вообще имеет смысл показывать поисковику."""
+def indexable(page, origin: bool = True) -> bool:
+    """
+    Страница, которую вообще имеет смысл показывать поисковику. `origin=False`
+    не считает закрытием canonical на `http://`/`www.`-версию самой страницы.
+    """
     if page.noindex:
         return False
     if is_expired(page):
@@ -152,7 +155,10 @@ def indexable(page) -> bool:
         # Сравнение по ключу: относительный canonical `/visa/` — это та же
         # страница, а не «другая». Раньше такие страницы молча выпадали
         # из sitemap, хотя с ними всё в порядке.
-        return url_key(page.canonical) == page.key
+        # Canonical на `http://` или `www.`-версию — другой адрес, хотя ключ
+        # тот же (`core._settle_canonical_origins`).
+        return (url_key(page.canonical) == page.key
+                and not (origin and page.__dict__.get("_canonical_origin")))
     return True
 
 

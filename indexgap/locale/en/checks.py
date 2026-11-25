@@ -306,4 +306,6 @@ MESSAGES = {
         "pages of that section at all. If this generator builds the section, it dropped "
         "out of the build and these are 404s on the live site; if another application "
         "serves it, all is well.",
+    'canonical указывает на {a0} — та же страница, но по другому адресу, а сайт живёт по {a1}. Поисковик считает эту страницу копией того адреса, в sitemap она не идёт':
+        'canonical points at {a0}: the same page, but on another address, and the site lives at {a1}. A search engine treats this page as a copy of that address; it is left out of the sitemap',
 }
