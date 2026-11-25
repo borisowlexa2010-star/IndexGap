@@ -170,6 +170,8 @@ MESSAGES = {
         "robots.txt does not let the search engine into this page: it is in the build and most likely in the sitemap, but its text will not be read.",
     "Разметка называет цену, рейтинг или число отзывов, которых нет в видимом тексте. Google требует, чтобы структурированные данные повторяли страницу.":
         "The markup names a price, a rating or a review count the visible text does not show. Google requires structured data to repeat the page.",
+    "Микроданные или RDFa называют цену, которой нет в видимом тексте: значение стоит в атрибуте content, и видит его только поисковик. Google требует, чтобы структурированные данные повторяли страницу.":
+        "Microdata or RDFa names a price the visible text does not show: the value sits in a content attribute that only search engines read. Google requires structured data to repeat the page.",
     "Страница раздела не ссылается на часть своих страниц: до них доходят только через sitemap, и вес раздела до них не доходит.":
         "The section page does not link to some of its pages: they are reached only through the sitemap, and the section's weight does not reach them.",
     "В заголовке прошлый год: страница обещает свежесть, а выглядит заброшенной.":

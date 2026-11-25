@@ -1419,7 +1419,7 @@ CODE_WEIGHT = {
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
     "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
-    "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
+    "jsonld-mismatch": 9, "microdata-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
     "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,

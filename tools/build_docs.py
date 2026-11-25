@@ -161,6 +161,8 @@ WHY = {
    "address from the wrong variable), and the page keeps its other findings.",
  "jsonld-mismatch":
    "Structured data that disagrees with the page: an Offer price, an aggregate rating or a review count in the JSON-LD that the visible text does not contain, in any spelling (`1,600`, `1 600`, `1600.00` are one number). Google's guidelines require markup to describe what the reader sees; on a generated site the two drift apart when the template takes the markup from one dataset column and the text from another. Ratings of individual reviews are not judged.",
+ "microdata-mismatch":
+   "The same check as `jsonld-mismatch`, for microdata and RDFa: an Offer `price`, `lowPrice` or `highPrice` whose value sits in an attribute — `<meta itemprop=\"price\" content=\"999\">`, `<span property=\"schema:price\" content=\"16.99\">` — and that the visible text does not contain in any spelling. Only search engines read the attribute, so it drifts from the price shown beside it when a theme takes the two from different fields. A price written as the element's own text is visible by definition and is not judged; neither is a property outside an `itemscope`, `typeof` or `vocab` element, or inside `<template>` or `<noscript>`. A number the page's JSON-LD also gives is left to `jsonld-mismatch`.",
  "hub-missing-links":
    "A section page — `/plumbing/` — that does not link to some of the pages under it. They are found only through the sitemap or a stray link, and the section passes them none of its weight. A link counts from the section page itself and from the listing pages it leads to, at any size: its pagination (`/plumbing/page/2/`, `/plumbing-2/`), the letters of an alphabetical index, and deeper pages whose links inside the section go mostly to its pages. A \"nearby\" block on the section's own pages does not count: it sits on every page of a programmatic site and would hide a section page that links two of twenty. One finding per section, naming the pages it misses.",
  "hreflang-in-body":
@@ -490,7 +492,7 @@ FAMILIES = [
   "page contains anything that survives being lifted out of it.",
   ["no-question-headings", "no-answer", "answer-short", "answer-long",
    "answer-preamble", "jsonld-broken", "jsonld-no-type", "jsonld-faq-invisible",
-   "jsonld-mismatch",
+   "jsonld-mismatch", "microdata-mismatch",
    "no-author", "no-date", "ai-crawler-blocked"]),
 
  ("robots", "robots.txt",
