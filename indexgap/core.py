@@ -1267,6 +1267,8 @@ class _Extractor(HTMLParser):
         if len(shown) == len(self._shown_chunks):
             return None
         return self._join(shown)
+
+    @property
     def framed_text(self) -> str:
         if self._saw_main and self._main_chunks:
             return ""
