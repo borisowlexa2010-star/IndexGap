@@ -1075,6 +1075,34 @@ def wrong_form_issues(pages: list, case_twins: dict) -> list:
     return issues
 
 
+def canonical_form_issues(pages: list) -> list:
+    """
+    Canonical на саму страницу, но в форме, которой раскладка файлов не
+    отдаёт (её отмечает разбор, `_canonical_form` страницы): `about.html`
+    с canonical `/about/`, `a/index.html` с `/a.html` — это 404, а
+    `a/index.html` с `/a` — редирект на `/a/`. Страница закрытая или
+    заглушка-редирект не в счёт: в индекс её canonical не идёт.
+    """
+    issues = []
+    for page in pages:
+        mark = page.__dict__.get("_canonical_form")
+        if not mark or not indexable(page) or redirect_target(page):
+            continue
+        form, served = mark
+        own = urlsplit(page.url).path
+        if form != "bare":
+            issues.append(("warning", page.url, "canonical-form", tr(
+                "canonical объявляет адрес {a0}, а страница лежит как {a1}: этой формы "
+                "сборка не отдаёт, и GitHub Pages, S3 и nginx отвечают на {a0} 404. "
+                "Тот же адрес уходит в sitemap и hreflang", a0=own, a1=served)))
+            continue
+        issues.append(("warning", page.url, "canonical-form", tr(
+            "canonical объявляет адрес {a0}, а страница лежит как {a1}: GitHub Pages, "
+            "Netlify, Cloudflare Pages, S3 и nginx отвечают на {a0} редиректом на {a1}. "
+            "Тот же адрес уходит в sitemap и hreflang", a0=own, a1=served)))
+    return issues
+
+
 def _other_host(pages: list) -> str:
     """Хост, под которым сайт ссылается на собственные страницы, если такой есть."""
     keys = {p.key.split("/", 3)[3] if p.key.count("/") >= 3 else "" for p in pages}
@@ -1422,7 +1450,7 @@ CODE_WEIGHT = {
     "jsonld-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -2286,6 +2314,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # пары не идут в дубли вовсе.
     regional = {tuple(sorted(pair)) for pair in multi["regional_pairs"]}
     issues = technical_issues(pages, cfg, language, shells=shells)
+    issues += canonical_form_issues(pages)
     issues += issues_hreflang
     # Цифры, разошедшиеся между языковыми версиями одной страницы.
     from . import facts

@@ -185,6 +185,8 @@ WHY = {
    "The dataset was given, but fewer than half of the pages were bound to its rows \u2014 so the numbers on the rest were never checked against anything, and a clean fact check means nothing. A page is bound by `keyword:` in its front matter, by `<meta name=\"keyword\">`, by a `slug`/`url`/`path` column in the dataset matching its address, by its folder name, or by its title. The run also lists the dataset rows that have no page at all: a generation failure or a filter.",
  "wrong-link-form":
    "A link that reaches a page of the build only because the checks forgive the difference: `/Blog/Tag/` for `blog/tag/`, `/about.html` for `about/index.html`, `/faq/` for `faq.html`. GitHub Pages, S3 and nginx on Linux are case-sensitive and map URL forms by fixed rules: a folder page is served at `/about/` and `/about`, a flat file at `/faq.html` (and at `/faq` on GitHub Pages, Netlify and Cloudflare), and every other form is a 404. A rule in `_redirects`, `netlify.toml` or `vercel.json` that catches the link, or `cleanUrls` / `trailingSlash` in vercel.json, silences it.",
+ "canonical-form":
+   "A canonical that names the page itself, but in a URL form its file does not have: `/about/` for `about.html`, `/a.html` or `/a` for `a/index.html`. The page keeps that address — it goes into the sitemap and hreflang, and links written the same way are not flagged — so the one place to see the mismatch is here. On GitHub Pages, S3 and nginx `/about/` for a flat file and `/a.html` for a folder page are a 404; `/a` for a folder page is a redirect to `/a/` on GitHub Pages, Netlify, Cloudflare Pages, S3 and nginx, so the canonical and every sitemap entry point at a redirect. Usually it is the generator's trailingSlash setting disagreeing with its output format. `cleanUrls` / `trailingSlash` in vercel.json, a redirect rule that catches the address, `cleanUrls` / `trailingSlash` in firebase.json, and builds served by an app server (`.next/server/app`) silence it; a vercel.json or staticwebapp.config.json silences the `/a` case, since those hosts serve a folder page without the slash.",
  "broken-link":
    "A link into a section of the build that points at a page the build does "
    "not have is a 404 on the live site. On a generated site it is usually a "
@@ -457,7 +459,7 @@ FAMILIES = [
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
   ["noindex", "noindex-group", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
-   "wrong-link-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
+   "wrong-link-form", "canonical-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
 
  ("content", "Content quality at scale",
   "The failures that only appear when pages are compared with each other. A "

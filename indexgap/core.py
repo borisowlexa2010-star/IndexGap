@@ -2405,6 +2405,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             file_url = _EXT_RE.sub("", file_url)
         parts = urlsplit(file_url)
         page.url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    _mark_canonical_forms(pages, root, base_url, redirects, host_rewrites)
     if host_rewrites:
         return
     base = urlsplit(base_url).path.rstrip("/")
@@ -2428,6 +2429,101 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
                 wrong.append((key, path))
         if wrong:
             page.__dict__["_wrong_forms"] = wrong
+
+
+def _host_serves_any_form(root: str) -> tuple:
+    """
+    (сводит ли хостинг формы адресов сам, отдаёт ли он `/a` без редиректа
+    на `/a/`) — то, что не видно по раскладке файлов.
+
+    Сборка `.next/server/app` — это не файлы для статического хостинга: её
+    отдаёт сервер Next.js по своим маршрутам, и `about.html` там выходит по
+    `/about/`, если в конфиге `trailingSlash: true`. Каталог, скачанный
+    `indexgap fetch`, исходники (Jekyll, Eleventy) и `firebase.json` с
+    `cleanUrls` или `trailingSlash` — тоже не та раскладка, которую отдаст
+    хостинг. Vercel и Azure Static Web Apps без настроек отдают
+    `a/index.html` и по `/a`, без редиректа.
+    """
+    real = os.path.abspath(root).replace(os.sep, "/").rstrip("/")
+    up = os.path.dirname(os.path.dirname(os.path.abspath(root)))
+    if (re.search(r"/\.next/server/(app|pages)$", real)
+            or os.path.isfile(os.path.join(up, "routes-manifest.json"))
+            or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
+            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)):
+        return True, True
+    near = [root, os.path.dirname(os.path.abspath(root))]
+    for folder in near:
+        try:
+            with open(os.path.join(folder, "firebase.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError, RecursionError):
+            continue
+        hosting = data.get("hosting") if isinstance(data, dict) else None
+        for entry in hosting if isinstance(hosting, list) else [hosting]:
+            if isinstance(entry, dict) and ("cleanUrls" in entry or "trailingSlash" in entry):
+                return True, True
+        break
+    bare = any(os.path.isfile(os.path.join(folder, name)) for folder in near
+               for name in ("vercel.json", "staticwebapp.config.json"))
+    return False, bare
+
+
+def _mark_canonical_forms(pages: list, root: str, base_url: str,
+                          redirects: list, host_rewrites: bool) -> None:
+    """
+    Отмечает страницы, чей canonical объявляет её же адрес, но в форме,
+    которой раскладка файлов не отдаёт (`_canonical_form` страницы).
+
+    Свой canonical страница сохраняет: адрес из него уезжает в sitemap и
+    hreflang, а ссылки в той же форме не отмечаются, — так и задумано, на
+    хостинге, который эту форму отдаёт, всё сходится. Но `about.html` с
+    canonical `/about/` и `a/index.html` с canonical `/a.html` — это 404 на
+    GitHub Pages, S3 и nginx, а `a/index.html` с canonical `/a` — редирект
+    на `/a/`. Раньше такое проходило молча.
+
+    Не отмечается то, что хостинг сводит сам: `cleanUrls` и `trailingSlash`
+    в vercel.json, правило перенаправления, которое ловит этот путь, и
+    раскладки, по которым форму не узнать (`_host_serves_any_form`).
+    """
+    if host_rewrites:
+        return
+    declared = [p for p in pages if p.__dict__.get("_url_declared")
+                and (p.path or "").lower().endswith((".html", ".htm"))]
+    if not declared:
+        return
+    any_form, bare_ok = _host_serves_any_form(root)
+    if any_form:
+        return
+    base = urlsplit(base_url).path.rstrip("/")
+    for page in declared:
+        path = urlsplit(page.url).path or "/"
+        local = path[len(base):] if base and path.startswith(base + "/") else path
+        if local in ("", "/") or local == base:
+            continue
+        name = os.path.basename(page.path).lower()
+        last = local.rstrip("/").rsplit("/", 1)[-1].lower()
+        if name.startswith("index."):
+            # `a/index.html`: отдаётся по /a/ и /a/index.html.
+            if local.endswith("/") or last.startswith("index."):
+                continue
+            form = "file" if _EXT_RE.search(last) else "bare"
+            if form == "bare" and bare_ok:
+                continue
+        else:
+            # `about.html`: отдаётся по /about.html и /about.
+            if local.endswith("/"):
+                form = "slash"
+            elif last.startswith("index.") and _EXT_RE.search(last):
+                form = "index"
+            else:
+                continue
+        if any(regex.match(local) for regex in redirects):
+            continue
+        # Форма, которую раскладка отдаёт: /a/ для папки, /about.html для файла.
+        served = urlsplit(_file_url(page.path, root, base_url)).path
+        if name.startswith("index."):
+            served = served.rsplit("/", 1)[0] + "/"
+        page.__dict__["_canonical_form"] = (form, served)
 
 
 FETCH_MANIFEST = "fetch.json"
