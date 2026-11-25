@@ -309,6 +309,7 @@ class Page:
     robots: str = ""
     text: str = ""                 # основной текст без разметки, без меню и подвала
     chrome: str = ""               # то, что осталось за пределами основного текста
+    framed: str = ""               # без <main>: текст внутри <header>, <footer>, <nav>, <aside>
     links: list = field(default_factory=list)   # внутренние ссылки (абсолютные URL)
     lang: str = ""
     meta: dict = field(default_factory=dict)   # фронтматтер целиком, если он был
@@ -750,6 +751,11 @@ class _Extractor(HTMLParser):
         # a live events site это 40% подзаголовков медианной страницы.
         self.outline = []
         self._chrome_stack = []
+        # Шапка, подвал, меню и врезки страницы без <main>: их текст остаётся
+        # в основном, но `trimmed_words` должен отличить подвал сайта от
+        # общего хвоста шаблона, а другого признака у него нет.
+        self._frame_stack = []
+        self._framed = []
         # Видимый текст без кода — для поиска швов шаблона. Собирается тем же
         # проходом: второй разбор исходника стоил пятую часть времени загрузки.
         self._code_stack = []
@@ -817,6 +823,8 @@ class _Extractor(HTMLParser):
     def _emit(self, text: str):
         target = self._main_chunks if self._in_main else self._chunks
         target.append((text, self._glue))
+        if self._frame_stack:
+            self._framed.append((text, self._glue))
         # Абзацы собираются только внутри основного блока: иначе первым абзацем
         # страницы оказывался пункт меню, и проверка прямого ответа выносила
         # вердикт по хлебным крошкам.
@@ -848,6 +856,8 @@ class _Extractor(HTMLParser):
             self._main_stack.pop()
         while self._chrome_stack and self._chrome_stack[-1] > self._depth:
             self._chrome_stack.pop()
+        while self._frame_stack and self._frame_stack[-1] > self._depth:
+            self._frame_stack.pop()
         while self._code_stack and self._code_stack[-1] > self._depth:
             self._code_stack.pop()
         if self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -932,6 +942,9 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and (tag in _CHROME_TAGS
                                      or a.get("role", "").lower() in _CHROME_ROLES):
             self._chrome_stack.append(self._depth)
+        if tag not in VOID_TAGS and (tag in _FRAME_TAGS
+                                     or a.get("role", "").lower() in _FRAME_ROLES):
+            self._frame_stack.append(self._depth)
         # Два <br> подряд — граница абзаца: так верстают тексты, собранные
         # из CMS без <p>. Один <br> — перенос строки внутри абзаца.
         if tag == "br":
@@ -1152,6 +1165,12 @@ class _Extractor(HTMLParser):
         return ""
 
     @property
+    def framed_text(self) -> str:
+        if self._saw_main and self._main_chunks:
+            return ""
+        return self._join(self._framed)
+
+    @property
     def paragraphs(self) -> list:
         self._flush_paragraph()
         found = self._paragraphs
@@ -1190,6 +1209,8 @@ _DATA_TAGS = {"table", "pre"}
 _CHROME_TAGS = {"aside", "footer", "nav"}
 _CODE_TAGS = {"code", "pre", "kbd", "samp", "textarea"}
 _CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
+_FRAME_TAGS = _CHROME_TAGS | {"header"}
+_FRAME_ROLES = _CHROME_ROLES | {"banner"}
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _BREAKOUT = {"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
              "dl", "dt", "em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head",
@@ -1840,6 +1861,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             meta=ex.meta,
             text=ex.main_text,
             chrome=ex.chrome_text,
+            framed=ex.framed_text,
             headings=ex.headings,
             outline=ex.outline,
             slots=find_slots(" ".join(ex.visible)),
