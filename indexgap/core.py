@@ -325,6 +325,9 @@ class Page:
     outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
     slots: list = None                             # следы незаполненного шаблона: (вид, образец)
     alts: list = field(default_factory=list)       # непустые alt картинок: (текст, src)
+    # Текст, который читатель видит: без блоков с `hidden` и `display:none`.
+    # None — скрытых блоков нет, видно всё, что в text и chrome.
+    shown: str = None
 
     @property
     def key(self) -> str:
@@ -807,6 +810,17 @@ class _Extractor(HTMLParser):
         # закрывающий тег просматривал весь стек: 240 КБ `</span>` разбирались
         # 77 секунд.
         self._open_count = Counter()
+        # Скрытые блоки: `hidden` и `display:none` / `visibility:hidden` в
+        # style. Текст их остаётся в text — по нему работают все проверки, —
+        # но сверка разметки с видимым ведётся без него. Стек — (глубина, id).
+        self._hidden_stack = []
+        self._hidden_ids = ()
+        self._any_hidden = False
+        # Весь текст по порядку: (кусок, приклеивать ли, id скрытых предков).
+        self._shown_chunks = []
+        # id, которыми управляют кнопки и ссылки: вкладки и раскрывашки,
+        # скрытые до щелчка. Google считает их содержимое видимым.
+        self._controls = set()
 
     # -- служебное ------------------------------------------------------------
 
@@ -817,6 +831,9 @@ class _Extractor(HTMLParser):
     def _emit(self, text: str):
         target = self._main_chunks if self._in_main else self._chunks
         target.append((text, self._glue))
+        self._shown_chunks.append((text, self._glue, self._hidden_ids))
+        if self._hidden_ids:
+            self._any_hidden = True
         # Абзацы собираются только внутри основного блока: иначе первым абзацем
         # страницы оказывался пункт меню, и проверка прямого ответа выносила
         # вердикт по хлебным крошкам.
@@ -850,6 +867,10 @@ class _Extractor(HTMLParser):
             self._chrome_stack.pop()
         while self._code_stack and self._code_stack[-1] > self._depth:
             self._code_stack.pop()
+        if self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
+            while self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
+                self._hidden_stack.pop()
+            self._hidden_ids = tuple(i for _, i in self._hidden_stack)
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -915,11 +936,26 @@ class _Extractor(HTMLParser):
         if tag not in INLINE_TAGS:
             self._glue = False
 
+        for name in ("aria-controls", "data-target", "data-bs-target", "href"):
+            value = a.get(name)
+            if value:
+                if name == "aria-controls":
+                    self._controls.update(value.split())
+                elif value.startswith("#") and len(value) > 1:
+                    self._controls.add(value[1:])
+
         if tag not in VOID_TAGS:
             self._imply_end(tag)
+            # `<body style="display:none">` — защита от мигания до загрузки
+            # стилей: скрипт показывает страницу сразу, и скрыта она не вся.
+            hides = (tag not in ("html", "body") and not self._open_count["details"]
+                     and _hides(a))
             self._open.append(tag)
             self._open_count[tag] += 1
             self._depth = len(self._open)
+            if hides:
+                self._hidden_stack.append((self._depth, a.get("id", "").strip()))
+                self._hidden_ids = tuple(i for _, i in self._hidden_stack)
         if tag not in VOID_TAGS and (tag in MAIN_TAGS
                                      or a.get("role", "").lower() == "main"):
             self._main_stack.append((tag, self._depth))
@@ -1152,6 +1188,19 @@ class _Extractor(HTMLParser):
         return ""
 
     @property
+    def shown_text(self):
+        """Видимый текст страницы; None — скрытых блоков нет."""
+        if not self._any_hidden:
+            return None
+        controls = self._controls
+        shown = [(text, glue) for text, glue, ids in self._shown_chunks
+                 if not ids or all(i and i in controls for i in ids)]
+        # Всё скрытое оказалось вкладками: отдельная копия текста не нужна.
+        if len(shown) == len(self._shown_chunks):
+            return None
+        return self._join(shown)
+
+    @property
     def paragraphs(self) -> list:
         self._flush_paragraph()
         found = self._paragraphs
@@ -1210,6 +1259,28 @@ _IMPLIED_END = {name: {"p"} for name in _BLOCKS}
 _IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
                      "tr": {"tr", "td", "th"}, "td": {"td", "th"},
                      "th": {"td", "th"}, "option": {"option"}})
+
+
+# Скрыто до щелчка или до скрипта — а значит, видно. `hidden="until-found"`
+# раскрывается поиском по странице; `role="tabpanel"`, `aria-labelledby` и
+# `data-state` (Radix, Headless UI) — неактивная вкладка или свёрнутая
+# панель; `S:0`, `P:0` — потоковый рендер React: скрипт переносит блок на
+# место сразу после загрузки.
+_STYLE_HIDDEN = re.compile(r"(?<![\w-])(?:display\s*:\s*none|visibility\s*:\s*hidden)(?![\w-])", re.I)
+_STREAMED_ID = re.compile(r"^[SP]:\d+$")
+
+
+def _hides(attrs: dict) -> bool:
+    """Прячет ли элемент своё содержимое от читателя — без щелчка и скрипта."""
+    if "hidden" in attrs:
+        if attrs["hidden"].strip().lower() == "until-found":
+            return False
+    elif not ("style" in attrs and _STYLE_HIDDEN.search(attrs["style"])):
+        return False
+    if attrs.get("role", "").lower() == "tabpanel" or "aria-labelledby" in attrs \
+            or "data-state" in attrs:
+        return False
+    return not _STREAMED_ID.match(attrs.get("id", "").strip())
 
 
 def _is_aside(tag: str, attrs: dict) -> bool:
@@ -1853,6 +1924,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             paragraphs=ex.paragraphs,
             blocks=ex.blocks,
             alts=ex.alts,
+            shown=ex.shown_text,
         )
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что

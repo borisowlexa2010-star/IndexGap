@@ -702,7 +702,7 @@ def check_jsonld(page) -> list:
             # расхождение давало находку с угрозой ручных санкций.
             # Сверяется весь вопрос, а не первые 40 символов: в программном
             # FAQ отличается как раз хвост — город или товар.
-            haystack = _plain((page.text or "") + " " + (getattr(page, "chrome", "") or ""))
+            haystack = _plain(_shown_text(page))
             missing = []
             entities = item.get("mainEntity") or []
             if isinstance(entities, dict):
@@ -826,8 +826,20 @@ def _ld_value(value):
     return round(number, 4) if math.isfinite(number) else None
 
 
+def _shown_text(page) -> str:
+    """
+    Текст, который видит читатель. Блоки с `hidden` и `display:none` в него
+    не входят: вопрос FAQ или цена, спрятанные так, для Google не видны, а
+    спрятать совпадающую копию — обычный способ разойтись с разметкой.
+    """
+    shown = getattr(page, "shown", None)
+    if shown is not None:
+        return shown
+    return (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+
+
 def _ld_numbers_missing(data, page) -> list:
-    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    text = _shown_text(page)
     values, digits, thousands = _visible_numbers(text)
     out = []
     for field, value in _ld_numbers(data):
