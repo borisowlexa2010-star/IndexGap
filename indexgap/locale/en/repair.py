@@ -33,6 +33,8 @@ MESSAGES = {
         "now it hands its weight to another page and drops out of the index.",
     "Пиши ссылку в той форме, в какой страница лежит в сборке: тот же регистр букв, /about/ для about/index.html, /faq.html или /faq для faq.html. Если хостинг сам перенаправляет эту форму — добавь правило в _redirects, netlify.toml или vercel.json, и находка уйдёт.":
         "Write the link in the form the page has in the build: the same letter case, /about/ for about/index.html, /faq.html or /faq for faq.html. If the host redirects that form itself, add the rule to _redirects, netlify.toml or vercel.json and the finding goes away.",
+    "Пиши canonical в той форме, в какой страница лежит в сборке: /about/ для about/index.html, /about.html или /about для about.html — обычно это настройка trailingSlash генератора. Если хостинг отдаёт эту форму сам — cleanUrls или trailingSlash в vercel.json, правило в _redirects или netlify.toml, — находка уйдёт.":
+        "Write the canonical in the form the page has in the build: /about/ for about/index.html, /about.html or /about for about.html — usually this is the generator's trailingSlash setting. If the host serves that form itself — cleanUrls or trailingSlash in vercel.json, a rule in _redirects or netlify.toml — the finding goes away.",
     "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
         "The links point at pages the build does not have. Find where the "
         "template takes these addresses from, and either remove the link or "

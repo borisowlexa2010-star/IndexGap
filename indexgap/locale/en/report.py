@@ -156,6 +156,8 @@ MESSAGES = {
         "The page has no headings — there is no structure.",
     "Ссылка ведёт на страницу сборки, но в форме, которую хостинг не отдаёт: другой регистр букв, /about.html при about/index.html, /faq/ при faq.html. url_key сводит формы в одну страницу, живой сервер — нет, и отвечает 404.":
         "The link leads to a page of the build, but in a form the host does not serve: other letter case, /about.html for about/index.html, /faq/ for faq.html. The checks treat these forms as one page; the live server does not, and answers 404.",
+    "Canonical указывает на саму страницу, но в форме, которой раскладка файлов не отдаёт: /about/ при about.html, /a.html или /a при a/index.html. Живой сервер отвечает на этот адрес 404 или редиректом, а он же уходит в sitemap и hreflang.":
+        "The canonical points at the page itself, but in a form the file layout does not serve: /about/ for about.html, /a.html or /a for a/index.html. The live server answers that address with a 404 or a redirect, and the same address goes into the sitemap and hreflang.",
     "Ссылка ведёт на страницу, которой в сборке нет: на живом сайте это 404. Чаще всего шаблон ссылается на строку данных, которую фильтр не пропустил в генерацию. Убери ссылку из шаблона или верни страницу.":
         "The link points at a page the build does not have: a 404 on the live "
         "site. Most often the template links to a data row that a filter kept out "
