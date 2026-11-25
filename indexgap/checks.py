@@ -488,6 +488,18 @@ def trimmed_words(pages: list) -> dict:
     if not head and not tail:
         return words
     tail.reverse()
+    # Общее у девяти страниц из десяти — не всегда шапка и подвал. Когда один
+    # шаблон занимает 90% сайта, общим становится и его неизменный текст, и он
+    # отрезался как подвал: пятьдесят клонов теряли половину слов и выходили
+    # «похожими», а стоило добавить пять постов блога — «дублями».
+    if head:
+        head = _site_frame(head, [p for p in plain if words[p.url][:len(head)] == head],
+                           pages, False)
+    if tail:
+        tail = _site_frame(tail, [p for p in plain if words[p.url][-len(tail):] == tail],
+                           pages, True)
+    if not head and not tail:
+        return words
     for p in plain:
         w = words[p.url]
         if head and w[:len(head)] == head:
@@ -496,6 +508,67 @@ def trimmed_words(pages: list) -> dict:
             w = w[:-len(tail)]
         words[p.url] = w
     return words
+
+
+def _template_group(page) -> tuple:
+    """Каталог страницы внутри языка; главная языка — своя группа."""
+    _, lang, rest = _locale_split(page.url)
+    if not rest:
+        return lang, None
+    return lang, rest.rsplit("/", 1)[0] if "/" in rest else ""
+
+
+def _site_frame(run: list, bearers: list, pages: list, at_end: bool) -> list:
+    """
+    Часть общего начала или конца `run`, которая — обвязка сайта, а не текст
+    шаблона.
+
+    Обвязка сайта стоит и вне шаблона: на главной, «О нас», в другом разделе —
+    у страницы без `<main>` в тексте, у страницы с `<main>` вокруг него. Или
+    она размечена: `<header>`, `<footer>`, `<nav>`, `<aside>`, или состоит из
+    текстов ссылок. Что общее только у страниц одного каталога и ничем таким
+    не отмечено, — текст шаблона, и сравнивать страницы надо вместе с ним.
+    Если вне каталога шаблона страниц нет вовсе, сравнить не с чем, и общее
+    по-прежнему считается обвязкой: молчать безопаснее, чем ошибиться.
+    """
+    if not bearers:
+        return run
+    home = Counter(_template_group(p) for p in bearers).most_common(1)[0][0]
+    outside = [p for p in pages if _template_group(p) != home]
+    if not outside:
+        return run
+    seq = run[::-1] if at_end else run         # от края страницы внутрь
+    size = len(seq)
+    support = 0
+    for p in outside[:2000]:
+        own = tokenize(p.chrome) if p.chrome else p.words
+        n, limit = 0, min(size, len(own))
+        if at_end:
+            while n < limit and own[-1 - n] == seq[n]:
+                n += 1
+        else:
+            while n < limit and own[n] == seq[n]:
+                n += 1
+        support = max(support, n)
+        if support == size:
+            return run
+    # Дальше — только разметка и ссылки. Слово считается служебным, если оно
+    # такое у половины страниц шаблона: одна ссылка в тексте не решает.
+    sample = bearers[:20]
+    votes = Counter()
+    for p in sample:
+        votes.update(set(tokenize(getattr(p, "framed", "") or "")) | _anchor_words(p))
+    marked = {w for w, c in votes.items() if c * 2 >= len(sample)}
+    keep = support
+    hits = 0
+    for i, word in enumerate(seq[support:], 1):
+        if word in marked:
+            hits += 1
+            if hits >= 0.8 * i:
+                keep = support + i
+    if keep == size:
+        return run
+    return run[size - keep:] if at_end else run[:keep]
 
 
 def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> dict:
