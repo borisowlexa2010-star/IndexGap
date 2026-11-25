@@ -325,6 +325,11 @@ class Page:
     outline: list = None                           # заголовки без шаблона: вне <aside>, <footer>, <nav>
     slots: list = None                             # следы незаполненного шаблона: (вид, образец)
     alts: list = field(default_factory=list)       # непустые alt картинок: (текст, src)
+    # Цены микроданных и RDFa с машинным значением: (поле, значение). Только
+    # те, где значение задано атрибутом (`content`, `value`), а не текстом
+    # элемента: текст элемента и так виден. Только внутри `itemscope`,
+    # `typeof` или `vocab`: вне элемента-сущности поисковик их не читает.
+    microdata: list = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -731,6 +736,12 @@ def open_text(path: str):
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
+# Поля цены, которые сверяются с текстом. Рейтинги в микроданных почти всегда
+# стоят текстом элемента (`<span itemprop="ratingValue">4.8</span>`), а не
+# атрибутом; цена атрибутом — норма WooCommerce и тем Shopify.
+_MICRODATA_PRICES = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice"}
+
+
 class _Extractor(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -763,6 +774,8 @@ class _Extractor(HTMLParser):
         self.alternates_in_body = 0
         self._in_body = False
         self.alts = []
+        self.microdata = []        # (поле, значение) цен микроданных и RDFa
+        self._scope_stack = []     # глубины открытых itemscope / typeof / vocab
         self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0, "img_empty_alt": 0,
                        "script": 0, "p": 0}
         self.meta = {}             # author, datePublished и прочее из <meta>
@@ -850,6 +863,8 @@ class _Extractor(HTMLParser):
             self._chrome_stack.pop()
         while self._code_stack and self._code_stack[-1] > self._depth:
             self._code_stack.pop()
+        while self._scope_stack and self._scope_stack[-1] > self._depth:
+            self._scope_stack.pop()
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -861,6 +876,42 @@ class _Extractor(HTMLParser):
                 self._flush_paragraph()
                 while self._data_stack and self._data_stack[-1] > self._depth:
                     self._data_stack.pop()
+
+    def _microdata_price(self, tag: str, a: dict):
+        """
+        Цена предложения в микроданных или RDFa, если её значение задано
+        атрибутом: `<meta itemprop="price" content="999">`,
+        `<span property="schema:price" content="16.99">`. Значение атрибута
+        видно только поисковику — его и есть смысл сверять с текстом.
+        """
+        if "itemscope" in a:
+            return                 # `itemprop` на сущности — ссылка на объект, не число
+        if "content" in a:
+            value = a["content"]
+        elif tag in ("data", "meter") and "value" in a:
+            value = a["value"]
+        else:
+            return
+        value = (value or "").strip()
+        if not value:
+            return
+        names = (a.get("itemprop", "") + " " + a.get("property", "")).split()
+        for name in names:
+            key = name.lower()
+            if "/" in key:
+                # Полное имя свойства — только словаря schema.org.
+                if "schema.org/" not in key:
+                    continue
+                key = key.rsplit("/", 1)[-1]
+            elif ":" in key:
+                # `schema:price` — да, `og:price:amount` и `product:price` — нет.
+                prefix, _, key = key.partition(":")
+                if prefix != "schema":
+                    continue
+            field_name = _MICRODATA_PRICES.get(key)
+            if field_name:
+                self.microdata.append((field_name, value))
+                return
 
     def _imply_end(self, tag: str):
         """
@@ -932,6 +983,10 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and (tag in _CHROME_TAGS
                                      or a.get("role", "").lower() in _CHROME_ROLES):
             self._chrome_stack.append(self._depth)
+        if self._scope_stack and ("itemprop" in a or "property" in a):
+            self._microdata_price(tag, a)
+        if tag not in VOID_TAGS and ("itemscope" in a or "typeof" in a or "vocab" in a):
+            self._scope_stack.append(self._depth)
         # Два <br> подряд — граница абзаца: так верстают тексты, собранные
         # из CMS без <p>. Один <br> — перенос строки внутри абзаца.
         if tag == "br":
@@ -1853,6 +1908,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             paragraphs=ex.paragraphs,
             blocks=ex.blocks,
             alts=ex.alts,
+            microdata=ex.microdata,
         )
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что

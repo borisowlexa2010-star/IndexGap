@@ -66,6 +66,8 @@ MESSAGES = {
         "Pages of the group (the highest similarity to another page of the group):",
     "Бери числа разметки из того же поля строки данных, что и текст страницы. Если на странице цены нет — убери её и из разметки, а не наоборот.":
         "Take the markup's numbers from the same field of the data row as the page text. If the page shows no price, remove it from the markup too, not the other way round.",
+    "Подставляй в content у itemprop=\"price\" то же поле, что выводится текстом рядом. Если цены на странице нет — убери её и из разметки, а не наоборот.":
+        "Fill the content of itemprop=\"price\" from the same field that is printed as text beside it. If the page shows no price, remove it from the markup too, not the other way round.",
     "Пусть шаблон раздела выводит ссылки на все страницы раздела — списком, по алфавиту или с пагинацией. Ссылки только из sitemap и случайных блоков «похожие» не в счёт.":
         "Make the section template link to every page of the section — as a list, alphabetically or with pagination. Links only from the sitemap and stray \"related\" blocks do not count.",
     "Убери год из шаблона заголовка или подставляй текущий из данных сборки. Если страница — история того года, поставь ей дату публикации.":
