@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from functools import lru_cache
 from urllib.parse import urlsplit
 from collections import Counter, defaultdict
 from .subject import Said
@@ -120,6 +121,9 @@ _SCALE_AFTER = re.compile(
     _SP + r"?(?:([" + _CJK_SCALES + r"])|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
 
 
+# Подпись и название колонки повторяются на каждой странице: без кэша разбор
+# одних и тех же пяти заголовков стоил семь секунд на десять тысяч страниц.
+@lru_cache(maxsize=4096)
 def _scale_in(unit: str) -> tuple:
     """(слово, множитель) множителя внутри подписи единицы — или ("", 1).
 
@@ -807,6 +811,7 @@ def _numbers_of(value) -> list:
     return out
 
 
+@lru_cache(maxsize=4096)
 def _column_scale(column) -> int:
     """Множитель из названия колонки — «цена, млн», `price_k` — или 1."""
     words = re.sub(r"[_\W]+", " ", str(column or "")).strip()
@@ -992,6 +997,16 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
         else:
             pending.append(page)
     free = sorted(k for k, r in by_keyword.items() if id(r) not in claimed)
+    # Основы слов ключей считаются один раз, а не для каждой страницы, и
+    # кандидатами берутся только ключи с общим словом: при пороге выше нуля
+    # остальные всё равно не проходят. Иначе 4 тысячи страниц шли полторы минуты.
+    free_stems = [(k, _stems(k)) for k in free]
+    free_stems = [(k, t) for k, t in free_stems if t]
+    by_length = {}
+    for candidate_key, tokens in free_stems:
+        postings = by_length.setdefault(len(tokens), {})
+        for token in tokens:
+            postings.setdefault(token, []).append(candidate_key)
 
     for page in pending:
         row = None
@@ -1000,11 +1015,31 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
         # Без нормализации словоформ сопоставлялось 10 страниц из 100,
         # и сверка фактов молча выключалась на девяти десятых сайта.
         haystack_tokens = _stems(haystack)
+        if cfg["match_min_score"] > 0:
+            # Совпадения считаются по спискам ключей с общим словом, отдельно
+            # для каждой длины ключа: доля — совпавшие слова / длина.
+            best = None
+            for length, postings in by_length.items():
+                counts = Counter()
+                for token in haystack_tokens:
+                    counts.update(postings.get(token, ()))
+                if not counts:
+                    continue
+                top = max(counts.values())
+                if best is None or top * best[1] > best[0] * length \
+                        or (top * best[1] == best[0] * length and length > best[1]):
+                    best = (top, length, counts)
+            if best is not None and best[0] / best[1] >= cfg["match_min_score"]:
+                values = list(best[2].values())
+                if values.count(best[0]) > 1:
+                    ambiguous.append(page.url)
+                else:
+                    row = by_keyword[list(best[2])[values.index(best[0])]]
+            if row is not None:
+                matched[page.url] = row
+            continue
         scored = []
-        for candidate_key in free:
-            key_tokens = _stems(candidate_key)
-            if not key_tokens:
-                continue
+        for candidate_key, key_tokens in free_stems:
             scored.append((len(key_tokens & haystack_tokens) / len(key_tokens),
                            len(key_tokens), candidate_key))
         scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
@@ -1311,7 +1346,8 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         row = matched.get(page.url)
         if row is None:
             continue
-        allowed = _row_numbers(row) | constants
+        own = _row_numbers(row)
+        allowed = own | constants
         # Постоянные сайта сверяются без меры: срок гарантии законно стоит
         # и рядом с ценой.
         measures = {n: m for n, m in _row_measures(row, fact_pattern).items()
@@ -1350,7 +1386,6 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             return text
 
         unknown_strong = {n: u for n, u in strong.items() if not supported(n, u)}
-        own = _row_numbers(row)
         kinds = _row_kinds(row)
         derived = {n: how for n, u in unknown_strong.items()
                    for how in [_derivation(n, own, kinds, _kind(u))] if how}
@@ -1915,6 +1950,6 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
         "unmatched": sorted(p.url for p in pages if p.url not in matched) if rows else [],
         # В обратную сторону: строка без страницы — сбой генерации или фильтр.
         "rows_without_page": sorted(
-            str(r.get(keyword_field) or "") for r in (rows or [])
-            if id(r) not in {id(v) for v in matched.values()}),
+            str(r.get(keyword_field) or "") for matched_ids in [{id(v) for v in matched.values()}]
+            for r in (rows or []) if id(r) not in matched_ids),
     }

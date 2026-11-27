@@ -936,6 +936,27 @@ _DYNAMIC = re.compile(r"^\[{1,2}(\.\.\.)?[^\]]*\]{1,2}$")
 MAX_ROUTE_ENTRIES = 200_000
 
 
+def _route_leaf(name: str):
+    """Пустая строка для файла страницы каталога (`index.html`, `page.js`), иначе None.
+
+    `index.xml` (RSS Hugo), `default.css` или `page.png` каталог маршрутом не
+    делают: на хостинге без своей страницы он 404.
+    """
+    stem, ext = os.path.splitext(name)
+    ext = ext[1:].lower()
+    if stem in _ROUTE_LEAF and (not ext or ext not in ASSET_EXTS
+                                or ext in ("html", "htm", "xhtml", "js", "mjs", "cjs", "md")):
+        return ""
+    return None
+
+
+def _listdir(path: str) -> list:
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
+
+
 def build_routes(root: str) -> tuple:
     """
     Маршруты, которые сборка знает, даже если HTML у них нет.
@@ -951,17 +972,30 @@ def build_routes(root: str) -> tuple:
         return literal, dynamic
     seen = 0
     for current, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP]
         rel = os.path.relpath(current, root)
         base = [] if rel == "." else rel.replace(os.sep, "/").split("/")
+        # Каталог-симлинк обход не раскрывает, а сервер отдаёт его как обычный;
+        # пропущенный служебный (`venv/`) сервер тоже отдаёт. Если в нём есть
+        # страница каталога, это маршрут, а не 404.
+        for d in dirs:
+            target = os.path.join(current, d)
+            if (d in ALWAYS_SKIP or os.path.islink(target)) and any(
+                    _route_leaf(f) is not None for f in _listdir(target)
+                    if os.path.isfile(os.path.join(target, f))):
+                literal.add("/" + "/".join(base + [d]))
+        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP]
         # Каталог — маршрут, только если в нём есть страница или файл маршрута
         # (`index.html`, `page.js`): `/downloads/` с одним PDF внутри на живом
         # хостинге — 404. Сам файл — тоже адрес: `/download/setup.exe`.
-        names = ([[]] if not base else []) + [base + [os.path.splitext(f)[0]] for f in files]
+        # Битый симлинк os.walk кладёт в файлы: ссылка на него на хостинге —
+        # 404, а не маршрут.
+        files = [f for f in files if os.path.exists(os.path.join(current, f))]
+        names = ([[]] if not base else []) + [
+            base + ["" if _route_leaf(f) is not None else os.path.splitext(f)[0]] for f in files]
         literal.update("/" + "/".join(base + [f]) for f in files)
         seen += len(files) + 1
         for segs in names:
-            if segs and segs[-1] in _ROUTE_LEAF:
+            if segs and segs[-1] == "":
                 segs = segs[:-1]
             segs = [x for x in segs if not (x.startswith("(") and x.endswith(")"))
                     and not x.startswith("@")]
@@ -1335,13 +1369,23 @@ def _slug(url: str) -> str:
     return urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1].lower()
 
 
+_TARGET_SHINGLES = [None, None, None]   # слова, k, шинглы последней цели
+
+
 def _text_overlap(a, b, k: int = None) -> float:
     """Доля общих словесных n-грамм двух страниц (Jaccard)."""
     k = k or CONFIG["shingle_size"]
-    sa, sb = _shingles(list(a.words or ()), k), _shingles(list(b.words or ()), k)
+    # Шаблон, ведущий canonical всех страниц на главную, сравнивает с одной и
+    # той же целью тысячи страниц: её шинглы считаются один раз, а не на
+    # каждую страницу — иначе проверка была квадратичной.
+    words = b.words
+    if _TARGET_SHINGLES[0] is not words or _TARGET_SHINGLES[1] != k:
+        _TARGET_SHINGLES[:] = [words, k, _shingles(list(words or ()), k)]
+    sa, sb = _shingles(list(a.words or ()), k), _TARGET_SHINGLES[2]
     if not sa or not sb:
         return 0.0
-    return len(sa & sb) / len(sa | sb)
+    common = len(sa & sb)
+    return common / (len(sa) + len(sb) - common)
 
 
 def _a_variant_of(page, target) -> bool:

@@ -5,6 +5,12 @@ MESSAGES = {
     "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; не проверялись: {a1}":
         "{a0} HTML file(s) are template fragments with no <html> or <title>, not "
         "pages; not checked: {a1}",
+    "каталоги со служебными именами пропущены, страницы в них не проверялись: {a0}":
+        "directories with service names were skipped and their pages not checked: {a0}",
+    " и ещё {a0}": " and {a0} more",
+    "{a0} различаются только регистром букв: на macOS, Windows и хостинге без учёта регистра один файл затрёт другой":
+        "{a0} differ only in letter case: on macOS, Windows and case-insensitive hosts "
+        "one file overwrites the other",
     "каталог {a0}/ пропущен как сборочный. Если проверять нужно собранный сайт — передай его каталог явно.":
         "the {a0}/ directory was skipped as build output. If the built site is "
         "what you want checked, pass that directory explicitly.",
