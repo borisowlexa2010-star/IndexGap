@@ -97,6 +97,10 @@ MESSAGES = {
         "and almost no text in common. That is what a template does when it takes "
         "the address from the wrong variable; this page is asking to be dropped "
         "from the index",
+    "canonical указывает на {a0}, а это другая страница: текст почти тот же, но другие имя, title и H1 — копия шаблона под другой запрос. Страница просит убрать её из индекса":
+        "the canonical points to {a0}, which is a different page: nearly the same "
+        "text, but another name, title and H1 — a template copy built for another "
+        "query. This page is asking to be dropped from the index",
     " (на эту же страницу ведут canonical ещё {a0} стр.)":
         " ({a0} more page(s) point their canonical to the same page)",
     "копия страницы {a0}: canonical указывает на неё, и та в сборке открыта — так и должно быть, если это вариант (печатная версия, второй адрес)":

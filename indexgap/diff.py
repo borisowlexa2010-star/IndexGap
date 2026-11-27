@@ -509,6 +509,8 @@ def _why_closed(page) -> tuple:
     """Почему новая страница выпала из индекса: (код причины, подробность)."""
     if redirect_target(page):
         return "redirect", redirect_target(page)
+    if page.noindex and page.__dict__.get("_noindex_header"):
+        return "noindex-header", page.__dict__["_noindex_header"]
     if page.noindex:
         return "noindex", page.robots
     if is_draft(page):
@@ -670,6 +672,8 @@ def _reason_text(item: dict) -> str:
     reason, detail = item["reason"], item["detail"]
     if reason == "noindex":
         return tr("появился noindex: meta robots «{a0}»", a0=detail)
+    if reason == "noindex-header":
+        return tr("появился noindex: заголовок X-Robots-Tag ({a0})", a0=detail)
     if reason == "canonical":
         return tr("canonical теперь ведёт на {a0}", a0=detail)
     if reason == "draft":

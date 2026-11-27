@@ -4,6 +4,8 @@
 MESSAGES = {
     "страница выпала из индексируемых": "the page dropped out of the indexable set",
     "появился noindex: meta robots «{a0}»": "noindex appeared: meta robots “{a0}”",
+    "появился noindex: заголовок X-Robots-Tag ({a0})":
+        "noindex appeared: X-Robots-Tag header ({a0})",
     "canonical теперь ведёт на {a0}": "the canonical now points to {a0}",
     "страница стала черновиком": "the page became a draft",
     "страница стала заглушкой-редиректом на {a0}": "the page became a redirect stub to {a0}",

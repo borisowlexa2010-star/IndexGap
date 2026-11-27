@@ -118,6 +118,9 @@ SOURCE_MARKERS = ("package.json", "pyproject.toml", "Gemfile", "go.mod",
                   "Cargo.toml", "composer.json", "hugo.toml", "hugo.yaml",
                   "config.toml", "_config.yml", "astro.config.mjs", "Makefile",
                   ".git")
+# Репозиторий — ещё не генератор: сайт на чистом HTML с GitHub Pages лежит в
+# корне репозитория, и `/team/` при `team.html` там — 404.
+_REPO_ONLY_MARKERS = (".git", "Makefile")
 
 DEFAULT_EXTS = (".html", ".htm", ".md", ".markdown")
 
@@ -752,6 +755,8 @@ class _Extractor(HTMLParser):
         self.title = ""
         self.description = ""
         self.canonical = ""
+        self.canonicals = []       # все непустые canonical в <head>
+        self.canonicals_in_body = []   # canonical в <body> поисковик не читает
         self.robots = ""
         self.lang = ""
         self.base = ""
@@ -1107,7 +1112,10 @@ class _Extractor(HTMLParser):
             if name == "description":
                 self.description = content
             elif name in ("robots", "googlebot"):
-                self.robots = (self.robots + "," + content).strip(",")
+                # Поисковик читает только name=: `property="robots"` и
+                # `itemprop="robots"` — не директива.
+                if (a.get("name") or "").lower() == name:
+                    self.robots = (self.robots + "," + content).strip(",")
             elif name and content:
                 # author, article:published_time, article:modified_time и прочее:
                 # раньше они были невидимы, и на каждой HTML-странице выдавались
@@ -1116,7 +1124,12 @@ class _Extractor(HTMLParser):
         elif tag == "link":
             rel = a.get("rel", "").lower()
             if "canonical" in rel:
-                self.canonical = a.get("href", "").strip()
+                href = a.get("href", "").strip()
+                if self._in_body:
+                    self.canonicals_in_body.append(href)
+                elif href:
+                    self.canonicals.append(href)
+                    self.canonical = self.canonical or href
             # Альтернативы hreflang собираются здесь же, за тот же проход.
             # Раньше их читал отдельный разбор того же документа, и не один
             # раз: на каталоге в четыре тысячи страниц это было сорок секунд
@@ -2004,6 +2017,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             shown=ex.shown_text,
             microdata=ex.microdata,
         )
+        page.__dict__["_canonicals"] = (ex.canonicals, ex.canonicals_in_body)
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что
     # и ссылки. Относительный `<base href>` раньше оставлял canonical
@@ -2019,12 +2033,38 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         base_for_links = urljoin(location, base_href) if base_href else location
     except ValueError:
         base_for_links = location
+    in_head, in_body = page.__dict__.pop("_canonicals", ((), ()))
+    if len(in_head) > 1:
+        # Разные canonical на одной странице поисковик не учитывает вовсе:
+        # раньше молча побеждал последний.
+        written = set()
+        for href in in_head:
+            try:
+                written.add(urldefrag(urljoin(base_for_links, href))[0])
+            except ValueError:
+                written.add(href)
+        if len(written) > 1:
+            page.notes.append(tr("на странице {a0} разных canonical: {a1} — поисковик не учтёт "
+                                 "ни один. Оставь один в <head>",
+                                 a0=len(written), a1=", ".join(sorted(written)[:3])))
+            page.canonical = ""
+    if in_body and [h for h in in_body if h]:
+        page.notes.append(tr("canonical в <body> ({a0}) поисковик не читает — перенеси его "
+                             "в <head>", a0=next(h for h in in_body if h)))
     if page.canonical:
         # Записан ли canonical полным адресом. Относительный достраивается от
         # --site, и его схема и хост — это --site, а не то, как пишет сам сайт.
         try:
             written = urlsplit(page.canonical)
             page.__dict__["_canonical_absolute"] = bool(written.scheme and written.netloc)
+            # `//www.host/a/` (или относительный при `<base href="//www.host/">`)
+            # называет хост явно, а схему берёт у запроса: сверяется только хост.
+            based = urlsplit(base_href) if base_href and not written.netloc else None
+            if based is not None and based.netloc:
+                page.__dict__["_canonical_absolute"] = bool(based.scheme)
+            page.__dict__["_canonical_host_only"] = bool(
+                (written.netloc and not written.scheme)
+                or (based is not None and based.netloc and not based.scheme))
         except ValueError:
             pass
         try:
@@ -2048,6 +2088,12 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             own_path = re.sub(r"/{2,}", "/", own.path or "/")
             own_path = quote(unicodedata.normalize("NFC", own_path),
                              safe="/~-._!$&'()*+,;=:@%")
+            # `ko%CC%88ln` — NFD в %-кодах: `url_key` сводит его к файлу
+            # `köln` (NFC), но хостинг, который сравнивает байты, ответит 404.
+            # Адресом остаётся форма файла.
+            decoded = unquote(own_path)
+            if unicodedata.normalize("NFC", decoded) != decoded:
+                own_path = urlsplit(page.url).path
             if own_path != urlsplit(page.url).path:
                 site_parts = urlsplit(page.url)
                 page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own_path, "", ""))
@@ -2202,8 +2248,18 @@ _TOML_FOR = re.compile(r"""^\s*for\s*=\s*["']([^"']+)["']""", re.M)
 # Ключ — в начале строки (`[headers.values]`) или во встроенной таблице
 # (`values = { "X-Robots-Tag" = "noindex" }`). Строки-комментарии снимаются
 # до поиска: `# X-Robots-Tag = "noindex"` закрывал весь сайт.
-_TOML_TAG = re.compile(r"""(?:^|[{,])\s*["']?X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""",
+# Ключ `values.X-Robots-Tag` прямо в `[[headers]]` и литерал в тройных
+# кавычках — тот же TOML.
+_TOML_TAG = re.compile(r"""(?:^|[{,])\s*(?:values\s*\.\s*)?["']?X-Robots-Tag["']?\s*=\s*"""
+                       r"""["']{1,3}([^"']+)["']""",
                        re.I | re.M)
+_TOML_HEADERS = re.compile(r"^\s*\[\[\s*headers\s*\]\]", re.M)
+
+
+# Директивы со значением через двоеточие: `max-image-preview:large` — это не
+# имя бота, и директивы после неё раньше приписывались «боту max-image-preview».
+_VALUED_DIRECTIVES = ("max-snippet", "max-image-preview", "max-video-preview",
+                      "unavailable_after")
 
 
 def _closes(value: str) -> bool:
@@ -2214,6 +2270,8 @@ def _closes(value: str) -> bool:
     """
     agent = ""
     for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.partition(":")[0] in _VALUED_DIRECTIVES:
+            continue
         if token.endswith(":") and len(token) > 1:
             agent = token[:-1]
             continue
@@ -2229,6 +2287,9 @@ def _hides_snippet(value: str) -> bool:
     agent = ""
     tokens = re.split(r"[,\s]+", (value or "").lower())
     for i, token in enumerate(tokens):
+        if (token.partition(":")[0] in _VALUED_DIRECTIVES
+                and not token.startswith("max-snippet")):
+            continue
         if token.endswith(":") and len(token) > 1 and token != "max-snippet:":
             agent = token[:-1]
             continue
@@ -2245,9 +2306,10 @@ def _hides_snippet(value: str) -> bool:
 
 
 def _same_host(a: str, b: str) -> bool:
+    # `www.` здесь не снимается: правило хостинга для www-зеркала (часто —
+    # его noindex) к голому домену не относится, это разные хосты запроса.
     a, b = (a or "").lower().split(":")[0], (b or "").lower().split(":")[0]
-    strip = lambda h: h[4:] if h.startswith("www.") else h
-    return bool(a) and strip(a) == strip(b)
+    return bool(a) and a.rstrip(".") == b.rstrip(".")
 
 
 def _vercel_applies(entry: dict, host: str) -> bool:
@@ -2325,7 +2387,7 @@ def header_noindex_rules(root: str, host: str = "", test=None) -> list:
         except SourceError:
             text = ""
         text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("#"))
-        for block in text.split("[[headers]]")[1:]:
+        for block in _TOML_HEADERS.split(text)[1:]:
             block = block.split("[[", 1)[0]
             where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)
             if where and tag and test(tag.group(1)):
@@ -2372,13 +2434,16 @@ def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -
         path = urlsplit(page.url).path
         if base and path.startswith(base + "/"):
             path = path[len(base):]
-        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        # Правило пишут и буквами (`/город/*`), и %-кодами: сверяются обе формы.
+        forms = {path, unicodedata.normalize("NFC", unquote(path))}
+        matches = lambda regex: any(regex.match(p) or regex.match(p.rstrip("/")) for p in forms)
         reopened = {source for regex, source, _, closes in rules
                     if not closes and matches(regex)}
         for regex, source, pattern, closes in rules:
             if closes and source not in reopened and matches(regex):
                 if not page.noindex:
                     page.robots = (page.robots + ",noindex").strip(",")
+                    page.__dict__["_noindex_header"] = "%s, %s" % (source, pattern)
                 hits[(source, pattern)] += 1
                 break
     for (source, pattern), n in sorted(hits.items()):
@@ -2412,6 +2477,8 @@ def _unfollows(value: str) -> bool:
     """`nofollow` или `none` в X-Robots-Tag — для всех или для Google."""
     agent = ""
     for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.partition(":")[0] in _VALUED_DIRECTIVES:
+            continue
         if token.endswith(":") and len(token) > 1:
             agent = token[:-1]
             continue
@@ -2431,7 +2498,9 @@ def _apply_directive(pages: list, root: str, base_url: str, test, directive: str
     base = urlsplit(base_url).path.rstrip("/")
     for page in pages:
         path = _header_path(page, base)
-        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        # Правило пишут и буквами (`/город/*`), и %-кодами: сверяются обе формы.
+        forms = {path, unicodedata.normalize("NFC", unquote(path))}
+        matches = lambda regex: any(regex.match(p) or regex.match(p.rstrip("/")) for p in forms)
         reopened = {source for regex, source, _, on in rules if not on and matches(regex)}
         if any(on and source not in reopened and matches(regex)
                for regex, source, _, on in rules) and not already(page):
@@ -2462,6 +2531,9 @@ def host_redirect_rules(root: str) -> tuple:
         # Это мягкий 404, и неверная форма ссылки остаётся находкой.
         if regex and str(status).startswith("200") and regex.match("/indexgap-probe/any/depth"):
             return
+        # Правило с ответом 404/410 путь не отдаёт, а закрывает.
+        if str(status)[:1] in ("4", "5"):
+            return
         if regex:
             rules.append(regex)
 
@@ -2473,7 +2545,9 @@ def host_redirect_rules(root: str) -> tuple:
 
     for line in text_of(os.path.join(root, "_redirects")).splitlines():
         fields = line.split("#", 1)[0].split()
-        if len(fields) >= 2:
+        # Условное правило (`Country=de`, `Role=admin`, параметр запроса)
+        # срабатывает не на каждый запрос: путь им не отдаётся.
+        if len(fields) >= 2 and not any("=" in f for f in fields[1:]):
             status = next((f for f in fields[1:] if re.match(r"^\d{3}!?$", f)), "301")
             add(fields[0], status)
     near = [root, os.path.dirname(os.path.abspath(root))]
@@ -2484,7 +2558,8 @@ def host_redirect_rules(root: str) -> tuple:
             for block in text.split("[[redirects]]")[1:]:
                 block = block.split("[[", 1)[0]
                 found = _TOML_FROM.search(block)
-                if found:
+                if found and not re.search(r"^\s*conditions\s*=|^\s*\[redirects\.conditions\]",
+                                           block, re.M):
                     status = _TOML_STATUS.search(block)
                     add(found.group(1), status.group(1) if status else "301")
             break
@@ -2500,7 +2575,8 @@ def host_redirect_rules(root: str) -> tuple:
             rewrites_forms = bool(data.get("cleanUrls")) or isinstance(data.get("trailingSlash"), bool)
             for section in ("redirects", "rewrites"):
                 for entry in data.get(section) or ():
-                    if isinstance(entry, dict) and isinstance(entry.get("source"), str):
+                    if (isinstance(entry, dict) and isinstance(entry.get("source"), str)
+                            and not entry.get("has")):
                         add(entry["source"], "200" if section == "rewrites" else "301")
         break
     return rules, rewrites_forms
@@ -2599,7 +2675,8 @@ def _host_serves_any_form(root: str) -> tuple:
     if (re.search(r"/\.next/server/(app|pages)$", real)
             or os.path.isfile(os.path.join(up, "routes-manifest.json"))
             or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
-            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)):
+            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS
+                   if m not in _REPO_ONLY_MARKERS)):
         return True, True
     near = [root, os.path.dirname(os.path.abspath(root))]
     for folder in near:
@@ -2653,8 +2730,11 @@ def _mark_canonical_forms(pages: list, root: str, base_url: str,
         name = os.path.basename(page.path).lower()
         last = local.rstrip("/").rsplit("/", 1)[-1].lower()
         if name.startswith("index."):
-            # `a/index.html`: отдаётся по /a/ и /a/index.html.
-            if local.endswith("/") or last.startswith("index."):
+            # `a/index.html`: отдаётся по /a/ и /a/index.html — но не по
+            # /a/index.htm и не по /a/index.md.
+            if local.endswith("/") or last == name:
+                continue
+            if last.startswith("index.") and not _EXT_RE.search(last):
                 continue
             form = "file" if _EXT_RE.search(last) else "bare"
             if form == "bare" and bare_ok:
@@ -2665,6 +2745,8 @@ def _mark_canonical_forms(pages: list, root: str, base_url: str,
                 form = "slash"
             elif last.startswith("index.") and _EXT_RE.search(last):
                 form = "index"
+            elif _EXT_RE.search(last) and last != name:
+                form = "file"             # /about.htm при about.html
             else:
                 continue
         if any(regex.match(local) for regex in redirects):
@@ -2883,26 +2965,46 @@ def _settle_canonical_origins(pages: list, base_url: str, problems: list) -> Non
     каждую страницу находкой — о нём одна заметка. Голосуют только canonical,
     записанные полным адресом: относительный достроен от --site и о сайте
     ничего не говорит. Если большинства нет, мерило — --site.
+
+    Относительный canonical на себя всё же голос: браузер достраивает его от
+    того адреса, по которому страница отдана. Без этого два canonical на
+    `http://` из восьми страниц перевешивали сайт. `//www.host/a/` сверяется
+    только по хосту: схему он берёт у запроса.
     """
-    votes = []
+    votes, neutral, host_only = [], 0, []
     for page in pages:
-        if (page.canonical and page.__dict__.get("_canonical_absolute")
-                and url_key(page.canonical) == page.key):
+        if not page.canonical or url_key(page.canonical) != page.key:
+            continue
+        if page.__dict__.get("_canonical_host_only"):
+            host_only.append(page)
+        elif page.__dict__.get("_canonical_absolute"):
             origin = _origin(page.canonical)
             if origin:
                 votes.append((page, origin))
-    if not votes:
-        return
+        else:
+            neutral += 1
     site = _origin(base_url)
+    if not votes and not host_only:
+        return
     counts = Counter(origin for _, origin in votes)
+    if site is not None and neutral:
+        counts[site] += neutral
+    if not counts and site is not None:
+        counts[site] = 0
+    if not counts:
+        return
     top, count = max(counts.items(),
                      key=lambda item: (item[1], item[0] == site, item[0][0] == "https"))
-    total = len(votes)
+    total = len(votes) + (neutral if site is not None else 0)
     home = top if count * 2 > total else site
     if home is None:
         return
     for page, origin in votes:
         if origin != home:
+            page.__dict__["_canonical_origin"] = "%s://%s" % home
+    for page in host_only:
+        origin = _origin(page.canonical)
+        if origin and origin[1] != home[1]:
             page.__dict__["_canonical_origin"] = "%s://%s" % home
     if site is not None and home != site:
         problems.append(tr(
