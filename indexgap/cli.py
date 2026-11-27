@@ -303,7 +303,10 @@ def _describe_project(project: dict, rows: list) -> None:
         parts.append(tr("единиц измерения в датасете нет — сверка идёт по всем числам"))
     if project.get("_path"):
         # Одно имя не говорило, какой из indexgap.json взят: путь от рабочего каталога.
-        shown = os.path.relpath(project['_path'])
+        try:
+            shown = os.path.relpath(project['_path'])
+        except ValueError:                 # другой диск Windows
+            shown = os.path.abspath(project['_path'])
         if shown.startswith(".." + os.sep + ".." + os.sep):
             shown = os.path.abspath(project['_path'])
         parts.append(tr("конфиг: {a0}", a0=shown))
@@ -2045,6 +2048,11 @@ def cmd_plan(args):
     return 0
 
 
+def _posix(path: str) -> str:
+    """Путь для печатной команды: с `/` вместо `\\` в Windows."""
+    return path.replace(os.sep, "/") if os.sep != "/" else path
+
+
 def cmd_init(args):
     """Установка в проект: скиллы для агента и конфиг с тем, что отличает проект."""
     result = install.run(args.dir, site=args.site, content=args.content,
@@ -2094,13 +2102,15 @@ def cmd_init(args):
 
     print(tr("\nСледующая команда:"))
     # Каталог с пробелом (`./my pages`) без кавычек давал «unrecognized arguments».
-    dataset = f" --dataset {shlex.quote(d['dataset'])}" if d["dataset"] else ""
-    print(f"  indexgap check {shlex.quote(d['content'])} --site {shlex.quote(d['site'].rstrip('/'))}{dataset}")
+    # Путь в команде — с прямыми слэшами: так его понимают и POSIX-оболочки,
+    # и PowerShell, а `.\\my pages` в одинарных кавычках — только Windows.
+    dataset = f" --dataset {shlex.quote(_posix(d['dataset']))}" if d["dataset"] else ""
+    print(f"  indexgap check {shlex.quote(_posix(d['content']))} --site {shlex.quote(d['site'].rstrip('/'))}{dataset}")
     if args.key:
         key = install.new_indexnow_key()
         print(tr("\nНовый ключ IndexNow для ЭТОГО проекта: {a0}", a0=key))
         print(tr("  Он привязан к домену файлом в корне сайта. Ключ от другого проекта здесь не сработает — протокол ответит 403."))
-        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=shlex.quote(d['content']), a1=shlex.quote(d['site'].rstrip('/')), a2=key))
+        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=shlex.quote(_posix(d['content'])), a1=shlex.quote(d['site'].rstrip('/')), a2=key))
     return 0
 
 

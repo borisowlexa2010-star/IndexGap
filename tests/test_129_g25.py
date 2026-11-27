@@ -196,7 +196,7 @@ class Shards(Temp):
             self.assertFalse(os.path.exists(os.path.join(self.dir, "site", "sitemap.xml")))
             result = publish.build_sitemap(pages, os.path.join(self.dir, "site"), SITE,
                                            manifest={}, force=True)
-            self.assertIn(foreign, result["files"])
+            self.assertIn(os.path.normpath(foreign), [os.path.normpath(f) for f in result["files"]])
             # Свои шарды следующего прогона заменяются без --force.
             publish.build_sitemap(pages, os.path.join(self.dir, "site"), SITE,
                                   manifest=result["manifest"], force=False)

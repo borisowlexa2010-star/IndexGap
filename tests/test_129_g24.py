@@ -146,7 +146,8 @@ class Routes(Site):
         self.write("index.html", html("Home", a("/rent/berlin/", "/latest/")))
         self.write("rent/berlin/index.html", html("Berlin", a("/")))
         try:
-            os.symlink("rent/berlin", os.path.join(self.dir, "latest"))
+            os.symlink(os.path.join("rent", "berlin"), os.path.join(self.dir, "latest"),
+                       target_is_directory=True)
         except (OSError, NotImplementedError):
             self.skipTest("no symlinks here")
         self.assertNotIn("/latest", self.broken(self.check()))

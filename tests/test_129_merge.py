@@ -65,5 +65,21 @@ class UnderscoreCode(unittest.TestCase):
         self.assertFalse(hreflang._same_language("", "de"))
 
 
+
+class OtherDrive(unittest.TestCase):
+    def test_config_on_another_windows_drive_does_not_crash(self):
+        import contextlib
+        import io
+        from unittest import mock
+        from indexgap import cli
+
+        def relpath(*_a, **_k):
+            raise ValueError("path is on mount 'C:', start on mount 'D:'")
+        buf = io.StringIO()
+        with mock.patch.object(cli.os.path, "relpath", relpath), contextlib.redirect_stdout(buf):
+            cli._describe_project({"_path": "/elsewhere/indexgap.json", "lang": "en"}, [])
+        self.assertIn("indexgap.json", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
