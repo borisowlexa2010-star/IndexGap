@@ -1527,7 +1527,7 @@ CODE_WEIGHT = {
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
     "hreflang-no-self": 5, "hreflang-no-return": 6, "hreflang-in-body": 6,
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
-    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
+    "hreflang-lang-mismatch": 15, "hreflang-conflict": 14, "hreflang-relative": 13, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
     "jsonld-mismatch": 9, "microdata-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,

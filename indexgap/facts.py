@@ -40,6 +40,14 @@ _CURRENCY = {
     "chf": "CHF", "try": "TRY", "tl": "TRY", "₺": "TRY", "lira": "TRY", "ليرة": "TRY",
     "kzt": "KZT", "тенге": "KZT", "uah": "UAH", "грн": "UAH", "₴": "UAH",
     "гривень": "UAH",
+    # Коды, которые content.CURRENCY_CODES читает ценой: без них цена в SEK
+    # находилась, но не сравнивалась.
+    "sek": "SEK", "nok": "NOK", "dkk": "DKK", "nzd": "NZD", "qar": "QAR",
+    # Доллар по-немецки, по-турецки, по-польски, по-чешски, по-вьетнамски,
+    # по-японски и по-китайски.
+    "us-dollar": "USD", "us-dollars": "USD", "doları": "USD", "dolarları": "USD",
+    "dolarów": "USD", "dolary": "USD", "dolarů": "USD", "đô": "USD",
+    "米ドル": "USD", "美金": "USD",
     # Доллары по-персидски, на урду, бенгали, хинди, тайском, иврите, украинском,
     # японском, китайском и корейском.
     "دلار": "USD", "ڈالر": "USD", "ডলার": "USD", "डॉलर": "USD", "डालर": "USD",
@@ -89,14 +97,44 @@ def _kind(unit: str) -> str:
     return ""
 
 
-def facts_of(page) -> dict:
-    """{вид: {число: как написано}} — цены и проценты страницы."""
+def _facts_in(text: str, out: dict) -> None:
+    """Добавляет в out цены и проценты текста."""
     from .content import _numbers_in, _shown
-    out = {}
-    for number, unit in _numbers_in(page.text or "", None).items():
+    for number, unit in _numbers_in(text, None).items():
         kind = _kind(unit)
         if kind:
-            out.setdefault(kind, {})[number] = _shown(number, unit)
+            out.setdefault(kind, {}).setdefault(number, _shown(number, unit))
+    # _numbers_in хранит одну единицу на число: «$20 и 20%» или «$35 или €35»
+    # теряли цену, и её расхождение не сравнивалось. Каждая валюта читается
+    # ещё раз отдельно — остальные цены и проценты стёрты из текста.
+    from . import content
+    prepared = content._cjk_compounds(content._same_signs(text))
+    spans = [(m.start(), m.end(), _kind(m.group(1))) for m in content.PREFIX_PRICE.finditer(prepared)]
+    spans += [(m.start(), m.end(), _kind(m.group(0)[len(m.group(1)):]))
+              for m in content.SUFFIX_PRICE.finditer(prepared)]
+    for pattern in (content.PERCENT, content.PERCENT_WORD, content.PERCENT_BEFORE):
+        spans += [(m.start(), m.end(), "%") for m in pattern.finditer(prepared)]
+    kinds = {kind for _, _, kind in spans if kind}
+    if len(kinds) < 2:
+        return
+    for kind in sorted(kinds - {"%"}):
+        chars = list(prepared)
+        for start, end, other in spans:
+            if other != kind:
+                chars[start:end] = " " * (end - start)
+        for number, unit in _numbers_in("".join(chars), None).items():
+            if _kind(unit) == kind:
+                out.setdefault(kind, {}).setdefault(number, _shown(number, unit))
+
+
+def facts_of(page) -> dict:
+    """{вид: {число: как написано}} — цены и проценты страницы, её title и description."""
+    out = {}
+    # title и description видны в выдаче раньше текста: цена, разошедшаяся
+    # только в них, — тоже расхождение.
+    for text in (page.text, getattr(page, "title", ""), getattr(page, "description", "")):
+        if text:
+            _facts_in(text, out)
     return out
 
 
@@ -183,16 +221,36 @@ def _converted(added: list, missing: list) -> bool:
     число далеко от единицы. Опечатка (`35` → `53`) или старая цена так
     не выглядят: они меняют одно число и ненамного.
     """
-    if len(added) != len(missing):
+    if not added or len(added) > len(missing):
         return False
+    if len(added) < len(missing):
+        # Пересчёт, из которого перевод выбросил одну-две цены: остальные
+        # всё равно отличаются в одно и то же число раз.
+        if len(added) < 2 or len(missing) - len(added) > 2:
+            return False
+        from itertools import combinations
+        return any(_converted(added, list(part)) for part in combinations(missing, len(added)))
     new = sorted(_value(n) for n in added)
     old = sorted(_value(n) for n in missing)
     if not all(new) or not all(old):
         return False
     ratios = [a / b for a, b in zip(new, old)]
     low, high = min(ratios), max(ratios)
+    # Одна цена, выросшая или упавшая ровно в десять раз, — лишний или
+    # потерянный ноль (`$35` → `$350`), а не курс валюты.
+    if len(ratios) == 1 and (abs(low - 10) < 1e-9 or abs(low * 10 - 1) < 1e-9):
+        return False
     far = low >= CONVERSION_MIN_RATIO or high <= 1 / CONVERSION_MIN_RATIO
     return far and high / low <= 1 + _CONVERSION_SPREAD
+
+
+def _dearer_dollar(kind: str, added_shown: list, added: list, missing: list) -> bool:
+    """
+    Перевод пишет доллары явно (`350 USD`), и сумма выросла. Пересчётом это
+    быть не может: доллара под знаком `$` дороже американского не бывает.
+    """
+    return (kind == "USD" and all(_explicit(shown) for shown in added_shown)
+            and sum(_value(n) for n in added) > sum(_value(n) for n in missing))
 
 
 def drift(pages: list) -> list:
@@ -225,7 +283,8 @@ def drift(pages: list) -> list:
                 missing = sorted(set(theirs) - set(ours))
                 if added and missing and not (
                         _may_convert(kind, [ours[n] for n in added], [theirs[n] for n in missing])
-                        and _converted(added, missing)):
+                        and _converted(added, missing)
+                        and not _dearer_dollar(kind, [ours[n] for n in added], added, missing)):
                     issues.append(("warning", page.url, "fact-drift", tr(
                         "в переводе {a0}, а в оригинале ({a1}) {a2} — цифра разошлась при "
                         "переводе или осталась старой",
