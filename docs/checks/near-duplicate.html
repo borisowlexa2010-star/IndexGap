@@ -95,7 +95,7 @@ font-size:.85rem;color:var(--ink3)}
   <span class="tag">near-duplicate</span>
   <span class="tag acc">Content quality at scale</span>
 </div>
-<p class="lede">Near-duplicates are a group problem: a single page out of a cluster of twenty cannot be fixed alone. When the pages target different queries (one per city or model), the fix is each page's own data, not a canonical: a canonical would hide the pages the site was built for. When the query is the same, keep one page and redirect the rest to it.</p>
+<p class="lede">Near-duplicates are a group problem: a single page out of a cluster of twenty cannot be fixed alone. When the pages target different queries (one per city or model), the fix is each page's own data, not a canonical: a canonical would hide the pages the site was built for. When the query is the same, keep one page and redirect the rest to it. In a group of thirty or more near-duplicates a new page is compared with one page of the group rather than with every member, so large clone groups cost linear time. The finding then names the group: the JSON keeps its first ten addresses in `subject` and the full count in `subject_total`, and lists the group once in `duplicate_groups` (id, size, members) instead of every pair in `duplicates`.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>

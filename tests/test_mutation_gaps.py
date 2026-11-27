@@ -487,15 +487,20 @@ class TestLshPath(unittest.TestCase):
         self.assertTrue(set(key(lsh)) <= set(key(exact)))
         self.assertFalse([a for a, b, _ in lsh["pairs"] if a is b])
 
-    def test_a_full_bucket_is_compared_pairwise_and_a_bigger_one_against_a_sample(self):
+    def test_a_full_bucket_and_a_bigger_one_are_both_compared_against_a_sample(self):
+        # С 1.30 и корзина в 200 клонов не перебирается попарно: группа
+        # почти-дублей сравнивается с образцом, и пар — линейно, а не 19 900.
         body = " ".join(words("одинаково", 40))
         full = [page(f"{SITE}/p{i:03}/", body) for i in range(200)]
         result = checks.find_near_duplicates(full, {"exact_below": 50})
-        self.assertEqual(len(result["pairs"]), 200 * 199 // 2)
-        self.assertEqual(result["notes"], [])
+        n = checks.GROUP_SAMPLE
+        self.assertLessEqual(len(result["pairs"]), n * (n - 1) // 2 + 200)
+        self.assertEqual(len(checks.duplicate_groups(result["pairs"])), 1)
+        self.assertIn("сравнивались с образцом", result["notes"][0])
         bigger = full + [page(f"{SITE}/p200/", body)]
         result = checks.find_near_duplicates(bigger, {"exact_below": 50})
-        self.assertEqual(len(result["pairs"]), 200)
+        self.assertLessEqual(len(result["pairs"]), n * (n - 1) // 2 + 201)
+        self.assertEqual([len(g) for g in checks.duplicate_groups(result["pairs"])], [201])
         self.assertIn("сравнивались с образцом", result["notes"][0])
 
 
