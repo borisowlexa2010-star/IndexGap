@@ -1079,12 +1079,22 @@ class _Extractor(HTMLParser):
                 self.blocks["table"] += 1
             elif tag == "p":
                 self.blocks["p"] += 1
-            elif tag == "img":
+        # Картинки — и после закрытого блока: одна врезка <article> (отзыв,
+        # промо) прятала от проверки alt всё, что шло за ней. Шапка, подвал,
+        # меню и боковые колонки — по-прежнему нет.
+        if tag == "img" and (self._in_main or not self._saw_main
+                             or not (self._frame_stack or self._aside_stack)):
                 self.blocks["img"] += 1
                 # Пустой alt="" — по WCAG пометка декоративной картинки, а не
                 # её отсутствие. Раньше они считались одним и тем же.
-                if "alt" not in a:
+                # role="presentation"/"none" и aria-hidden axe тоже считает
+                # декоративными.
+                if "alt" not in a and not (
+                        a.get("role", "").strip().lower() in ("presentation", "none")
+                        or a.get("aria-hidden", "").strip().lower() == "true"):
                     self.blocks["img_no_alt"] += 1
+                elif "alt" not in a:
+                    self.blocks["img_empty_alt"] += 1
                 elif not a["alt"].strip():
                     self.blocks["img_empty_alt"] += 1
                 else:
@@ -1105,7 +1115,11 @@ class _Extractor(HTMLParser):
             name = (a.get("name") or a.get("property") or a.get("itemprop") or "").lower()
             content = (a.get("content") or "").strip()
             if name == "description":
-                self.description = content
+                # itemprop="description" в теле — описание товара или отзыва
+                # из микроразметки, а не страницы. Второй пустой тег (тема и
+                # SEO-плагин выводят по одному) заполненный не стирает.
+                if (a.get("name") or a.get("property")) and content:
+                    self.description = content
             elif name in ("robots", "googlebot"):
                 self.robots = (self.robots + "," + content).strip(",")
             elif name and content:
@@ -1943,6 +1957,10 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         # там отсутствие title — находка.
         if not m and not toml and md_headings and md_headings[0][0] == 1:
             meta = {"title": md_headings[0][1]}
+        # Картинки — вне блоков кода (там примеры синтаксиса), со ссылочной
+        # формой `![alt][ref]` и с сырым <img> без alt.
+        shown = _strip_fences(body)
+        raw_imgs = re.findall(r"<img\b[^>]*>", shown, re.I)
         page = Page(
             path=path, url=url,
             title=_clean(meta.get("title", "")),
@@ -1958,16 +1976,18 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             encoding=encoding,
             notes=notes,
             paragraphs=_md_paragraphs(body),
-            alts=[(m.group(1).strip(), m.group(2)) for m in
-                  re.finditer(r"!\[([^\[\]\n]{0,1000})\]\(([^)\s]*)", body) if m.group(1).strip()],
+            alts=[(m.group(1).strip(), m.group(2) or "") for m in
+                  re.finditer(r"!\[([^\[\]\n]{0,1000})\](?:\(([^)\s]*)|\[[^\]\n]*\])", shown)
+                  if m.group(1).strip()],
             slots=find_slots(text, markdown=True),
             blocks={"li": _md_list_items(_strip_fences(body)),
                     "table": len(re.findall(r"^[ \t>]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
-                    "img": len(re.findall(r"!\[[^\[\]\n]{0,1000}\]\(", body)),
-                    "img_no_alt": 0,
+                    "img": len(re.findall(r"!\[[^\[\]\n]{0,1000}\][(\[]", shown)) + len(raw_imgs),
+                    "img_no_alt": sum(1 for t in raw_imgs if not re.search(
+                        r"\salt(?:\s*=|[\s/>])", t, re.I)),
                     # В Markdown alt есть всегда: `![](x.png)` — пустой, а не
                     # отсутствующий.
-                    "img_empty_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
+                    "img_empty_alt": len(re.findall(r"!\[[ \t]*\][(\[]", shown)),
                     "script": 0, "p": 0},
         )
     else:

@@ -544,7 +544,20 @@ ALT_FILLERS = {
     "รูปภาพ", "รูป", "ภาพ", "hình ảnh", "ảnh", "gambar", "foto produk",
     "图片", "图像", "照片", "圖片", "画像", "写真", "イメージ", "이미지", "사진",
     "εικόνα", "φωτογραφία",
+    "placeholder image", "image placeholder", "default image", "product image",
+    "featured image", "hero image", "banner image", "thumbnail image", "untitled design",
+    # Невыведенная переменная шаблона.
+    "undefined", "null", "none", "[object object]",
 }
+# Заготовка шаблона, стоковое или загрузочное имя файла, скриншот с датой.
+_ALT_TEMPLATE = re.compile(
+    r"\{\{.*?\}\}|\{%.*?%\}|\$\{\w+\}|^\{\s*[\w.]+\s*\}$|^%\w+%$|"
+    r"^(?:shutterstock|adobestock|gettyimages|istock(?:photo)?|depositphotos|dreamstime|"
+    r"pexels[\s_\-]*photo|unsplash)[\s_\-]*\d{3,}|"
+    r"^(?:screenshot|screen shot|снимок экрана)[\s_\-]+\d{4}-\d{2}-\d{2}|"
+    r"^untitled(?: design)? \(\d+\)$|"
+    r"^\S+(?: \(\d+\))?\.(?:jpe?g|png|gif|webp|avif|svg|bmp|tiff?|heic)\?\S*$|"
+    r"^\S+ \(\d+\)\.(?:jpe?g|png|gif|webp|avif|svg|bmp|tiff?|heic)$", re.I)
 # Имя файла вместо описания: `IMG_2034`, `DSC00123`, `PXL_20240101_1234`,
 # `photo-1.webp`, хеш загрузчика. Не «iPhone 15 Pro 256GB»: число в alt —
 # не признак файла.
@@ -557,14 +570,22 @@ _ALT_FILE = re.compile(
 def _alt_is_filler(alt: str) -> bool:
     text = re.sub(r"[\s\u3000]+", " ", alt.strip().strip(".:-—_").lower())
     if not text:
-        return False
-    if text in ALT_FILLERS:
+        return bool(alt.strip())           # «-», «...»: знак вместо описания
+    if text in ALT_FILLERS or _ALT_TEMPLATE.search(text):
         return True
     # «image 3», «фото 12», «画像1» — заглушка с номером.
     bare = re.sub(r"[\s#№\-_]*\d+$", "", text)
     if bare != text and bare in ALT_FILLERS:
         return True
     return bool(_ALT_FILE.match(text))
+
+
+def _alt_is_name(alt: str) -> bool:
+    """Больше половины слов с заглавной или с цифрой — имя, а не описание."""
+    words = [w for w in alt.split() if any(ch.isalpha() for ch in w)]
+    named = sum(1 for w in words if w[0].isupper() or any(ch.isdigit() for ch in w)
+                or (len(w) > 1 and w[1].isupper()))
+    return bool(words) and named * 2 > len(words)
 
 
 def check_alt_text(page) -> list:
@@ -586,15 +607,21 @@ def check_alt_text(page) -> list:
             "у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка "
             "или имя файла, а не описание", a0=len(fillers), a1=len(alts), a2=shown)))
     expected = declared_scripts(page.lang)
-    meaningful = [a for a in alts if a not in fillers]
+    # Имя модели или места («Samsung Galaxy S24 Ultra», «Haus der Kulturen der
+    # Welt») не переводят: язык сверяется по alt-описаниям, а не по именам.
+    meaningful = [a for a in alts if a not in fillers and not _alt_is_name(a)]
     if expected and meaningful:
         script, share, letters = text_script(" ".join(meaningful), expected)
         from . import langid
+        other = langid.identify(" ".join(meaningful), min_tokens=12)[0]
         same_script_other = (script in expected and letters >= 20
-                             and langid.identify(" ".join(meaningful), min_tokens=12)[0]
-                             not in ("", langid.primary(page.lang))
+                             and other not in ("", langid.primary(page.lang))
                              and langid.primary(page.lang) in langid.WORDS)
-        if same_script_other or (letters >= 20 and share >= 0.8 and script not in expected):
+        if same_script_other:
+            issues.append(("info", page.url, "img-alt-language", tr(
+                "страница на lang=«{a0}», а alt изображений написан на другом языке "
+                "({a1}): похоже, шаблон alt не переведён", a0=page.lang.strip(), a1=other)))
+        elif letters >= 20 and share >= 0.8 and script not in expected:
             issues.append(("info", page.url, "img-alt-language", tr(
                 "страница на lang=«{a0}», а alt изображений написан другим письмом "
                 "({a1}): похоже, шаблон alt не переведён", a0=page.lang.strip(),

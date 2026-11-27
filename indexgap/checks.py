@@ -1419,8 +1419,15 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         # разных стран не конкурируют (Congo: 147 «дублей» из пяти языков).
         language = (p.lang or "").lower().split("-")[0]
         if not language:
-            first = urlsplit(p.url).path.strip("/").split("/")[0].lower()
-            language = first if _is_locale(first) else ""
+            # Без lang язык — по тексту: `/ca/`, `/de/`, `/pa/` бывают и
+            # штатами. Префикс пути — только когда текст не говорит ничего.
+            from . import langid
+            head = (p.title or "") + " " + (p.description or "")
+            language = (langid.identify(" ".join(list(p.paragraphs or [])[:30]))[0]
+                        or langid.identify(head, min_tokens=8)[0])
+            if not language:
+                first = urlsplit(p.url).path.strip("/").split("/")[0].lower()
+                language = first if _is_locale(first) else ""
         if p.title:
             titles[(language, p.title.strip().lower())].append(p.url)
         if p.description:
@@ -1439,7 +1446,8 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         if p.nosnippet:
             issues.append(("critical", p.url, "nosnippet",
                            tr("запрещён сниппет: страница может быть в индексе, но в ответы ИИ-поиска и в расширенную выдачу не попадёт")))
-        if not p.title:
+        # Title из одних невидимых знаков (U+200B, BOM, &shy;) не виден в выдаче.
+        if not p.title or not display_width(p.title):
             issues.append(("critical", p.url, "no-title", tr("нет title")))
         else:
             n = display_width(p.title)
@@ -1448,7 +1456,7 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
             elif n > bounds["title_max"]:
                 issues.append(("info", p.url, "title-long",
                                tr("title {a0} символов, обрежется в выдаче", a0=n)))
-        if not p.description:
+        if not p.description or not display_width(p.description):
             issues.append(("warning", p.url, "no-description", tr("нет meta description")))
         else:
             n = display_width(p.description)
@@ -1503,6 +1511,15 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
 
     issues = [i for i in issues if not (i[1] in shells and i[2] in SHELL_DEPENDENT)]
 
+    for groups in (titles, descriptions):
+        # Страница без языка — не другой перевод, если язык у этого текста один.
+        named = defaultdict(set)
+        for language, text in groups:
+            named[text].add(language)
+        for text, languages in named.items():
+            if "" in languages and len(languages) == 2:
+                other = next(l for l in languages if l)
+                groups[(other, text)] += groups.pop(("", text))
     for title, urls in sorted(titles.items()):
         if len(urls) > 1:
             for u in sorted(urls):

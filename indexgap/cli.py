@@ -401,7 +401,7 @@ def load_baseline(path: str) -> list:
 # «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
 _SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-missing-links", "unfilled-slot",
                   "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
-                  "duplicate-description"}
+                  "duplicate-description", "heavy-images"}
 _SUBJECT = re.compile(r"https?://[^\s,;«»\"']+|(?<![\w/])/[^\s,;«»\"'()]*|«[^»]*»")
 
 

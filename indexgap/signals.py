@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from .core import ALWAYS_SKIP, _CODE_TAG, tokenize
 from .i18n import N_, tr
+from .settings import DENSE_SCRIPT
 
 # Googlebot читает первые 2 МБ поддерживаемого файла и отдаёт в индекс то, что
 # успел прочитать (developers.google.com/search/docs/crawling-indexing/googlebot,
@@ -179,7 +180,7 @@ def _share(a: set, b: set) -> bool:
 def _title_h1_apart(title: str, h1: str) -> bool:
     if not title or not h1:
         return False
-    if any(len(w) == 1 and not w.isascii() for w in tokenize(h1 + " " + title)):
+    if DENSE_SCRIPT.search(h1 + " " + title):
         return False                       # иероглифика: слов по пробелам нет
     head = _words(h1)
     parts = [_words(p) for p in _SEPARATORS.split(title)] or [_words(title)]
@@ -576,9 +577,27 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
 
 # ── картинки ─────────────────────────────────────────────────────────────────
 
+def _site_folder(page) -> str:
+    """
+    Корень сборки по странице: её каталог минус путь URL. Все страницы в
+    `/guides/`, а картинки в `/images/` — общий каталог страниц картинок не видел.
+    """
+    from urllib.parse import unquote
+    folder = os.path.dirname(page.path)
+    parts = [x for x in unquote(urlsplit(page.url).path).split("/") if x]
+    if parts and parts[-1] in (os.path.basename(page.path),
+                               os.path.splitext(os.path.basename(page.path))[0]):
+        parts.pop()
+    for part in reversed(parts):
+        if os.path.basename(folder) != part:
+            break
+        folder = os.path.dirname(folder)
+    return folder
+
+
 def heavy_images(pages: list) -> list:
     """Картинки тяжелее 1 МБ в сборке — одна находка на сайт, с самыми тяжёлыми."""
-    paths = [os.path.dirname(p.path) for p in pages if p.path and _is_html(p)]
+    paths = [_site_folder(p) for p in pages if p.path and _is_html(p)]
     if not paths:
         return []
     try:
@@ -605,6 +624,8 @@ def heavy_images(pages: list) -> list:
         return []
     heavy.sort(key=lambda x: (-x[0], x[1]))
     shown = ", ".join(f"{name} ({size / 1024 / 1024:.1f} MB)" for size, name in heavy[:5])
-    return [("info", "", "heavy-images", tr(
+    # Предмет — все файлы: новая тяжёлая картинка видна в --baseline.
+    from .subject import Said
+    return [("info", "", "heavy-images", Said(tr(
         "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; "
-        "сожми их или отдай WebP/AVIF", a0=len(heavy), a1=shown))]
+        "сожми их или отдай WebP/AVIF", a0=len(heavy), a1=shown), [name for _, name in heavy]))]
