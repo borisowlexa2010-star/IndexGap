@@ -133,4 +133,10 @@ MESSAGES = {
         "{a0} links back to {a1} — a different address (the scheme or host differs from the rest of the site's links). Search engines need the exact address of the version, not a redirect to it",
     'ссылки hreflang ведут на {a0}, а сами страницы в canonical называют себя адресами {a1} ({a2} из {a3}). Каждая альтернатива — редирект, а не версия, и поисковик отбрасывает кластер. Чинится один раз, в шаблоне hreflang':
         'hreflang links point at {a0}, while the pages name themselves {a1} in their canonical ({a2} of {a3}). Every alternate is a redirect, not a version, and search engines drop the cluster. Fix it once, in the hreflang template',
+    'ссылки hreflang записаны не полным адресом ({a0}) — Google требует абсолютный URL со схемой и хостом, например https://…':
+        'hreflang links are not written as full addresses ({a0}) — Google requires an absolute URL with a scheme and a host, such as https://…',
+    'self-ссылка в кластере записана как {a0} — это другой адрес (схема или хост не те, что у остальных ссылок сайта), то есть редирект, а не сама страница. Поисковик требует точный адрес версии':
+        "the cluster's self-link is written as {a0} — a different address (the scheme or host differs from the rest of the site's links), so it is a redirect, not the page itself. Search engines need the exact address of the version",
+    '{a0} ссылается обратно на {a1}, а сама страница называет себя {a2} — это другой адрес (слэш на конце или index.html), то есть редирект. Поисковик требует точный адрес версии':
+        '{a0} links back to {a1}, while the page names itself {a2} — a different address (the trailing slash or index.html), so it is a redirect. Search engines need the exact address of the version',
 }

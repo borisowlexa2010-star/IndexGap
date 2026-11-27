@@ -401,7 +401,10 @@ def load_baseline(path: str) -> list:
 # «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
 _SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-missing-links", "unfilled-slot",
                   "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
-                  "duplicate-description"}
+                  "duplicate-description", "translations-parked"}
+# Предмет этих находок есть только в поле `subject`: из текста его не вынуть,
+# и база без поля сравнивается, как раньше, без предмета.
+_GIVEN_ONLY = {"translations-parked"}
 _SUBJECT = re.compile(r"https?://[^\s,;«»\"']+|(?<![\w/])/[^\s,;«»\"'()]*|«[^»]*»")
 
 
@@ -414,7 +417,7 @@ def _subject(code: str, message: str, given=None) -> tuple:
     """
     if given is not None:
         return tuple(given)
-    if code not in _SUBJECT_CODES or not message:
+    if code not in _SUBJECT_CODES or code in _GIVEN_ONLY or not message:
         return ()
     if code == "ai-crawler-blocked":
         return (message.split()[0].lower(),)

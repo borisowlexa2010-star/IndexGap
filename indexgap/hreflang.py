@@ -31,7 +31,8 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+import unicodedata
+from urllib.parse import unquote, urljoin, urlsplit
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
@@ -135,6 +136,21 @@ def read_alternates(page) -> list:
     return parser.alternates
 
 
+def absolute(base: str, href: str) -> str:
+    """
+    href альтернативы полным адресом. Относительный (`/de/a/`) и без схемы
+    (`//demo.example/de/a/`) поисковик достраивает от адреса страницы; без
+    этого такие ссылки не совпадали ни с одной страницей, и каждая страница
+    «не ссылалась на себя».
+    """
+    if not href or not base:
+        return href
+    try:
+        return urljoin(base, href)
+    except ValueError:
+        return href
+
+
 def check_tag(code: str) -> str:
     """
     Что не так с кодом. Пустая строка — всё в порядке.
@@ -178,7 +194,8 @@ def clusters(pages: list) -> dict:
     """
     out = {}
     for page in pages:
-        out[page.key] = {url_key(href) for _code, href in read_alternates(page) if href}
+        out[page.key] = {url_key(absolute(page.url, href))
+                         for _code, href in read_alternates(page) if href}
     return out
 
 
@@ -220,12 +237,21 @@ def _canonical_to_a_sibling(page, keys) -> bool:
     target = url_key(page.canonical)
     if target not in keys:
         return False
-    own = (page.lang or "").lower().split("-")[0]
-    for code, href in read_alternates(page):
-        if href and url_key(href) == target:
-            lang = code.lower().split("-")[0]
-            return lang not in (own, "x")
-    return False
+    alternates = [(code.lower().split("-")[0], url_key(absolute(page.url, href)))
+                  for code, href in read_alternates(page) if href]
+    # Без `<html lang>` язык страницы — код, которым она называет себя в кластере.
+    own = ((page.lang or "").lower().split("-")[0]
+           or next((c for c, k in alternates if k == page.key and c != "x"), ""))
+    # x-default делит адрес с языковой версией: он не язык, и решает код той.
+    codes = [c for c, k in alternates if k == target and c != "x"]
+    return any(c != own for c in codes)
+
+
+def urlsplit_safe(href):
+    try:
+        return urlsplit(href)
+    except ValueError:
+        return urlsplit("")
 
 
 def _origin(parts):
@@ -268,11 +294,18 @@ def check(pages: list, cfg: dict = None) -> dict:
     x_default = set()
     default_only = {}
     empty = []
+    raw = {}
 
     for page in pages:
         alternates = read_alternates(page)
+        raw[page.key] = alternates
+        alternates = [(code, absolute(page.url, href)) for code, href in alternates]
         declared[page.key] = alternates
         hidden = getattr(page, "alternates_in_body", 0) or 0
+        # Версии уже связаны из <head> или из sitemap, и кластер называет
+        # саму страницу: ссылки в <body> лишние, но связи не ломают.
+        if hidden and any(url_key(href) == page.key for _, href in alternates):
+            hidden = 0
         if hidden:
             issues.append(("warning", page.url, "hreflang-in-body", tr(
                 "{a0} ссылок hreflang стоят в <body> — поисковики читают их только "
@@ -289,6 +322,12 @@ def check(pages: list, cfg: dict = None) -> dict:
             if indexable(page) and not redirect_target(page) and not hidden:
                 empty.append(page)
             continue
+        partial = [href for _, href in raw[page.key]
+                   if href and not (urlsplit_safe(href).scheme and urlsplit_safe(href).netloc)]
+        if partial:
+            issues.append(("warning", page.url, "hreflang-bad-code", tr(
+                "ссылки hreflang записаны не полным адресом ({a0}) — Google требует "
+                "абсолютный URL со схемой и хостом, например https://…", a0=partial[0])))
         keys, default_keys, lang_keys = set(), set(), set()
         for code, href in alternates:
             problem = check_tag(code)
@@ -345,7 +384,7 @@ def check(pages: list, cfg: dict = None) -> dict:
             return None
 
     origins = Counter()
-    for alternates in declared.values():
+    for alternates in raw.values():
         for _, href in alternates:
             origin = _origin(split(href))
             if origin:
@@ -369,17 +408,38 @@ def check(pages: list, cfg: dict = None) -> dict:
     # сайта: ссылки на соседние домены (`demo.de` с `demo.example`) — не
     # другое написание своего адреса, а другие сайты.
     named = Counter()
-    for alternates in declared.values():
+    for alternates in raw.values():
         for _, href in alternates:
             origin = _origin(split(href))
             if origin and url_key(href) in known:
                 named[origin] += 1
+    # Относительные ссылки поисковик достраивает от адреса страницы — они не
+    # редиректы, и одна ссылка на http:// среди них не «каждая альтернатива».
+    relative = sum(1 for key, alternates in raw.items() for _, href in alternates
+                   if href and not _origin(split(href))
+                   and url_key(absolute(known[key].url, href)) in known)
+    if named:
+        # Адрес сайта — то, как называют его собственные страницы: соседний
+        # домен с бо́льшим числом языков (`demo.eu` рядом с `demo.example`)
+        # делал «другим адресом» каждую верную ссылку между своими страницами.
+        home = named.most_common(1)[0][0]
+        served = Counter(o for o in (_origin(split(p.url)) for p in pages) if o)
+        site = served.most_common(1)[0][0] if served else None
+        if own and sum(own.values()) >= 2:
+            stated = own.most_common(1)[0][0]
+            if own[stated] / sum(own.values()) >= 0.9:
+                home = stated
+        elif not own and site in named and site != home:
+            # Часть кластеров написана адресом, по которому страницы отдаются,
+            # часть — другим, а canonical не говорит, какой верен. Большинство
+            # тут не довод: неверный шаблон объявлял редиректом верные ссылки.
+            home = None
     if named and own:
         stated, count = own.most_common(1)[0]
         wrong = Counter({o: c for o, c in named.items() if o != stated})
         if (wrong and count >= 2
                 and count / sum(own.values()) >= 0.9
-                and sum(wrong.values()) / sum(named.values()) >= 0.5):
+                and sum(wrong.values()) / (sum(named.values()) + relative) >= 0.5):
             home = wrong.most_common(1)[0][0]
             issues.append(("critical", "", "hreflang-no-return", tr(
                 "ссылки hreflang ведут на {a0}, а сами страницы в canonical "
@@ -391,16 +451,44 @@ def check(pages: list, cfg: dict = None) -> dict:
             # Об отдельных ответных ссылках говорить уже нечего: неверен шаблон.
             home = None
 
+    def path_of(parts):
+        return unicodedata.normalize("NFC", unquote(parts.path or "/"))
+
+    # Как страница пишет свой адрес: self-ссылка и canonical полным адресом,
+    # если они согласны. `/en/a` и `/en/a/index.html` вместо `/en/a/` — тот
+    # же ключ, но для статического хостинга это редирект.
+    own_form = {}
+    for page in pages:
+        forms = {path_of(parts) for parts in (split(href) for _, href in raw.get(page.key) or ()
+                                              if url_key(href) == page.key)
+                 if parts and _origin(parts)}
+        if page.canonical and page.__dict__.get("_canonical_absolute") \
+                and url_key(page.canonical) == page.key:
+            parts = split(page.canonical)
+            if parts:
+                forms.add(path_of(parts))
+        if len(forms) == 1:
+            own_form[page.key] = forms.pop()
+
     def exact_return(target, page_key):
         """href, которым target называет страницу, если он отличается от адреса сайта."""
-        if home is None:
-            return ""
-        for _, href in declared.get(target.key) or ():
-            if url_key(href) != page_key:
+        for _, href in raw.get(target.key) or ():
+            if url_key(absolute(target.url, href)) != page_key:
                 continue
-            origin = _origin(split(href))
-            if origin and origin != home:
+            parts = split(href)
+            origin = _origin(parts)
+            if not origin:
+                continue
+            if home is not None and origin != home:
                 return href
+            if own_form.get(page_key) and path_of(parts) != own_form[page_key]:
+                return href
+        return ""
+
+    def self_code(p):
+        for code, href in declared.get(p.key, ()):
+            if href and url_key(href) == p.key and code.strip().lower() != "x-default":
+                return code.strip()
         return ""
 
     from .publish import indexable
@@ -422,6 +510,19 @@ def check(pages: list, cfg: dict = None) -> dict:
                            tr("в кластере нет ссылки на саму эту страницу — "
                               "без self-ссылки Google считает кластер невалидным "
                               "целиком")))
+        elif home is not None:
+            # Self-ссылка на http:// или www. — ссылка на редирект, как и такая
+            # же ответная ссылка: точного адреса самой страницы в кластере нет.
+            mine = [_origin(split(href)) for _, href in raw.get(page.key) or ()
+                    if url_key(href) == page.key]
+            stated = (_origin(split(page.canonical))
+                      if page.canonical and page.__dict__.get("_canonical_absolute") else None)
+            if (mine and all(o and o != home and o != stated for o in mine)):
+                href = next(h for _, h in raw[page.key] if url_key(h) == page.key)
+                issues.append(("critical", page.url, "hreflang-no-self", tr(
+                    "self-ссылка в кластере записана как {a0} — это другой адрес (схема "
+                    "или хост не те, что у остальных ссылок сайта), то есть редирект, а "
+                    "не сама страница. Поисковик требует точный адрес версии", a0=href)))
 
         for other in sorted(keys):
             if other == page.key:
@@ -448,7 +549,13 @@ def check(pages: list, cfg: dict = None) -> dict:
                                   a0=target.url)))
             elif back:
                 variant = exact_return(target, page.key)
-                if variant:
+                if variant and (home is None or _origin(split(variant)) == home):
+                    issues.append(("critical", page.url, "hreflang-no-return", tr(
+                        "{a0} ссылается обратно на {a1}, а сама страница называет себя "
+                        "{a2} — это другой адрес (слэш на конце или index.html), то есть "
+                        "редирект. Поисковик требует точный адрес версии",
+                        a0=target.url, a1=variant, a2=own_form.get(page.key, ""))))
+                elif variant:
                     issues.append(("critical", page.url, "hreflang-no-return", tr(
                         "{a0} ссылается обратно на {a1} — это другой адрес (схема или "
                         "хост не те, что у остальных ссылок сайта). Поисковик требует "
@@ -471,9 +578,12 @@ def check(pages: list, cfg: dict = None) -> dict:
         if page.canonical:
             canonical_key = url_key(page.canonical)
             other = known.get(canonical_key)
+            # Без `<html lang>` язык берётся из кода, которым кластер называет страницу.
+            mine = page.lang or self_code(page)
+            theirs = other.lang or self_code(other) if other is not None else ""
             if (canonical_key != page.key and other is not None
-                    and (other.lang or "") and (page.lang or "")
-                    and not _same_language(other.lang, page.lang)):
+                    and theirs and mine
+                    and not _same_language(theirs, mine)):
                 issues.append(("critical", page.url, "hreflang-canonical-conflict",
                                tr("canonical ведёт на версию другого языка ({a0}) — "
                                   "это отменяет hreflang: поисковик склеит версии "

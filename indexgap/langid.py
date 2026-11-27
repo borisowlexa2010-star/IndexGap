@@ -109,6 +109,28 @@ def tokens(text: str) -> list:
     return [t.lower() for t in tokenize(text or "") if not t.isdigit()]
 
 
+# Конец фразы: после него слово с заглавной — начало предложения, а не имя.
+_PHRASE = re.compile(r"[.!?…:;\n]+")
+_SENTENCE_END = re.compile(r"[.!?…]\W*$")
+ALL_WORDS = set().union(*WORDS.values())
+
+
+def _names(text: str) -> dict:
+    """
+    Служебные слова, написанные с заглавной посреди фразы: «Los Angeles»,
+    «La Jolla», «Del Mar», «MacBook Pro». Это части имён, а не испанский
+    и не чешский текст — список городов на английской странице объявлялся
+    непереведённым.
+    """
+    from .core import _TOKEN
+    out = {}
+    for phrase in _PHRASE.split(text or ""):
+        for word in _TOKEN.findall(phrase)[1:]:
+            if word[:1].isupper() and word.lower() in ALL_WORDS:
+                out[word.lower()] = out.get(word.lower(), 0) + 1
+    return out
+
+
 def identify(text: str, candidates=None, min_tokens: int = MIN_TOKENS) -> tuple:
     """
     (язык, доля служебных слов, запас над вторым) или ("", 0, 0), если
@@ -118,12 +140,20 @@ def identify(text: str, candidates=None, min_tokens: int = MIN_TOKENS) -> tuple:
     if len(words) < min_tokens:
         return "", 0.0, 0.0
     langs = [l for l in (candidates or WORDS) if l in WORDS]
-    scores = {}
+    names = _names(text)
+    scores, distinct = {}, {}
     for lang in langs:
         vocab = WORDS[lang]
-        scores[lang] = sum(1 for w in words if w in vocab) / len(words)
+        hits = sum(1 for w in words if w in vocab)
+        hits -= sum(n for w, n in names.items() if w in vocab)
+        scores[lang] = max(hits, 0) / len(words)
+        distinct[lang] = len({w for w in words if w in vocab} - set(names))
     ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     if not ranked or ranked[0][1] < 0.08:
+        return "", 0.0, 0.0
+    # Одно-два слова, повторённые много раз, — не язык: «Pro» в каждой
+    # строке каталога ноутбуков давало чешский (в чешском «pro» — «для»).
+    if distinct[ranked[0][0]] < 3:
         return "", 0.0, 0.0
     best, share = ranked[0]
     if len(ranked) > 1 and {best, ranked[1][0]} <= set(DISTINCT):
@@ -158,4 +188,16 @@ def mismatch(declared: str, text: str) -> str:
     if want not in WORDS:
         return ""
     got, _, _ = identify(text)
-    return got if got and got != want else ""
+    if not got or got == want:
+        return ""
+    # Перевод со списком иностранных названий (книги, фильмы, модели): сами
+    # фразы — на объявленном языке, а чужие слова стоят в строках без точки.
+    # Если в предложениях объявленного языка больше, тело переведено.
+    sentences = tokens("\n".join(line for line in (text or "").splitlines()
+                                  if _SENTENCE_END.search(line.strip())))
+    if len(sentences) >= 12:
+        mine = sum(1 for w in sentences if w in WORDS[want])
+        theirs = sum(1 for w in sentences if w in WORDS[got])
+        if mine > theirs:
+            return ""
+    return got
