@@ -768,7 +768,7 @@ def collect() -> dict:
     literal = r'"(?:[^"\\]|\\.)*"'
     pat = re.compile(
         r'\(\s*"(critical|warning|info)"\s*,\s*[^,\n]+,\s*'
-        r'"([a-z0-9-]+)"\s*,\s*\n?\s*tr\(\s*((?:' + literal + r'\s*)+)', re.S)
+        r'"([a-z0-9-]+)"\s*,\s*\n?\s*(?:Said\(\s*)?tr\(\s*((?:' + literal + r'\s*)+)', re.S)
     seen, levels = {}, {}
     for level, code, literals in pat.findall(src):
         source = "".join(ast.literal_eval(x) for x in re.findall(literal, literals))

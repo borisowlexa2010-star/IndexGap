@@ -785,7 +785,15 @@ def read_sources(specs: list, site: str = "") -> dict:
             # объявила бы непроиндексированным всё остальное.
             kinds[name] = kind
             counts = read_citations(path, site)
-            cited[name] = {**cited.get(name, {}), **counts}
+            if name in cited:
+                # Две выгрузки (январь и февраль) — цитирования складываются,
+                # как у --cite; слияние словарей молча теряло первую.
+                notes.append(tr("две выгрузки цитирований помечены как «{a0}» — "
+                                "цитирования сложены; если периоды пересекаются, "
+                                "числа завышены", a0=name))
+            merged = cited.setdefault(name, {})
+            for url, n in counts.items():
+                merged[url] = merged.get(url, 0) + n
             continue
         # «Эффективность» из Search Console — отчёт о показах: страница в индексе
         # без показов в него не попадает. Узнаётся по столбцу показов.
@@ -1037,9 +1045,13 @@ def _has_impressions(header, path: str = "") -> bool:
 
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
            by_engine: dict = None, by_source: dict = None,
-           cited: dict = None, impressions: list = None) -> dict:
+           cited: dict = None, impressions: list = None,
+           robots_blocked=None) -> dict:
     """
     Строит воронку и, главное, объясняет каждую потерю.
+
+    `robots_blocked` — страницы, которые robots.txt не пускает обходить: к
+    индексации они не открыты, как и закрытые noindex.
     Возвращает как числа, так и конкретные списки URL — чинить надо адресно.
 
     Всё сравнение идёт по ключу URL: `/виза/`, `/%D0%B2%D0%B8%D0%B7%D0%B0/`
@@ -1058,7 +1070,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     # Все панели — отчёты о показах, и других свидетельств индексации нет.
     impressions_only = bool(live_panels) and not (by_source or {}) and all(
         n in shown for n in live_panels)
-    publishable = {url_key(p.url) for p in pages if indexable(p)}
+    disallowed = _keys(robots_blocked or ()) & generated
+    publishable = {url_key(p.url) for p in pages if indexable(p)} - disallowed
     blocked = generated - publishable
 
     def show(keys):
@@ -1118,7 +1131,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         {"id": "generated", "name": tr("Сгенерировано"), "count": len(generated)},
         {"id": "indexable", "name": tr("Пригодно к индексации"), "count": len(publishable),
          "lost": len(blocked),
-         "why": tr("noindex или canonical на другую страницу")},
+         "why": (tr("noindex, canonical на другую страницу или Disallow в robots.txt")
+                 if disallowed else tr("noindex или canonical на другую страницу"))},
     ]
     if in_sitemap is not None:
         steps.append({"id": "in-sitemap", "name": tr("В sitemap"),
@@ -1170,6 +1184,9 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     for name, counts in (cited or {}).items():
         merged = {}
         for u, n in (counts or {}).items():
+            if not n or n <= 0:
+                # Строка «Citations: 0» — страница, которую не цитировали.
+                continue
             for key in fold({url_key(u)}):
                 merged[key] = merged.get(key, 0) + n
                 # Печатается адрес, как его процитировали: ключ сравнения
@@ -1263,6 +1280,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "proves": sources.describe(list(engines_keys)),
         "display": display,
         "blocked": show(blocked),
+        "robots_blocked": show(disallowed),
         "missing_from_sitemap": missing_from_sitemap,
         "stale_in_sitemap": stale_in_sitemap,
         "stale_in_sitemap_urls": stale_listed,
@@ -1474,7 +1492,9 @@ def segments(funnel_result: dict, pages: list = None) -> dict:
 
     funnel_result = funnel_result or {}
     pages = pages or []
-    publishable = {url_key(p.url): p.url for p in pages if indexable(p)}
+    disallowed = _keys(funnel_result.get("robots_blocked") or ())
+    publishable = {url_key(p.url): p.url for p in pages
+                   if indexable(p) and url_key(p.url) not in disallowed}
 
     no_sitemap = _keys(funnel_result.get("missing_from_sitemap") or [])
     not_indexed = _keys(funnel_result.get("not_indexed") or [])
@@ -1655,11 +1675,21 @@ def compare_runs(current: dict, previous: dict) -> dict:
     """
     cur_f, old_f = current.get("funnel") or {}, previous.get("funnel") or {}
 
+    # Индекс из другого источника (краулер вместо панели Google, Bing вместо
+    # Google) — не «страницы вернулись в индекс»: сравнивать шаг нечем.
+    def sources_of(funnel):
+        got = funnel.get("engine_keys")
+        return sorted(got) if isinstance(got, dict) and got else None
+    src_now, src_was = sources_of(cur_f), sources_of(old_f)
+    swapped = bool(src_now and src_was and src_now != src_was)
+
     old_steps = {_step_key(s): s for s in old_f.get("steps") or () if isinstance(s, dict)}
     steps = []
     for step in cur_f.get("steps") or ():
         before = old_steps.get(_step_key(step))
         if before is None:
+            continue
+        if swapped and step.get("id") in ("indexed", "with-impressions"):
             continue
         delta = (step.get("count") or 0) - (before.get("count") or 0)
         if delta:
@@ -1679,13 +1709,24 @@ def compare_runs(current: dict, previous: dict) -> dict:
         shown = {url_key(u): u for u in list(old_f.get(field) or ()) + list(cur_f.get(field) or ())}
         return (sorted(shown[k] for k in now - was), sorted(shown[k] for k in was - now))
 
-    newly_lost, recovered = moved("not_indexed", "has_index")
+    newly_lost, recovered = moved("not_indexed", "has_index") if not swapped else ([], [])
+    in_index_now = cur_f.get("engine_keys")
+    if isinstance(in_index_now, dict) and in_index_now:
+        # Ушла из «не в индексе» — ещё не «вернулась»: страницу удалили,
+        # закрыли noindex или убрали из sitemap. Вернулась та, что в индексе.
+        now_keys = set().union(*(set(v) for v in in_index_now.values()))
+        recovered = [u for u in recovered if url_key(u) in now_keys]
     newly_off_map, back_on_map = moved("missing_from_sitemap", "has_sitemap")
-    same_inputs = all(has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap"))
+    same_inputs = not swapped and all(
+        has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap"))
 
     def sections(key):
         if key == "segments" and not same_inputs:
             # Потери раздела считаются по другим шагам — разница ничего не значит.
+            return {"rows": [], "new_gaps": [], "closed_gaps": []}
+        if key == "ai_segments" and not (current.get(key) and previous.get(key)):
+            # Без --logs в одном из прогонов разделов ИИ-поиска нет вовсе:
+            # «разрыв закрыт» значило бы только «логов не дали».
             return {"rows": [], "new_gaps": [], "closed_gaps": []}
         cur = {r["segment"]: r for r in ((current.get(key) or {}).get("rows") or ())}
         old = {r["segment"]: r for r in ((previous.get(key) or {}).get("rows") or ())}
@@ -1721,4 +1762,5 @@ def compare_runs(current: dict, previous: dict) -> dict:
         "not_compared": [f[4:] for f in ("has_index", "has_sitemap")
                          if has(cur_f, f) != has(old_f, f)],
         "site_changed": (current.get("site") or "") != (previous.get("site") or ""),
+        "index_sources": {"before": src_was, "after": src_now} if swapped else None,
     }

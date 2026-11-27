@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from .core import ALWAYS_SKIP, _CODE_TAG, tokenize
 from .i18n import N_, tr
+from .subject import Said
 
 # Googlebot читает первые 2 МБ поддерживаемого файла и отдаёт в индекс то, что
 # успел прочитать (developers.google.com/search/docs/crawling-indexing/googlebot,
@@ -566,11 +567,12 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                          and k.url not in pagers)
         if missing:
             shown = ", ".join(urlsplit(u).path for u in missing[:3])
-            issues.append(("warning", hub.url, "hub-missing-links", tr(
+            issues.append(("warning", hub.url, "hub-missing-links", Said(tr(
                 "раздел не ссылается на {a0} из {a1} своих страниц: {a2}{a3} — до них "
                 "доходят только через sitemap или случайные ссылки",
                 a0=len(missing), a1=len(kids), a2=shown,
-                a3=tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else "")))
+                a3=tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else ""),
+                (urlsplit(u).path for u in missing))))
     return issues
 
 

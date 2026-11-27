@@ -261,7 +261,8 @@ def _collect_indexed(args) -> tuple:
         print(tr("Прочие источники — {a0}", a0=summary))
     for name, counts in sorted(cited.items()):
         print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} цитирований",
-                 a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
+                 a0=sources.title_of(name), a1=sum(1 for n in counts.values() if n > 0),
+                 a2=sum(counts.values())))
     for line in sources.describe(list(by_engine) + list(by_source) + list(cited)):
         print(tr("  что это доказывает → {a0}", a0=line))
     for note in engines.describe_coverage(list(by_engine)):
@@ -393,7 +394,21 @@ def load_baseline(path: str) -> list:
         raise SourceError(tr(
             "{a0} — не данные прогона indexgap check. Базовой линией служит JSON, "
             "который пишет `indexgap check`.", a0=path))
-    return [i for i in data["issues"] if isinstance(i, dict)]
+    issues = [i for i in data["issues"] if isinstance(i, dict)]
+    for item in issues:
+        # Испорченная руками база падала трассировкой с кодом 1 — тем же,
+        # что и «есть критичные находки». Это ошибка входа.
+        subject = item.get("subject")
+        if (not all(isinstance(item.get(f), str) for f in ("level", "code"))
+                or not all(isinstance(item.get(f), (str, type(None)))
+                           for f in ("url", "message"))
+                or not (subject is None or (isinstance(subject, list) and all(
+                    isinstance(s, str) for s in subject)))):
+            raise SourceError(tr(
+                "{a0}: находка базовой линии записана не так, как её пишет "
+                "`indexgap check`: {a1}", a0=path,
+                a1=json.dumps(item, ensure_ascii=False)[:200]))
+    return issues
 
 
 # Находки, у которых на одной странице бывает разный предмет: какой бот
@@ -424,6 +439,18 @@ def _subject(code: str, message: str, given=None) -> tuple:
 # Находки сверки с датасетом: без датасета их не бывает, и их пропажа в
 # прогоне без --dataset — не исправление, а выключенная проверка.
 FACT_CODES = frozenset({"unsupported-number", "check-by-eye", "dataset-unbound"})
+# Находки проверок, которые выключают --no-aeo и --no-content (или профиль):
+# в таком прогоне их пропажа — тоже не исправление.
+AEO_CODES = frozenset({
+    "ai-crawler-blocked", "answer-long", "answer-preamble", "answer-short",
+    "img-alt-filler", "img-alt-language", "img-no-alt", "js-shell", "jsonld-broken",
+    "jsonld-faq-invisible", "jsonld-mismatch", "jsonld-no-type", "long-paragraph",
+    "microdata-mismatch", "no-answer", "no-author", "no-date", "no-question-headings",
+    "no-robots", "no-structure", "robots-blocks-all", "robots-blocks-page",
+    "robots-no-sitemap", "robots-unreadable"})
+CONTENT_CODES = FACT_CODES | frozenset({
+    "brief-left", "llm-leftover", "mojibake", "same-opening", "still-draft",
+    "template-skeleton", "unfilled-slot", "vague-anchor"})
 
 
 def baseline_coverage(path: str, old: list) -> dict:
@@ -470,6 +497,11 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     for level, url, code, message in list(issues) + list(accepted or []):
         if code == "noindex-group":
             grouped.update(subject_of(message) or ())
+    # И наоборот: группа базы распалась (часть веток открыли) — оставшиеся
+    # закрытыми страницы не «новые» критичные и не «исчезнувшие» сведения.
+    for i in old:
+        if i.get("code") == "noindex-group" and isinstance(i.get("subject"), list):
+            grouped.update(s for s in i["subject"] if isinstance(s, str))
     for level, url, code, message in accepted or []:
         if code == "noindex-group":
             accepted_group.update(subject_of(message) or ())
@@ -487,10 +519,12 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     # База до 1.25 не хранит полный предмет: тогда обе стороны сравниваются
     # по тексту, иначе полный предмет новой стороны против укороченного
     # старого дал бы «новые» находки на ровном месте.
-    full = any(isinstance(i.get("subject"), list) for i in old)
+    # Решается по коду: в базе 1.25–1.28 полный предмет есть у битых ссылок,
+    # но не у незаполненных мест шаблона и ссылок не в той форме.
+    full = {i.get("code") for i in old if isinstance(i.get("subject"), list)}
 
     def subject(code, message, given):
-        if full and given is not None:
+        if code in full and given is not None:
             return _subject(code, message or "", given)
         return _subject(code, message or "")
 
@@ -569,11 +603,26 @@ def _print_baseline(path: str, diff: dict) -> None:
     if diff.get("accepted"):
         print(tr("  находок базы, принятых с тех пор через ignore: {a0} — они на "
                  "сайте и в «исчезло» не входят", a0=len(diff["accepted"])))
-    if diff.get("facts_off"):
+    unchecked = diff.get("unchecked") or []
+    facts = sum(1 for i in unchecked if i.get("code") in FACT_CODES)
+    off = diff.get("facts_off")
+    if off == "--no-content":
+        print(tr("  ! база снята со сверкой фактов по датасету, а в этом прогоне её "
+                 "выключил --no-content: {a0} находок сверки не проверены и в "
+                 "«исчезло» не входят, а новые числа не сверялись. Запусти без "
+                 "--no-content", a0=facts))
+    elif off and off is not True:
+        print(tr("  ! база снята со сверкой фактов по датасету, а профиль «{a1}» "
+                 "фактов не сверяет: {a0} находок сверки не проверены и в «исчезло» "
+                 "не входят", a0=facts, a1=off))
+    elif off:
         print(tr("  ! база снята со сверкой фактов по датасету, этот прогон — без "
                  "неё: {a0} находок сверки не проверены и в «исчезло» не входят, "
                  "а новые числа не сверялись. Передай тот же --dataset",
-                 a0=len(diff.get("unchecked") or [])))
+                 a0=facts))
+    if len(unchecked) > facts:
+        print(tr("  находок базы из проверок, выключенных в этом прогоне: {a0} — их "
+                 "не искали, и в «исчезло» они не входят", a0=len(unchecked) - facts))
 
 
 # ── команды ───────────────────────────────────────────────────────────────────
@@ -652,6 +701,7 @@ def _analyse(args, pages=None):
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
+    analysis["robots_blocked"] = sorted(blocked)
     notes = list(project.get("_config_notes") or []) + list(analysis.get("notes") or [])
 
     content_result = None
@@ -779,7 +829,8 @@ def cmd_check(args):
     if sitemap_urls is not None or by_engine or by_source or cited:
         funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                       by_engine=by_engine, by_source=by_source,
-                                      cited=cited, impressions=impressions)
+                                      cited=cited, impressions=impressions,
+                                      robots_blocked=analysis.get("robots_blocked"))
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
         segments = doctor.segments(funnel_result, pages)
@@ -799,13 +850,25 @@ def cmd_check(args):
                              title=tr("Проверка перед публикацией"),
                              templates=got["templates"], segments=segments)
     json_path = report_pair(args.out)[1]
-    coverage = {"facts": bool(content_result and content_result.get("facts_checked"))}
+    coverage = {"facts": bool(content_result and content_result.get("facts_checked")),
+                "aeo": aeo_result is not None, "content": content_result is not None}
     diff = None
     if baseline is not None:
-        unchecked = FACT_CODES if coverage_before.get("facts") and not coverage["facts"] else ()
+        facts_off = bool(coverage_before.get("facts") and not coverage["facts"])
+        unchecked = set(FACT_CODES if facts_off else ())
+        if not coverage["aeo"]:
+            unchecked |= AEO_CODES
+        if not coverage["content"]:
+            unchecked |= CONTENT_CODES
         diff = compare_baseline(analysis["issues"], baseline,
                                 accepted=analysis.get("accepted"), unchecked=unchecked)
-        diff["facts_off"] = bool(unchecked)
+        if facts_off and got["project"].get("_skip_facts"):
+            # Датасет передан, сверку выключил профиль или флаг: «передай тот
+            # же --dataset» тут — неверный совет.
+            facts_off = got["project"].get("_profile") or True
+        elif facts_off and args.no_content:
+            facts_off = "--no-content"
+        diff["facts_off"] = facts_off
     _write_json(json_path, {
         "site": args.site,
         "pages": len(pages),
@@ -1244,6 +1307,7 @@ def cmd_doctor(args):
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
+    analysis["robots_blocked"] = sorted(blocked)
     notes = list(analysis.get("notes") or [])
 
     sitemap_urls = None
@@ -1265,7 +1329,8 @@ def cmd_doctor(args):
             for url, n in counts.items():
                 merged[url] = merged.get(url, 0) + n
             print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} прогонов с цитатой",
-                     a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
+                     a0=sources.title_of(name), a1=sum(1 for n in counts.values() if n > 0),
+                     a2=sum(counts.values())))
     logs = crawlers.read_logs(getattr(args, "logs", None) or [], site=args.site or "")
     verdicts = None
     if logs and getattr(args, "verify_bots", False):
@@ -1277,7 +1342,8 @@ def cmd_doctor(args):
 
     funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                   by_engine=by_engine, by_source=by_source,
-                                  cited=cited, impressions=impressions)
+                                  cited=cited, impressions=impressions,
+                                  robots_blocked=analysis.get("robots_blocked"))
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
     segments = doctor.segments(funnel_result, pages)
@@ -1420,6 +1486,12 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
         quiet = False
         print(tr("  ! данные для шага «{a0}» есть только в одном из прогонов — "
                  "этот шаг и разделы не сравниваются", a0=names.get(step, step)))
+    swapped = trend.get("index_sources")
+    if swapped:
+        quiet = False
+        print(tr("  ! индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг "
+                 "индекса и разделы не сравниваются",
+                 a0=", ".join(swapped["before"]), a1=", ".join(swapped["after"])))
     for step in trend["steps"]:
         quiet = False
         print(tr("  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})",
@@ -1437,7 +1509,10 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
                          a0=row["segment"], a1=row["before"], a2=row["after"], a3=row["delta"]))
         if part.get("closed_gaps"):
             quiet = False
-            print(tr("  ✓ разрыв закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
+            if key == "ai_segments":
+                print(tr("  ✓ разрыв ИИ-поиска закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
+            else:
+                print(tr("  ✓ разрыв закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
     for field, title in (("newly_not_indexed", tr("Выпали из индекса ({a0}):")),
                          ("newly_off_sitemap", tr("Выпали из sitemap ({a0}):"))):
         urls = trend.get(field) or []

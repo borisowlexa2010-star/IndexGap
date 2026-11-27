@@ -76,6 +76,10 @@ MESSAGES = {
         "\n    An export with a column of addresses is needed (in Search Console "
         "that is “Pages”, not “Queries”).",
     "  из них в {a0}{a1}": "  of those in {a0}{a1}",
+    "noindex, canonical на другую страницу или Disallow в robots.txt":
+        "noindex, a canonical pointing elsewhere, or Disallow in robots.txt",
+    "две выгрузки цитирований помечены как «{a0}» — цитирования сложены; если периоды пересекаются, числа завышены":
+        "two citation exports are labelled \"{a0}\" — their citations are added up; if the periods overlap, the numbers are inflated",
     "noindex или canonical на другую страницу":
         "noindex, or a canonical pointing elsewhere",
     "{a0} не читается: {a1}": "{a0} cannot be read: {a1}",

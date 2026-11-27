@@ -1126,25 +1126,26 @@ def wrong_form_issues(pages: list, case_twins: dict) -> list:
     issues = []
     for page in pages:
         written = []
-        for path, twin in sorted(set(case_twins.get(page.url, ()))):
+        pairs = sorted(set(case_twins.get(page.url, ())))
+        for path, twin in pairs:
             written.append(tr("{a0} вместо {a1}", a0=_local(path), a1=urlsplit(twin).path))
         if written:
             more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
-            issues.append(("warning", page.url, "wrong-link-form", tr(
+            issues.append(("warning", page.url, "wrong-link-form", Said(tr(
                 "ссылки расходятся со страницей регистром букв: {a0}{a1}. GitHub Pages, "
                 "S3 и nginx на Linux различают регистр и отдают на них 404",
-                a0=", ".join(written[:3]), a1=more)))
-        written = sorted({tr("{a0} вместо {a1}", a0=path, a1=urlsplit(by_key[key]).path)
-                          for key, path in page.__dict__.get("_wrong_forms", ())
-                          if key in by_key})
+                a0=", ".join(written[:3]), a1=more), (_local(p) for p, _ in pairs))))
+        forms = {(path, urlsplit(by_key[key]).path)
+                 for key, path in page.__dict__.get("_wrong_forms", ()) if key in by_key}
+        written = sorted({tr("{a0} вместо {a1}", a0=path, a1=aim) for path, aim in forms})
         if written:
             more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
-            issues.append(("warning", page.url, "wrong-link-form", tr(
+            issues.append(("warning", page.url, "wrong-link-form", Said(tr(
                 "ссылки в форме, которой нет в сборке: {a0}{a1}. Сервер сводит формы "
                 "адреса только по своим правилам: GitHub Pages и S3 отдают "
                 "`about/index.html` по /about/, но не по /about.html, а `faq.html` — "
                 "по /faq.html, но не по /faq/; на такие ссылки они отвечают 404",
-                a0=", ".join(written[:3]), a1=more)))
+                a0=", ".join(written[:3]), a1=more), (p for p, _ in forms))))
     return issues
 
 

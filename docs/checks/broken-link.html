@@ -99,7 +99,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>warning  broken-link  —</code></pre>
+<pre><code>warning  broken-link  links to pages that are not in the build: … — ……. On the live site they are 404s unless the server redirects them</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>The links point at pages the build does not have. Find where the template takes these addresses from, and either remove the link or generate the page. If the server redirects these addresses, check that the redirect really exists.</p></div>
 

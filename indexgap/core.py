@@ -1585,7 +1585,8 @@ def visible_text(raw: str) -> str:
 def find_slots(text: str, markdown: bool = False) -> list:
     """
     Следы незаполненного шаблона в тексте: [(вид, образец)], не больше трёх
-    образцов на вид. В исходнике Markdown `{{ }}` и `{% %}` — синтаксис Hugo
+    образцов на вид (полей шаблона и скобок — двенадцати: они предмет
+    находки, и четвёртое новое поле базовая линия должна видеть). В исходнике Markdown `{{ }}` и `{% %}` — синтаксис Hugo
     и Jekyll, а не шов: их там не ищем.
     """
     text = (text or "").replace("\u2019", "'")
@@ -1617,7 +1618,7 @@ def find_slots(text: str, markdown: bool = False) -> list:
                 continue
             if sample not in samples:
                 samples.append(sample)
-            if len(samples) >= (12 if kind == "bracket" else 3):
+            if len(samples) >= (12 if kind in ("bracket", "template") else 3):
                 break
         found += [(kind, sample) for sample in samples]
     return found
