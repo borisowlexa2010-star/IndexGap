@@ -705,6 +705,11 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
             rest = _locale_split(p.url)[2]
             if "/" in rest:
                 sections[rest.split("/", 1)[0]].append(p)
+            elif rest:
+                # Плоские адреса (`/rent-town-1/`): раздел — первое слово адреса.
+                head = [t for t in re.split(r"[-_.]+", rest.lower()) if t]
+                if len(head) > 1:
+                    sections[("-", head[0])].append(p)
         for part in sections.values():
             if cfg["boilerplate_min_pages"] <= len(part) < len(members):
                 for url, share in measure(part).items():
@@ -738,11 +743,11 @@ _REFRESH_CONTENT = re.compile(
     r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*(?:url\s*=\s*)?['\"]?"
     r"([^\"'\s>]+)", re.I)
 # Заглушка на одном скрипте: весь <script> — это `location.replace("/x/")`
-# или `window.location.href = "/x/"`, и ничего больше. Условный переход
+# (`assign`) или `window.location.href = "/x/"`, и ничего больше. Условный переход
 # внутри приложения (`if (!user) location.href = …`) сюда не попадает.
 _JS_REDIRECT = re.compile(
     r"^\s*(?:(?:window|self|top|document)\.)?location"
-    r"(?:\.replace\(\s*([\"'])([^\"'\s]+)\1\s*\)|(?:\.href)?\s*=\s*([\"'])([^\"'\s]+)\3)"
+    r"(?:\.(?:replace|assign)\(\s*([\"'])([^\"'\s]+)\1\s*\)|(?:\.href)?\s*=\s*([\"'])([^\"'\s]+)\3)"
     r"\s*;?\s*$")
 # RSC-поток Next.js с ошибкой-редиректом (`"digest":"NEXT_REDIRECT;…"`):
 # redirect() сработал при отрисовке, и шапка с подвалом вокруг пустого
@@ -902,6 +907,10 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         if getattr(p, "nofollow", False):
             nofollow.add(p.url)
             followed[p.url] = {landing} if landing and landing != p.url else set()
+        elif landing and landing != p.url:
+            # Заглушку поисковик не читает как страницу — он уходит по
+            # редиректу. Ссылки из её тела никуда не ведут.
+            followed[p.url] = {landing}
         else:
             followed[p.url] = targets
         for t in targets:
@@ -914,6 +923,15 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             twin = by_key.get(url_key(href)) if href else None
             if twin and twin != p.url:
                 by_hreflang[p.url].add(twin)
+
+    # Поисковик верит hreflang, только если версия называет страницу в ответ,
+    # и не читает его на странице под noindex. Иначе связи нет: страница, на
+    # которую указал один hreflang с главной, оставалась «не сиротой».
+    by_page = {p.url: p for p in pages}
+    by_hreflang = defaultdict(set, {
+        source: {t for t in twins if source in by_hreflang.get(t, ())}
+        for source, twins in by_hreflang.items()
+        if not getattr(by_page[source], "noindex", False)})
 
     home = by_key.get(url_key(home_url)) if home_url else None
     # Главная-заглушка: ссылок из неё нет, и без этого шага недостижимым
@@ -965,7 +983,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     behind_nofollow = []
     if (nofollow or soft) and home:
         loose = walk(lambda u: set() if u in blocked
-                     else set(outbound.get(u, ())) | soft.get(u, set())
+                     else set(followed.get(u, ()) if u in landing_of and u not in nofollow
+                              else outbound.get(u, ())) | soft.get(u, set())
                      | by_hreflang.get(u, set()))
         behind_nofollow = sorted(u for u in loose if u not in depth)
     # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
@@ -1481,6 +1500,14 @@ def misdirected(pages: list) -> dict:
     return out
 
 
+class _Bare:
+    """Кусок текста, который `text_volume` меряет как страницу."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.word_count = len(tokenize(text))
+
+
 _CLOSED_BY_DESIGN = {"print", "print.html", "toc", "toc.html", "search", "search.html",
                      "404", "404.html", "search-results"}
 
@@ -1502,6 +1529,10 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
 
     titles = defaultdict(list)
     descriptions = defaultdict(list)
+    # Шапка, меню и подвал страницы без <main>: одинаковые у многих страниц —
+    # обвязка сайта, и в объём статьи она не входит.
+    frames = Counter(p.framed for p in pages
+                     if not p.chrome and getattr(p, "framed", ""))
     for p in pages:
         # Отдельные noindex/canonical-находки не отменяют намеренную
         # консолидацию URL и не делают её дублем индексируемой страницы.
@@ -1594,6 +1625,10 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
                               "считает эту страницу копией того адреса, в sitemap она не идёт",
                               a0=p.canonical, a1=p.__dict__["_canonical_origin"])))
         volume = text_volume(p, language)
+        if not p.chrome and getattr(p, "framed", "") and frames[p.framed] >= 3:
+            rest = volume - text_volume(_Bare(p.framed), language)
+            if rest > 0:
+                volume = rest
         if volume < cfg["thin_words"]:
             issues.append(("warning", p.url, "thin",
                            tr("объём текста ≈ {a0} — тонкая страница", a0=volume)))

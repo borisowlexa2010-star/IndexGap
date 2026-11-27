@@ -1905,6 +1905,21 @@ def _opening(page) -> list:
     её H1 — или первого заголовка, если H1 нет.
     """
     words = page.words
+    # Крошки и подпись автора — не начало текста. Крошка обычно кончается
+    # тем же H1, и начало искалось с названия города; подпись «By the
+    # Editorial Team» одинакова у всех статей блога.
+    service = [w for w in (tokenize(t) for t in getattr(page, "service", None) or ()) if w]
+    if service:
+        kept, at, window = [], 0, words[:400]
+        while at < len(window):
+            for block in service:
+                if window[at:at + len(block)] == block:
+                    at += len(block)
+                    break
+            else:
+                kept.append(window[at])
+                at += 1
+        words = kept + words[len(window):]
     heads = page.headings or []
     title = next((t for level, t in heads if level == 1), heads[0][1] if heads else "")
     marker = tokenize(title) if title else []
@@ -1919,6 +1934,24 @@ def _opening(page) -> list:
 SLOT_MARK = "…"
 
 
+def _inflected(word: str, slots: set) -> bool:
+    """
+    Слово — другая форма значения из H1: «Москва» в H1 и «в Москве» в
+    подзаголовках, «Уфа» и «в Уфе». Отличаться может только окончание: у
+    короткого из двух слов — последняя буква, у длинного — до трёх.
+    """
+    if len(word) < 3 or word.isdigit():
+        return False
+    for slot in slots:
+        if len(slot) < 3 or slot.isdigit():
+            continue
+        n = len(os.path.commonprefix([word, slot]))
+        if (n >= 2 and n >= min(len(word), len(slot)) - 1
+                and n >= max(len(word), len(slot)) - 3):
+            return True
+    return False
+
+
 def _slot_skeletons(pages: list, skip: set) -> dict:
     """Скелеты заголовков, где слова-подстановки из H1 заменены меткой."""
     h1_words = {}
@@ -1926,7 +1959,8 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
     for page in pages:
         heads = page.headings or []
         h1 = next((t for level, t in heads if level == 1), "")
-        own = {w.lower() for w in tokenize(h1) if len(w) >= 2 and not w.isdigit()}
+        # Число — тоже значение подстановки: индекс 90210, «District 3».
+        own = {w.lower() for w in tokenize(h1) if len(w) >= 2 or w.isdigit()}
         h1_words[page.url] = own
         df.update(own)
     half = len(pages) / 2
@@ -1942,7 +1976,8 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
             if level < 2:
                 continue
             tokens = [w.lower() for w in tokenize(text)]
-            kept = [SLOT_MARK if w in slots else w for w in tokens]
+            kept = [SLOT_MARK if w in slots or _inflected(w, slots) else w
+                    for w in tokens]
             # Заголовок из одного значения («Alpha») — не шаблонная фраза:
             # такой скелет совпал бы у любых страниц со списком городов.
             if SLOT_MARK in kept and any(w != SLOT_MARK for w in kept):
@@ -1956,6 +1991,8 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
 
 
 SECTION_SEAM_MIN = 5
+# Доля раздела, с которой скелет считается одним из его шаблонов.
+TEMPLATE_PART = 0.3
 
 
 _SLUG_TOKEN = re.compile(r"[-_.]+")
@@ -2049,18 +2086,40 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     in_section = _section_counter(
         pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2)
 
-    def stamped_here(urls):
+    # Два шаблона в одном каталоге: тридцать страниц аренды и тридцать
+    # услуг под /rent/ — у каждого скелета половина раздела, и порог в 70%
+    # не брал ни один. Скелеты, каждый из которых занимает заметную долю
+    # раздела, складываются: вместе они и есть раздел. Только скелеты из
+    # трёх заголовков и больше: «Введение, Итоги» бывают у любых статей.
+    covered = Counter()
+
+    def cover(groups):
+        for skeleton, urls in groups:
+            if len(skeleton) >= 3 and len(urls) >= SECTION_SEAM_MIN:
+                size, prefix = in_section(urls)
+                if size and len(urls) >= size * TEMPLATE_PART:
+                    covered[prefix] += len(urls)
+
+    def stamped_here(urls, skeleton=()):
         if len(urls) >= threshold:
             return True
         if len(urls) < SECTION_SEAM_MIN:
             return False
-        size, _ = in_section(urls)
-        return size >= cfg["min_pages_for_seams"] and len(urls) >= size * cfg["template_share"]
+        size, prefix = in_section(urls)
+        if size < cfg["min_pages_for_seams"]:
+            return False
+        return (len(urls) >= size * cfg["template_share"]
+                or (len(skeleton) >= 3 and len(urls) >= size * TEMPLATE_PART
+                    and covered[prefix] >= size * cfg["template_share"]))
 
+    cover(skeletons.items())
+
+    stamped_groups = []
     for skeleton, urls in sorted(skeletons.items()):
-        if stamped_here(urls):
+        if stamped_here(urls, skeleton):
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             stamped.update(urls)
+            stamped_groups.append((skeleton, urls))
             for url in sorted(urls):
                 issues.append((
                     "warning", url, "template-skeleton",
@@ -2071,8 +2130,14 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     # одной пары. Слово из H1, которое есть меньше чем у половины страниц, —
     # значение подстановки; оно заменяется меткой, и скелеты сравниваются
     # ещё раз. Только для страниц, которых точное сравнение не нашло.
-    for skeleton, urls in sorted(_slot_skeletons(pages, stamped).items()):
-        if stamped_here(urls):
+    slotted = _slot_skeletons(pages, stamped)
+    # Страница не должна попасть в сумму дважды: раз точным скелетом, раз —
+    # с меткой подстановки.
+    covered.clear()
+    cover(stamped_groups)
+    cover(slotted.items())
+    for skeleton, urls in sorted(slotted.items()):
+        if stamped_here(urls, skeleton):
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             for url in sorted(urls):
                 issues.append((

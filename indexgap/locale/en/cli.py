@@ -2,6 +2,9 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    "--home {a0}: такой страницы нет среди разобранных файлов. Укажи адрес страницы сборки — полный или путь от --site.":
+        "--home {a0}: there is no such page among the parsed files. Give the address "
+        "of a page in the build — a full one or a path from --site.",
     "в тексте страницы есть «TODO» — если это пометка автора, а не предмет текста, страница не дописана":
         "the page text contains “TODO” — if it is the author's note rather than "
         "the subject of the text, the page is unfinished",
