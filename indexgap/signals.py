@@ -359,11 +359,20 @@ def cjk_swap(text: str, expected: set) -> tuple:
 CODE_SHARE = 0.2
 _CODE_SPAN = re.compile(r"<(pre|code)\b[^<>]*>(.*?)</\1\s*>", re.I | re.S)
 _TAG = re.compile(r"<[^<>]*>")
+# Где код читателю не виден и к тексту страницы не относится: комментарий,
+# шаблон в <script>, скрытый блок, меню и подвал. `<pre>` в шаблоне виджета
+# глушил обе проверки языка на непереведённой странице.
+_UNSEEN = re.compile(r"<!--.*?-->|<(script|style|template|noscript|nav|footer|aside)(?=[\s>]).*?</\1\s*>"
+                     r"|<(\w+)\b[^<>]*\s(?:hidden|aria-hidden\s*=\s*[\"']?true)(?=[\s>/=\"'])[^<>]*>"
+                     r".*?</\2\s*>",
+                     re.I | re.S)
+_ELEMENT_LANG = re.compile(r"<(?:body|main|article|section|div)\b[^<>]*?\slang\s*=\s*[\"']?([\w-]+)",
+                           re.I)
 
 
 def _much_code(raw: str, prose: str) -> bool:
     """Код в `<pre>`/`<code>` — не меньше пятой части букв прозы."""
-    raw = (raw or "")[:400_000]
+    raw = _UNSEEN.sub(" ", (raw or "")[:400_000])
     if not _CODE_TAG.search(raw):
         return False
     code = sum(len("".join(_LETTERS.findall(_TAG.sub(" ", m.group(2)))))
@@ -388,6 +397,9 @@ def lang_script(pages: list) -> list:
         if not expected:
             continue
         prose = "\n".join(page.paragraphs or ())
+        # Язык, объявленный у блока (`<main lang="de">`, `<div lang="en">`), —
+        # верная разметка части страницы: текст на нём не «непереведён».
+        parts = {m.group(1) for m in _ELEMENT_LANG.finditer((page.raw or "")[:400_000])}
         script, share, letters = text_script(prose, expected)
         swapped, swapped_share = cjk_swap(prose, expected)
         if swapped:
@@ -398,6 +410,8 @@ def lang_script(pages: list) -> list:
             # этого не видит, служебные слова — видят.
             from . import langid
             other = langid.mismatch(page.lang, prose)
+            if other in {langid.primary(p) for p in parts}:
+                other = ""
             if other and not (other == "en" and _much_code(page.raw, prose)):
                 issues.append(("warning", page.url, "lang-text-mismatch", tr(
                     "страница объявляет lang=«{a0}», а текст написан на другом языке "
@@ -409,6 +423,8 @@ def lang_script(pages: list) -> list:
             continue
         # Без прозы абзацами становятся код и таблицы, а код — латиница.
         if script == "latin" and _much_code(page.raw, prose):
+            continue
+        if any(script in declared_scripts(p) for p in parts):
             continue
         issues.append(("warning", page.url, "lang-script-mismatch", tr(
             "страница объявляет lang=«{a0}», а {a1:.0%} букв её текста — {a2}. "

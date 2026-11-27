@@ -1899,7 +1899,9 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
         message += " " + tr(
             "У {a0} из них canonical ведёт на страницу, которой среди файлов нет.",
             a0=orphaned)
-    kept.append(("critical", "hreflang", "translations-parked", message))
+    # Предмет — языки: перевод, запаркованный после базовой линии, — новая
+    # находка, а не та же самая с другим числом в тексте.
+    kept.append(("critical", "hreflang", "translations-parked", Said(message, by_lang)))
     notes.append(tr(
         "запаркованные переводы: {a0} страниц(ы) сведены в одну находку, "
         "снято {a1} повторов — у каждой страницы было до семи находок "
