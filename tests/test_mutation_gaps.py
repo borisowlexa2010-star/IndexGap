@@ -566,13 +566,24 @@ class TestClickDepth(unittest.TestCase):
 
 class TestSlotFloor(unittest.TestCase):
     def test_below_the_floor_a_pair_is_not_rechecked(self):
-        """Одно подставленное слово 11 раз: сходство 45/155 = 0.29 — ниже 0.30."""
+        """Одиннадцать разных подстановок: сходство 45/155 = 0.29 — ниже 0.30.
+        Выше порога эта пара перепроверялась бы (доля вхождений — 11 из 104)."""
+        base = words("текст", 104)
+        a, b = list(base), list(base)
+        for n in range(11):
+            a[4 + n * 9], b[4 + n * 9] = f"москва{n}", f"казань{n}"
+        self.assertEqual(similarity([page(f"{SITE}/a/", " ".join(a)),
+                                     page(f"{SITE}/b/", " ".join(b))]), [])
+
+    def test_below_the_floor_one_slot_word_is_rechecked(self):
+        """Одно подставленное слово 11 раз — дорвей: словарь различается одним
+        словом, и пара перепроверяется, хотя сходство шинглов 0.29 (1.29)."""
         base = words("текст", 104)
         a, b = list(base), list(base)
         for n in range(11):
             a[4 + n * 9], b[4 + n * 9] = "москва", "казань"
         self.assertEqual(similarity([page(f"{SITE}/a/", " ".join(a)),
-                                     page(f"{SITE}/b/", " ".join(b))]), [])
+                                     page(f"{SITE}/b/", " ".join(b))]), [1.0])
 
 
 class TestBoilerplateShares(unittest.TestCase):

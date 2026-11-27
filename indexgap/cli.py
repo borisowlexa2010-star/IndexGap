@@ -557,6 +557,16 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     return {"new": new, "fixed": fixed, "accepted": still, "unchecked": skipped}
 
 
+def baseline_method(path: str) -> str:
+    """Каким методом база искала дубли: попарно или LSH (с 1.10 в JSON)."""
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            got = json.load(fh).get("duplicate_method")
+    except (OSError, ValueError, AttributeError):
+        got = None
+    return got if isinstance(got, str) else ""
+
+
 def _print_baseline(path: str, diff: dict) -> None:
     new = diff["new"]
     crit = [i for i in new if i["level"] == "critical"]
@@ -574,6 +584,15 @@ def _print_baseline(path: str, diff: dict) -> None:
                  "неё: {a0} находок сверки не проверены и в «исчезло» не входят, "
                  "а новые числа не сверялись. Передай тот же --dataset",
                  a0=len(diff.get("unchecked") or [])))
+    if diff.get("duplicate_method_changed"):
+        # Сайт перешёл порог exact_below: LSH находит пары с вероятностью, и
+        # пропавший дубль может оказаться пропущенным, а не исправленным.
+        gone = sum(1 for i in diff["fixed"] if i.get("code") in ("near-duplicate", "similar"))
+        print(tr("  ! база искала дубли методом «{a0}», этот прогон — «{a1}» (порог "
+                 "exact_below): из исчезнувших {a2} — находки о дублях, их сравнение "
+                 "приблизительно. Для точной сверки задай тот же метод через "
+                 "checks.exact_below", a0=diff["duplicate_method_changed"][0],
+                 a1=diff["duplicate_method_changed"][1], a2=gone))
 
 
 # ── команды ───────────────────────────────────────────────────────────────────
@@ -806,6 +825,10 @@ def cmd_check(args):
         diff = compare_baseline(analysis["issues"], baseline,
                                 accepted=analysis.get("accepted"), unchecked=unchecked)
         diff["facts_off"] = bool(unchecked)
+        method_before, method_now = baseline_method(args.baseline), analysis.get("duplicate_method")
+        diff["duplicate_method_changed"] = ([method_before, method_now]
+                                            if method_before and method_now
+                                            and method_before != method_now else None)
     _write_json(json_path, {
         "site": args.site,
         "pages": len(pages),

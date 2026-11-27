@@ -632,6 +632,8 @@ MESSAGES = {
         '  baseline findings accepted since then through ignore: {a0} — they are still on the site and are not counted as gone',
     '  ! база снята со сверкой фактов по датасету, этот прогон — без неё: {a0} находок сверки не проверены и в «исчезло» не входят, а новые числа не сверялись. Передай тот же --dataset':
         '  ! the baseline was made with fact-checking against a dataset, this run without it: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Pass the same --dataset',
+    '  ! база искала дубли методом «{a0}», этот прогон — «{a1}» (порог exact_below): из исчезнувших {a2} — находки о дублях, их сравнение приблизительно. Для точной сверки задай тот же метод через checks.exact_below':
+        '  ! the baseline searched for duplicates with “{a0}”, this run with “{a1}” (the exact_below threshold): {a2} of the gone findings are about duplicates, and that comparison is approximate. For an exact comparison set the same method with checks.exact_below',
     'индекс':
         'index',
     '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':

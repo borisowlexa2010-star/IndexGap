@@ -181,7 +181,10 @@ class RegionalNotDuplicateRisk(unittest.TestCase):
               + '</main></body></html>')
         report = run_check(folder)
         codes = [i["code"] for i in report["issues"]]
-        self.assertTrue(report["duplicates"])          # пары есть, и они региональные
+        # Пары есть, и они региональные: сказано заметкой, а в «похожие пары»
+        # они не идут (1.29) — заметка называет их не дублями.
+        self.assertTrue(any("не попали в дубли" in n for n in report["notes"]), report["notes"])
+        self.assertEqual(report["duplicates"], [])
         self.assertNotIn("duplicate-risk", codes)
         self.assertNotIn("near-duplicate", codes)
 
