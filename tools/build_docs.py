@@ -363,6 +363,15 @@ WHY = {
    "The cluster points at a URL that is not among the pages found. Either a "
    "version was removed and the template still declares it, or the addresses "
    "drifted apart.",
+ "hreflang-conflict":
+   "Every code in a cluster names one version, and every version has one code. "
+   "Two addresses under the same code (or two x-default links), or a page that "
+   "calls itself `en` while its siblings call it `fr`, is a contradiction, and "
+   "search engines may ignore the annotations involved.",
+ "hreflang-relative":
+   "Search engines require fully qualified alternate URLs, with scheme and "
+   "host. A root-relative href such as `/de/a/` may be ignored. The package "
+   "names it, and checks the cluster as the browser would resolve it.",
  "hreflang-lang-mismatch":
    "The declared language does not match the language the page is actually "
    "written in. This is the failure that sends a Spanish reader to an English "
@@ -489,7 +498,7 @@ FAMILIES = [
   "template gets wrong in three different ways. These checks validate the "
   "cluster as a whole rather than the tag in isolation.",
   ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
-   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch", "lang-text-mismatch", "fact-drift",
+   "hreflang-unknown-target", "hreflang-lang-mismatch", "hreflang-conflict", "hreflang-relative", "lang-script-mismatch", "lang-text-mismatch", "fact-drift",
    "hreflang-canonical-conflict",
    "hreflang-target-blocked", "hreflang-static-cluster", "hreflang-in-body"]),
 

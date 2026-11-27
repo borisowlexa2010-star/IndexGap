@@ -185,7 +185,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
             if child:
                 result = read_sitemap(child, _depth + 1, _seen, fetcher)
                 urls.extend(result["urls"])
-                alternates.update(result.get("alternates") or {})
+                _merge_alternates(alternates, result.get("alternates"))
                 problem = result["error"]
             if problem and problem not in errors:
                 errors.append(problem)
@@ -214,7 +214,7 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
                  if el.tag.rsplit("}", 1)[-1] == "link" and el.get("hreflang")
                  and "alternate" in (el.get("rel") or "").lower()]
         if links:
-            alternates[loc] = links
+            _merge_alternates(alternates, {loc: links})
     if not urls:
         return {"urls": [], "error": tr("{a0}: в файле нет ни одного <loc>", a0=source)}
     return {"urls": urls, "error": "", "alternates": alternates}
@@ -242,25 +242,46 @@ def read_sitemaps(sources, fetcher=None) -> dict:
             if url not in seen:
                 seen.add(url)
                 urls.append(url)
-        alternates.update(result.get("alternates") or {})
+        _merge_alternates(alternates, result.get("alternates"))
     return {"urls": urls, "errors": errors, "alternates": alternates}
+
+
+def _merge_alternates(into: dict, more) -> None:
+    """
+    Объединяет hreflang одного адреса из разных <url> и файлов. Поисковик
+    складывает их, а `update` оставлял последний: итог зависел от порядка
+    --sitemap.
+    """
+    for loc, links in (more or {}).items():
+        have = into.setdefault(loc, [])
+        for link in links:
+            if link not in have:
+                have.append(link)
 
 
 def apply_sitemap_alternates(pages: list, alternates: dict) -> int:
     """
     Отдаёт страницам hreflang, объявленный в sitemap. Возвращает, скольким.
 
-    Разметка в самой странице сильнее: sitemap дополняет только те страницы,
-    у которых своей нет.
+    Разметка в самой странице сильнее: у страницы со своей разметкой sitemap
+    только дополняет её кодами и адресами, которых в ней нет. Тема, которая
+    печатает в <head> один `x-default`, иначе прятала весь кластер из sitemap.
     """
     by_key = {url_key(loc): links for loc, links in (alternates or {}).items()}
     given = 0
     for page in pages:
-        if getattr(page, "alternates", None):
-            continue
         links = by_key.get(page.key)
-        if links:
+        if not links:
+            continue
+        own = getattr(page, "alternates", None)
+        if not own:
             page.alternates = list(links)
+            given += 1
+            continue
+        codes = {code.strip().lower() for code, _ in own}
+        extra = [(code, href) for code, href in links if code.strip().lower() not in codes]
+        if extra:
+            page.alternates = list(own) + extra
             given += 1
     return given
 

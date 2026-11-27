@@ -31,7 +31,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
@@ -252,6 +252,22 @@ def _origin(parts):
     return scheme, host
 
 
+_NO_PARTS = urlsplit("")
+
+
+def split_href(href):
+    try:
+        return urlsplit(href)
+    except ValueError:              # `http://[x` — битый адрес, не повод падать
+        return None
+
+
+def _latin_not_cyrillic(text: str) -> bool:
+    """Текст написан латиницей и в нём нет ни одной кириллической буквы."""
+    latin = sum(1 for ch in text or "" if "a" <= ch.lower() <= "z")
+    return latin >= 40 and not re.search("[\u0400-\u04ff]", text or "")
+
+
 def check(pages: list, cfg: dict = None) -> dict:
     """Все проверки hreflang разом. Возвращает находки, заметки и пары-регионы."""
     issues, notes = [], []
@@ -268,9 +284,23 @@ def check(pages: list, cfg: dict = None) -> dict:
     x_default = set()
     default_only = {}
     empty = []
+    self_only = []
 
     for page in pages:
         alternates = read_alternates(page)
+        # Относительный href поисковик не принимает: ему нужен полный адрес.
+        # Он называется своей находкой, а связи проверяются по адресу, до
+        # которого его достроит браузер, — иначе «нет self-ссылки» у
+        # страницы, которая на себя ссылается.
+        relative = [href for href in dict.fromkeys(h for _, h in alternates) if href and not (
+            (split_href(href) or _NO_PARTS).scheme and (split_href(href) or _NO_PARTS).netloc)]
+        if relative:
+            issues.append(("warning", page.url, "hreflang-relative", tr(
+                "адреса в hreflang записаны не полностью ({a0}) — поисковики "
+                "требуют полный адрес со схемой и хостом, например {a1}",
+                a0=", ".join(relative[:3]), a1=urljoin(page.url, relative[0]))))
+            alternates = [(code, urljoin(page.url, href) if href in relative else href)
+                          for code, href in alternates]
         declared[page.key] = alternates
         hidden = getattr(page, "alternates_in_body", 0) or 0
         if hidden:
@@ -290,6 +320,7 @@ def check(pages: list, cfg: dict = None) -> dict:
                 empty.append(page)
             continue
         keys, default_keys, lang_keys = set(), set(), set()
+        by_code = defaultdict(dict)
         for code, href in alternates:
             problem = check_tag(code)
             if problem:
@@ -304,8 +335,21 @@ def check(pages: list, cfg: dict = None) -> dict:
             else:
                 lang_keys.add(url_key(href))
             keys.add(url_key(href))
+            by_code[code.strip().lower()].setdefault(url_key(href), href)
         targets[page.key] = keys
         default_only[page.key] = default_keys - lang_keys
+        # Один код — одна версия. Два адреса под «en» или два x-default
+        # противоречат друг другу, и поисковик не знает, какой верить.
+        for code, hrefs in sorted(by_code.items()):
+            if len(hrefs) > 1:
+                issues.append(("warning", page.url, "hreflang-conflict", tr(
+                    "код «{a0}» объявлен для нескольких адресов ({a1}) — у одного "
+                    "кода может быть только одна версия, и противоречивую разметку "
+                    "поисковик отбрасывает", a0=code, a1=", ".join(list(hrefs.values())[:3]))))
+        # Шаблон, печатающий только текущую версию: разметка есть, а связей
+        # между переводами нет — то же, что её отсутствие.
+        if lang_keys == {page.key} and indexable(page):
+            self_only.append(page)
 
     # Шаблон, печатающий один и тот же кластер на всех страницах, — это одна
     # беда, а не тысяча. На живом каталоге недвижимости все 1 099 страниц
@@ -338,11 +382,7 @@ def check(pages: list, cfg: dict = None) -> dict:
     # одной ответной ссылке — уже не та страница, а её редирект. Сравнивается
     # с тем, как пишет сам сайт, а не с --site: неверный --site не должен
     # превращать каждую ссылку в находку.
-    def split(href):
-        try:
-            return urlsplit(href)
-        except ValueError:              # `http://[x` — битый адрес, не повод падать
-            return None
+    split = split_href
 
     origins = Counter()
     for alternates in declared.values():
@@ -487,6 +527,32 @@ def check(pages: list, cfg: dict = None) -> dict:
             issues.append(("warning", page.url, "hreflang-lang-mismatch",
                            tr("self-ссылка объявлена как «{a0}», а страница "
                               "объявляет lang=«{a1}»", a0=own[0], a2=None, a1=page.lang)))
+        # «uk» — украинский, а не Великобритания. Сам код верен, поэтому
+        # check_tag его пропускает; выдаёт подмену текст латиницей рядом
+        # с английской версией в том же кластере.
+        siblings = [code for code, href in declared.get(page.key, ())
+                    if url_key(href) != page.key and code.lower().split("-")[0] == "en"]
+        if (own and own[0].lower().split("-")[0] == "uk" and siblings
+                and _latin_not_cyrillic(page.text)):
+            issues.append(("warning", page.url, "hreflang-lang-mismatch", tr(
+                "{a0}: текст страницы не украинский, а рядом в кластере — английская "
+                "версия. Для Великобритании нужен код `en-GB`",
+                a0=tr(LOOKS_LIKE_A_COUNTRY["uk"][1]))))
+
+        # Члены кластера должны соглашаться, на каком языке каждая версия:
+        # страница, которая называет себя «en», а соседями названа «fr»,
+        # ломает кластер для всех.
+        for code, href in declared.get(page.key, ()):
+            other = known.get(url_key(href)) if href else None
+            if other is None or other.key == page.key or code.lower() == "x-default":
+                continue
+            theirs = [c for c, h in declared.get(other.key, ())
+                      if h and url_key(h) == other.key and c.lower() != "x-default"]
+            if theirs and not _same_language(code, theirs[0]):
+                issues.append(("warning", page.url, "hreflang-conflict", tr(
+                    "альтернатива {a0} объявлена здесь как «{a1}», а сама она "
+                    "называет себя «{a2}» — версии кластера расходятся в том, на "
+                    "каком она языке", a0=other.url, a1=code, a2=theirs[0])))
 
     # hreflang связывает переводы одной страницы. Требовать его у страницы,
     # у которой перевода нет, — шум: на живом сайте сообщества так попали `/about`,
@@ -499,6 +565,15 @@ def check(pages: list, cfg: dict = None) -> dict:
         if indexable(page):
             host, lang, rest = _locale_split(page.url)
             by_rest[(host, rest)].append((lang, page))
+    for page in self_only:
+        host, lang, rest = _locale_split(page.url)
+        others = [p.url for l, p in by_rest[(host, rest)] if l != lang]
+        if others:
+            issues.append(("warning", page.url, "hreflang-missing", tr(
+                "по тому же пути есть страница на другом языке ({a0}), а hreflang "
+                "этой страницы называет только её саму. Если это перевод — "
+                "перечисли в нём все языковые версии",
+                a0=", ".join(sorted(others)[:3]))))
     lonely = 0
     for page in empty:
         # В исходник на Markdown <link> не поставить — его добавит шаблон.

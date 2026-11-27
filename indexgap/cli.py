@@ -594,7 +594,7 @@ def _sitemap_hreflang(args, pages) -> None:
     given = doctor.apply_sitemap_alternates(pages, _sitemaps(args).get("alternates"))
     if given:
         print(tr("hreflang взят из sitemap для {a0} страниц(ы): в самих страницах "
-                 "его нет", a0=given))
+                 "его нет или он неполный", a0=given))
 
 
 def _warn_stale_skills(config_path: str) -> None:

@@ -290,6 +290,11 @@ MESSAGES = {
         "Remove the addresses that are not among the site's pages from the "
         "cluster, or correct them. Right now the cluster points at nothing, "
         "and a search engine is entitled to disregard it entirely.",
+    "Оставь у каждого кода один адрес и называй каждую версию одним и тем же кодом на всех страницах кластера.":
+        "Keep one address per code, and call each version by the same code on "
+        "every page of the cluster.",
+    "Пиши в href альтернатив полный адрес: схему, хост и путь.":
+        "Write the full address in each alternate's href: scheme, host and path.",
     "Приведи объявленный язык в соответствие с языком текста. Пока они расходятся, поисковик показывает страницу не тем читателям — и считает это правильным результатом.":
         "Bring the declared language in line with the language the text is "
         "written in. While they disagree, the engine shows the page to the "
