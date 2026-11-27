@@ -2800,8 +2800,20 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     if maybe_error:
         linked = {url_key(link) for page in loaded if page.path not in maybe_error
                   for link in page.links}
+        dropped = sorted(page.url for page in loaded if page.path in maybe_error
+                         and page.key not in linked
+                         and re.search(r"/index\.html?$", page.path.replace(os.sep, "/"), re.I))
         loaded = [page for page in loaded
                   if page.path not in maybe_error or page.key in linked]
+        # Статья `/http/404/` без входящих ссылок неотличима от страницы
+        # ошибки — но молча пропадать ей нельзя: в sitemap её не будет, а
+        # сирота — ровно то, что sitemap должен вывести к поисковику.
+        if dropped:
+            problems.append(tr(
+                "{a0} страниц(ы) в каталоге с именем кода ответа (…/404/) никто не "
+                "ссылается — сочтены страницами ошибки, не проверялись и в sitemap не "
+                "попадут: {a1}. Если это статьи — поставь на них ссылку",
+                a0=len(dropped), a1=", ".join(dropped[:3]) + (" …" if len(dropped) > 3 else "")))
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.

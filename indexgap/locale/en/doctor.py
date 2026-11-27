@@ -340,4 +340,18 @@ MESSAGES = {
         '{a0} is kept off {a1} of {a2} open pages (rule “Disallow: {a3}”): {a4}',
     'в {a0} запрос(ах) ботов к страницам не нашёлся код ответа — открыл ли бот эти страницы, по логу не понять, и в шаг «открыто» они не засчитаны. Проверь, в каком поле лог пишет статус':
         '{a0} bot request(s) to pages have no response status — the log does not show whether the bot got those pages, so they are not counted as opened. Check which field the log writes the status to',
+    '{a0}: корневой элемент не в пространстве имён {a1} ({a2}) — Search Console отвергает такой файл как «неверное пространство имён»':
+        '{a0}: the root element is not in the {a1} namespace ({a2}) — Search Console rejects such a file as “incorrect namespace”',
+    '{a0}: {a1} адресов, {a2} МБ — больше предела протокола ({a3} адресов и {a4} МБ на файл). Поисковик может отвергнуть файл целиком: разбей его на части под sitemap-индексом':
+        '{a0}: {a1} addresses, {a2} MB — over the protocol limit ({a3} addresses and {a4} MB per file). A search engine may reject the whole file: split it into parts under a sitemap index',
+    '{a0}: {a1} <loc> — не полные адреса ({a2}). Протокол требует адрес со схемой и хостом, поисковик такие строки пропускает — и здесь они ни с одной страницей не совпадут':
+        '{a0}: {a1} <loc> values are not full addresses ({a2}). The protocol requires a scheme and a host, search engines skip such entries — and here they match none of the pages',
+    '{a0}: {a1} <lastmod> — не дата W3C ({a2}): поисковик такие даты не принимает':
+        '{a0}: {a1} <lastmod> values are not W3C dates ({a2}): search engines do not accept them',
+    '{a0}: {a1} <lastmod> — в будущем ({a2}): поисковик таким датам не верит':
+        '{a0}: {a1} <lastmod> values are in the future ({a2}): search engines do not trust them',
+    '{a0}: у всех {a1} адресов один и тот же <lastmod> {a2} — это время сборки, а не правки, и поисковик перестаёт на него смотреть':
+        '{a0}: all {a1} addresses share one <lastmod> {a2} — that is the build time, not an edit, and search engines stop looking at it',
+    'не объявлено':
+        'not declared',
 }

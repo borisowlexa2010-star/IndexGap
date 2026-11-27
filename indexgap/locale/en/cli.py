@@ -98,7 +98,6 @@ MESSAGES = {
     "  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками.":
         "  ! --write-key without --key-dir: the key file must sit at the SITE ROOT, "
         "not next to your sources.",
-    "  ! sitemap не прочитан: {a0}": "  ! sitemap not read: {a0}",
     "  ! колонка с ключом не названа `keyword` — взята «{a0}». Если это не она, укажи явно: --keyword <имя колонки>":
         "  ! the keyword column is not called `keyword` — took “{a0}”. If that is "
         "the wrong one, say so: --keyword <column name>",
@@ -643,4 +642,18 @@ MESSAGES = {
     "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как страницы с переадресацией — в sitemap нужен адрес, куда они ведут.":
         "the sitemap lists redirect stubs ({a0}): {a1}. Search engines will report them as pages with redirect — the sitemap needs the address they lead to.",
     " и ещё {a0}": " and {a0} more",
+    'sitemap прочитан не целиком: {a0}. Шаг «в sitemap» и список «нет в sitemap» неполные':
+        'the sitemap was not read in full: {a0}. The “in the sitemap” step and the “missing from the sitemap” list are incomplete',
+    '  ! {a0} адрес(ов) в sitemap взяты из canonical в форме, которой раскладка файлов не отдаёт (check: canonical-form) — хостинг ответит редиректом или 404: {a1}. Поправь canonical':
+        '  ! {a0} sitemap address(es) come from a canonical in a form the file layout does not serve (check: canonical-form) — the host will answer with a redirect or a 404: {a1}. Fix the canonical',
+    '--public-prefix — путь на сайте ({a0}), а не адрес: шарды лежат на том же хосте, что и --site. Например: --public-prefix sitemaps':
+        '--public-prefix is a path on the site ({a0}), not an address: the shards live on the same host as --site. For example: --public-prefix sitemaps',
+    '  ! в sitemap {a0} адрес(ов), в прошлый раз было {a1}: больше половины выпало разом. Проверь noindex и canonical в шаблонах и X-Robots-Tag хостинга — чаще всего так выглядит правило, закрывшее целый раздел':
+        '  ! the sitemap has {a0} address(es), last time it had {a1}: more than half dropped out at once. Check noindex and canonical in the templates and the host’s X-Robots-Tag — this is usually a rule that closed a whole section',
+    '{a0} адрес(ов) в sitemap — не на {a1}, а на другой схеме или хосте ({a2}): каждый из них отвечает редиректом, и Search Console отметит их как «страница с переадресацией». В sitemap нужны адреса как в --site':
+        '{a0} sitemap address(es) are not on {a1} but on another scheme or host ({a2}): each of them answers with a redirect, and Search Console will report them as “page with redirect”. The sitemap needs addresses as in --site',
+    '  ! {a0} адрес(ов) в sitemap перехватывает правило хостинга (redirects в vercel.json, `301!`/`404!` в _redirects) раньше файла — поисковик получит редирект или ошибку, а не страницу: {a1}':
+        '  ! {a0} sitemap address(es) are caught by a host rule (redirects in vercel.json, `301!`/`404!` in _redirects) before the file — the search engine gets a redirect or an error, not the page: {a1}',
+    '  ! {a0} объявляет другой sitemap ({a1}), а записан {a2} — поисковик будет читать объявленный. Пропиши в robots.txt `Sitemap: {a2}`':
+        '  ! {a0} declares a different sitemap ({a1}), but {a2} was written — search engines will read the declared one. Add `Sitemap: {a2}` to robots.txt',
 }
