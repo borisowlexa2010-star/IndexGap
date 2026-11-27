@@ -36,6 +36,7 @@ import json
 import os
 import re
 import unicodedata
+from functools import lru_cache
 from urllib.parse import urlsplit
 from collections import Counter, defaultdict
 from .subject import Said
@@ -190,6 +191,9 @@ def _price_scale_at(text: str, end: int) -> tuple:
     return _PRICE_SCALES[word], match.end() - end
 
 
+# Подпись и название колонки повторяются на каждой странице: без кэша разбор
+# одних и тех же пяти заголовков стоил семь секунд на десять тысяч страниц.
+@lru_cache(maxsize=4096)
 def _scale_in(unit: str, price: bool = False) -> tuple:
     """(слово, множитель) множителя внутри подписи единицы — или ("", 1).
 
@@ -1047,6 +1051,7 @@ def _numbers_of(value) -> list:
     return out
 
 
+@lru_cache(maxsize=4096)
 def _column_scale(column) -> int:
     """Множитель из названия колонки — «цена, млн», `price_k` — или 1."""
     words = re.sub(r"[_\W]+", " ", str(column or "")).strip()
@@ -1324,6 +1329,17 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
                 if len(winners) > 1:
                     ambiguous.append(page.url)
     free = sorted(k for k, r in by_keyword.items() if id(r) not in claimed)
+    # Основы слов ключей считаются один раз, а не для каждой страницы, и
+    # кандидатами берутся только ключи с общим словом: при пороге выше нуля
+    # остальные всё равно не проходят. Иначе 4 тысячи страниц шли полторы минуты.
+    free_stems = [(k, _stems(k)) for k in free]
+    free_stems = [(k, t) for k, t in free_stems if t]
+    key_slugs = {k: set(re.findall(r"[a-z]+", slugify(k))) for k, _ in free_stems}
+    by_length = {}
+    for candidate_key, tokens in free_stems:
+        postings = by_length.setdefault(len(tokens), {})
+        for token in tokens:
+            postings.setdefault(token, []).append(candidate_key)
 
     for page in pending:
         row = None
@@ -1339,12 +1355,36 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
         own_slug = set() if own_slug.startswith("p-") else (
             {t for t in re.findall(r"[a-z]+", own_slug) if len(t) > 2}
             & set(re.findall(r"[a-z]+", slugify(haystack, max_len=10 ** 6))))
+
+        def fits(candidate_key):
+            return not own_slug or bool(own_slug & key_slugs[candidate_key])
+
+        if cfg["match_min_score"] > 0:
+            # Совпадения считаются по спискам ключей с общим словом, отдельно
+            # для каждой длины ключа: доля — совпавшие слова / длина.
+            best = None
+            for length, postings in by_length.items():
+                counts = Counter()
+                for token in haystack_tokens:
+                    counts.update(k for k in postings.get(token, ()) if fits(k))
+                if not counts:
+                    continue
+                top = max(counts.values())
+                if best is None or top * best[1] > best[0] * length \
+                        or (top * best[1] == best[0] * length and length > best[1]):
+                    best = (top, length, counts)
+            if best is not None and best[0] / best[1] >= cfg["match_min_score"]:
+                values = list(best[2].values())
+                if values.count(best[0]) > 1:
+                    ambiguous.append(page.url)
+                else:
+                    row = by_keyword[list(best[2])[values.index(best[0])]]
+            if row is not None:
+                matched[page.url] = row
+            continue
         scored = []
-        for candidate_key in free:
-            key_tokens = _stems(candidate_key)
-            if not key_tokens:
-                continue
-            if own_slug and not own_slug & set(re.findall(r"[a-z]+", slugify(candidate_key))):
+        for candidate_key, key_tokens in free_stems:
+            if not fits(candidate_key):
                 continue
             scored.append((len(key_tokens & haystack_tokens) / len(key_tokens),
                            len(key_tokens), candidate_key))
@@ -1798,7 +1838,8 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             own = {n for n in (_norm_number(raw) for raw in _numbers_of(row.get(column) or "")) if n}
             if not own or own == numbers:
                 constants |= numbers
-        allowed = _row_numbers(row) | constants
+        own = _row_numbers(row)
+        allowed = own | constants
         # Постоянные сайта сверяются своей мерой — вместе с мерой строки:
         # срок гарантии «12 months» законно стоит и рядом с «12 minutes».
         measures = _row_measures(row, fact_pattern)
@@ -1855,7 +1896,6 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             return text
 
         unknown_strong = {n: u for n, u in strong.items() if not supported(n, u)}
-        own = _row_numbers(row)
         kinds = _row_kinds(row)
         derived = {n: how for n, u in unknown_strong.items()
                    for how in [_derivation(n, own, kinds, _kind(u))] if how}
@@ -2493,6 +2533,7 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
         # В обратную сторону: строка без страницы — сбой генерации или фильтр.
         # Строка без ключа называется номером: раньше она шла пустой строкой.
         "rows_without_page": sorted(
-            str(r.get(keyword_field) or "").strip() or f"#{n}" for n, r in enumerate(rows or [], 1)
-            if id(r) not in {id(v) for v in matched.values()}),
+            str(r.get(keyword_field) or "").strip() or f"#{n}"
+            for matched_ids in [{id(v) for v in matched.values()}]
+            for n, r in enumerate(rows or [], 1) if id(r) not in matched_ids),
     }

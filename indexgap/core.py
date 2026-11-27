@@ -465,6 +465,9 @@ def url_key(url: str) -> str:
     # cleanUrls ссылается так на каждой странице, и вышло 307 «битых» ссылок.
     if len(path) > 1:
         path = path.rstrip("/")
+        # Каталог с именем файла — `c.html/index.html`: сервер отдаёт его и по
+        # /c.html, а ключ страницы расходился с ключом ссылки.
+        path = _EXT_RE.sub("", path)
     path = _BARE_INDEX.sub(r"\1", path)
     if len(path) > 1:
         path = path.rstrip("/")
@@ -2998,7 +3001,8 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         # `a.html` рядом с `a/index.html`: какую форму отдаст хостинг, не понять.
         key = page.key
         kinds[key] = kind if kinds.get(key, kind) == kind else None
-        files[key] = os.path.basename(page.path or "")
+        # Имя в NFC, как и адрес страницы: macOS пишет его в NFD.
+        files[key] = unicodedata.normalize("NFC", os.path.basename(page.path or ""))
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
     # Сборку `.next/server` отдаёт сервер Next.js по маршрутам: `/pricing`,
@@ -3042,7 +3046,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             # переписывает `b.md` сам.
             exact = (html and form in ("file", "index")
                      and (kind, form) in (("folder", "index"), ("flat", "file"))
-                     and path.rsplit("/", 1)[-1] != files.get(key))
+                     and unicodedata.normalize("NFC", path.rsplit("/", 1)[-1]) != files.get(key))
             if (kind, form) not in always and not exact:
                 continue
             local = path[len(base):] if base and path.startswith(base + "/") else path
@@ -3295,6 +3299,9 @@ def _apply_fetch_manifest(pages: list, root: str, base_url: str) -> None:
             page.url = urlunsplit((site.scheme, site.netloc, urlsplit(url).path or "/", "", ""))
 
 
+_INDEX_NAME = re.compile(r"index\.(?:html?|md|markdown)$", re.I)
+
+
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
     """
     Возвращает (страницы, проблемы). Проблемы — это файлы, которые не прочитались,
@@ -3302,7 +3309,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
-    todo, maybe_error = [], set()
+    todo, maybe_error, hidden_dirs = [], set(), []
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
@@ -3345,6 +3352,14 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                     problems.append(tr(
                         "каталог {a0}/ пропущен как сборочный. Если проверять "
                         "нужно собранный сайт — передай его каталог явно.", a0=name))
+        # В готовом сайте служебное имя каталога (`venv`, `.guides`) — не
+        # повод молча терять его страницы: о пропуске говорится вслух.
+        if not source_repo:
+            hidden_dirs.extend(
+                os.path.relpath(os.path.join(dirpath, d), root).replace(os.sep, "/")
+                for d in sorted(dirnames)
+                if (d.startswith(".") or d in ALWAYS_SKIP) and d not in (".git", ".svn")
+                and _has_pages(os.path.join(dirpath, d), exts))
         # Порядок обхода — по имени: readdir отдаёт каталоги в порядке
         # файловой системы, и список «первых пяти» менялся от машины к машине.
         dirnames[:] = sorted(d for d in dirnames
@@ -3379,6 +3394,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             readme_home = ((jekyll or not source_repo) and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
+    if hidden_dirs:
+        problems.append(tr(
+            "каталоги со служебными именами пропущены, страницы в них не проверялись: {a0}",
+            a0=", ".join(d + "/" for d in hidden_dirs[:5])
+            + (tr(" и ещё {a0}", a0=len(hidden_dirs) - 5) if len(hidden_dirs) > 5 else "")))
     for kind, path, value in _parse_all(todo, jobs):
         if kind == "page" and jekyll:
             _jekyll_post_url(value, root, base_url, jekyll_config)
@@ -3411,6 +3431,14 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
     loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded, root)
+    # В какой форме сайт ссылается на адрес — до `_settle_flat_urls`, которая
+    # эти формы забирает. Нужно только при совпавших адресах.
+    link_forms = defaultdict(set)
+    if len({page.key for page in loaded}) < len(loaded):
+        for item in loaded:
+            for key, form, _ in item.__dict__.get("_link_forms", ()):
+                if form != "bare":
+                    link_forms[key].add("flat" if form == "file" else "folder")
     _settle_flat_urls(loaded, root, base_url)
     _apply_fetch_manifest(loaded, root, base_url)
     _apply_header_rules(loaded, root, base_url, problems)
@@ -3420,6 +3448,29 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             "не проверялись: {a1}", a0=len(fragments),
             a1=", ".join(os.path.relpath(p, root).replace(os.sep, "/") for p in fragments[:5])))
     position = {}
+
+    def served(a, b):
+        """Тот из двух файлов, который отдаёт хост, — или None, если не ясно."""
+        da, na = os.path.split(a.path)
+        db, nb = os.path.split(b.path)
+        # В одном каталоге index.html и старый index.htm: сервер отдаёт
+        # index.html (он раньше в DirectoryIndex), а проверялась копия.
+        if da == db and {na.lower(), nb.lower()} == {"index.html", "index.htm"}:
+            return a if na.lower() == "index.html" else b
+        folder_a, folder_b = (_INDEX_NAME.match(na) is not None,
+                              _INDEX_NAME.match(nb) is not None)
+        if folder_a == folder_b:
+            return None
+        # `about.html` и `about/index.html` хост отдаёт по разным адресам:
+        # `/about.html` и `/about/`. Если сайт ссылается на адрес только в
+        # одной форме, проверяется файл, который по ней и откроется.
+        forms = link_forms.get(a.key, set())
+        if forms == {"folder"}:
+            return a if folder_a else b
+        if forms == {"flat"}:
+            return b if folder_a else a
+        return None
+
     for page in loaded:
         other = by_key.get(page.key)
         if other is None:
@@ -3431,9 +3482,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
         # что раньше встретился в обходе: заглушка `about.html` рядом
         # с настоящей `about/index.html` уносила её исходящие ссылки,
         # и целевые страницы становились ложными сиротами.
+        host = served(page, other)
         keep, drop = ((page, other)
-                      if (len(page.links), len(page.text)) >
-                         (len(other.links), len(other.text))
+                      if (host is page if host is not None else
+                          (len(page.links), len(page.text)) >
+                          (len(other.links), len(other.text)))
                       else (other, page))
         problems.append(
             tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
@@ -3447,6 +3500,17 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт "
             "как есть, а не страницы; не проверялись: {a1}",
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
+    # `Guide/` и `guide/` на Linux — две страницы, а на macOS, Windows и
+    # хостинге без учёта регистра одна затирает другую.
+    folded = defaultdict(list)
+    for page in pages:
+        folded[page.key.lower()].append(page)
+    twins = sorted(sorted(os.path.relpath(p.path, root).replace(os.sep, "/") for p in group)
+                   for group in folded.values() if len(group) > 1)
+    for group in twins[:5]:
+        problems.append(tr("{a0} различаются только регистром букв: на macOS, Windows и "
+                           "хостинге без учёта регистра один файл затрёт другой",
+                           a0=", ".join(group)))
     _settle_canonical_origins(pages, base_url, problems)
     pages.sort(key=lambda p: p.url)
     return pages, problems
