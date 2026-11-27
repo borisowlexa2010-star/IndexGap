@@ -185,11 +185,19 @@ def units_from_dataset(rows: list, keyword_field: str = None, min_count: int = 2
     Единица должна встретиться не в одной строке: единичное совпадение —
     это почти всегда кусок описания, а не мера.
     """
+    from .content import NUMBER, _COLUMN_TERMS, _column_unit, _is_identifier
     counter = Counter()
     for row in rows or ():
         for field, value in (row or {}).items():
             if keyword_field and field == keyword_field:
                 continue
+            # «12 Main Street» — адрес, а не двенадцать «main».
+            if _is_identifier(field, value):
+                continue
+            # Голое число в `deposit_months` — те же «months».
+            unit = _column_unit(field)
+            if unit in _COLUMN_TERMS and re.fullmatch(NUMBER, str(value).strip()):
+                counter[unit] += 1
             for match in UNIT_AFTER_NUMBER.finditer(str(value)):
                 unit = match.group(1).strip().lower()
                 if unit and not unit.isdigit() and unit not in NOT_A_UNIT:

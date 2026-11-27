@@ -1176,7 +1176,8 @@ class TestInventedNumbers(unittest.TestCase):
 
 class TestSiteConstants(unittest.TestCase):
     def rows(self, having, total, value="500"):
-        return [{"fee": value if i < having else str(1000 + i)} for i in range(total)]
+        # 1.29: the other rows are empty — unique values there are row data.
+        return [{"fee": value if i < having else ""} for i in range(total)]
 
     def test_half_of_the_rows_make_a_constant(self):
         self.assertIn("500", content._site_constants(self.rows(5, 10)))

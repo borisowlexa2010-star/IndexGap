@@ -79,6 +79,9 @@ _HYPHEN_SIGNS = r"\-\u2010\u2011"
 _SAME_SIGNS = str.maketrans({"٫": ".", "٬": ",", "٪": "%",
                              "％": "%", "﹪": "%", "’": "'",
                              "ʼ": "'", "，": ",", "．": ".",
+                             # Полноширинные «￥9,900» и «＄99» — те же иена и
+                             # доллар, «45㎡» — те же квадратные метры.
+                             "￥": "¥", "＄": "$", "㎡": "m²",
                              # Невидимые знаки направления письма: RTL-редакторы
                              # ставят `&rlm;` рядом с числом, и «35‏ دولارا» не
                              # читалось как цена.
@@ -99,6 +102,8 @@ def _same_signs(text: str) -> str:
 SCALES = {
     "万": 10**4, "萬": 10**4, "만": 10**4, "億": 10**8, "亿": 10**8, "억": 10**8,
     "千": 10**3, "천": 10**3,
+    # «8千万円», «2천만원» — десять миллионов: раньше читалось как тысяча.
+    "千万": 10**7, "千萬": 10**7, "천만": 10**7,
     "тыс": 10**3, "тысяч": 10**3, "тысячи": 10**3, "тысяча": 10**3,
     "млн": 10**6, "миллион": 10**6, "миллиона": 10**6, "миллионов": 10**6,
     "млрд": 10**9, "миллиард": 10**9, "миллиарда": 10**9, "миллиардов": 10**9,
@@ -116,8 +121,9 @@ SCALES = {
 _CJK_SCALES = "万萬만億亿억千천"
 _SCALE_WORDS = "|".join(re.escape(w) for w in sorted(
     (k for k in SCALES if k[0] not in _CJK_SCALES), key=len, reverse=True))
+_CJK_SCALE = r"千[万萬]|천만|[" + _CJK_SCALES + r"]"
 _SCALE_AFTER = re.compile(
-    _SP + r"?(?:([" + _CJK_SCALES + r"])|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
+    _SP + r"?(?:(" + _CJK_SCALE + r")|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
 
 
 def _scale_in(unit: str) -> tuple:
@@ -173,8 +179,11 @@ _LOCAL_PREFIX = re.compile(LOCAL_PREFIXES)
 # Знак с пробелом — «$ 2,900», «€ 1.900» — та же цена: так пишут в нидерландской,
 # немецкой и французской типографике. Но знак, перед которым стоит число
 # («1.900 € 12 Monate»), — это валюта после числа, а не перед следующим.
+# Иероглифы, кана и хангыль — буквы для `\w`, но пробелов в этих письменностях
+# нет: «价格为$450。», «料金は¥9,900。» — знак валюты стоит вплотную к слову.
+_CJK_LETTERS = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
 PREFIX_PRICE = re.compile(
-    r"(?<![\w.,$])((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽]" + _SP
+    r"(?:(?<![\w.,$])|(?<=[" + _CJK_LETTERS + r"]))((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽]" + _SP
     + r"|(?:" + CURRENCY_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
 
 # Валюта после числа: `9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `3万円`. Раньше
@@ -200,9 +209,10 @@ CJK_CURRENCY_WORDS = "ドル|ユーロ|美元|欧元|港元|新元|人民币|달
 SUFFIX_PRICE = re.compile(
     NOT_INSIDE + r"(" + NUMBER + r")"
     # Слово-множитель — целым словом: «18945 kgbp» — не тысячи фунтов.
-    r"(?:" + _SP + r"?(?:[" + _CJK_SCALES + r"]|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))))?"
+    r"(?:" + _SP + r"?(?:" + _CJK_SCALE + r"|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))))?"
     + _SP + r"?(?:" + CJK_CURRENCY_WORDS + r"|[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS
-    + "|" + CURRENCY_CODES + r")(?![^\W\d_]))", re.I | re.U)
+    + "|" + CURRENCY_CODES + r")(?:(?![^\W\d_])|(?<=[a-zA-Z])(?=[" + _CJK_LETTERS + r"])))",
+    re.I | re.U)
 
 
 # Общее «число + слово»: ловит «12 лет», «25 тонн», «3500 заказов» —
@@ -296,7 +306,7 @@ def _unit_forms(units: list) -> list:
     """Единицы проекта вместе с единственным числом и сокращениями: months → month."""
     out = set()
     for unit in units or ():
-        unit = (unit or "").strip()
+        unit = _same_signs(unit or "").strip()
         if not unit:
             continue
         out.add(unit)
@@ -325,7 +335,8 @@ def build_fact_pattern(units: list):
     spaced = [re.escape(u) for u in units if not _CJK_CHAR.search(u)]
     glued = [re.escape(u) for u in units if _CJK_CHAR.search(u)]
     alternatives = "|".join(
-        (["(?:" + "|".join(spaced) + r")(?![^\W\d_])"] if spaced else [])
+        # «45kmです», «45min到达»: за латинской единицей вплотную идёт CJK.
+        (["(?:" + "|".join(spaced) + r")(?![^\W\d_" + _CJK_LETTERS + r"])"] if spaced else [])
         + (["(?:" + "|".join(glued) + ")"] if glued else []))
     # Через дефис — составное прилагательное: «a 4-month deposit», «a 44-minute
     # ride». Раньше такое число не читалось вовсе. «5 min read» — подпись блога.
@@ -386,7 +397,21 @@ def _scaled(raw: str, factor: int) -> str:
 _CJK_COMPOUND = re.compile(r"(?<![\d.,])(\d{1,4})([万萬]|만" + _SP + r"?)(\d{1,4})([千천])?(?![\d.,]?\d)")
 
 
+# «1億2000万円», «3억 2천만원» — тоже одно число: 120000000 и 320000000.
+_CJK_OKU = re.compile(r"(?<![\d.,])(\d{1,4})([億亿]|억" + _SP + r"?)(\d{1,4})(千[万萬]|천만|[万萬]|만)"
+                      r"(?![\d.,]?\d)")
+
+
 def _cjk_compounds(text: str) -> str:
+    def oku(match):
+        scale = 10**7 if match.group(4)[0] in "千천" else 10**4
+        tail = int(match.group(3)) * scale
+        if tail >= 10**8:
+            return match.group(0)
+        return str(int(match.group(1)) * 10**8 + tail)
+
+    text = _CJK_OKU.sub(oku, text or "")
+
     def joined(match):
         head = int(match.group(1)) * 10**4
         tail = int(match.group(3)) * (10**3 if match.group(4) else 1)
@@ -555,12 +580,26 @@ _SCALE = re.compile(r"(?:\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|/\s?)(?:5|10
                     re.I)
 
 
+# Дата «2026年11月18日», «11월 18일» — не два количества: «November 18»
+# второй эшелон тоже не читает (месяцы — в `NON_UNITS`).
+_CJK_DATE = re.compile(r"(?<![\d.,])(?:\d{4}" + _SP + r"?[年년]" + _SP + r"?)?(\d{1,2})" + _SP
+                       + r"?[月월]" + _SP + r"?(\d{1,2})" + _SP + r"?[日일]")
+
+
+def _without_cjk_dates(text: str) -> str:
+    def blank(match):
+        if 1 <= int(match.group(1)) <= 12 and 1 <= int(match.group(2)) <= 31:
+            return " "
+        return match.group(0)
+    return _CJK_DATE.sub(blank, text)
+
+
 def _generic_numbers_in(text: str) -> dict:
     """«Число + любое слово» — второй эшелон: слабее сигнал, но покрывает всё."""
     found = {}
     # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
     # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
-    text = _SCALE.sub(" ", _cjk_compounds(_same_signs(text)))
+    text = _without_cjk_dates(_SCALE.sub(" ", _cjk_compounds(_same_signs(text))))
     for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
@@ -845,6 +884,10 @@ def _row_numbers(row: dict) -> set:
 
 
 def _site_constants(rows: list, share: float = 0.5) -> set:
+    return set().union(*_site_constant_columns(rows, share).values())
+
+
+def _site_constant_columns(rows: list, share: float = 0.5) -> dict:
     """
     Числа, постоянные для всего сайта: фиксированная пошлина, срок гарантии,
     год основания — то, что законно стоит на каждой странице.
@@ -857,7 +900,7 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
     """
     rows = list(rows or ())
     if not rows:
-        return set()
+        return {}
     # Считаются не отдельные числа, а набор чисел ячейки: «3-5 days» во всех
     # строках — это постоянные 3 и 5 вместе. Постоянной колонку делает одно
     # значение, которое встречается чаще других. Если два значения делят колонку
@@ -867,12 +910,16 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
     per_column = defaultdict(Counter)
     for row in rows:
         for column, value in (row or {}).items():
+            # Телефон и адрес на каждой строке — не постоянные: «2000» из
+            # «+1 555 010 2000» и «400» из «Suite 400» прощали выдуманные цены.
+            if _is_identifier(column, value):
+                continue
             numbers = frozenset(n for n in (_norm_number(raw) for raw in _numbers_of(value)) if n)
             if numbers:
                 per_column[column][numbers] += 1
     threshold = max(2, int(len(rows) * share))
-    out = set()
-    for counter in per_column.values():
+    out = {}
+    for column, counter in per_column.items():
         top = counter.most_common(2)
         if top[0][1] < threshold:
             continue
@@ -883,8 +930,36 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
         # постоянную не отменяет.
         if len(top) > 1 and top[1][1] >= 2 and top[1][1] * 4 >= top[0][1]:
             continue
-        out |= top[0][0]
+        # Исключения, каждое из которых единично, — тоже данные строки, если их
+        # больше одного на пятерых: «3 months» в четырёх строках из восьми и
+        # 1, 2, 4, 5 в остальных делали тройку постоянной.
+        if (sum(counter.values()) - top[0][1]) * 4 > top[0][1]:
+            continue
+        out[column] = top[0][0]
     return out
+
+
+# Телефон, адрес, индекс — номер, а не величина: его числа не меряются ничем.
+_ID_COLUMN = re.compile(
+    r"(?<![^\W\d_])(?:phones?|tel|telephone|mobile|fax|whatsapp|address|addr|street|zip|zipcode|"
+    r"postcode|postal|телефон|тел|адрес|улица|индекс)(?![^\W\d_])", re.I)
+_PHONE_CELL = re.compile(r"\+?\(?\d[\d \u00a0().\-]{5,}\d")
+_ADDRESS_CELL = re.compile(
+    r"(?<![^\W\d_])(?:street|avenue|ave|road|suite|blvd|boulevard|lane|floor|"
+    r"улица|ул|проспект|офис)(?![^\W\d_])", re.I)
+
+
+def _is_identifier(column, value) -> bool:
+    """Колонка телефона или адреса — или ячейка, похожая на телефон."""
+    if _ID_COLUMN.search(re.sub(r"[_\W]+", " ", str(column or ""))):
+        return True
+    text = _same_signs(str(value or "")).strip()
+    if _ADDRESS_CELL.search(text):
+        return True
+    if not _PHONE_CELL.fullmatch(text) or re.fullmatch(NUMBER, text) or _dates_in(text):
+        return False
+    return (sum(c.isdigit() for c in text) >= 7
+            and (text[0] in "+(" or len(re.findall(r"\d+", text)) >= 3))
 
 
 def _stems(text: str) -> set:
@@ -1080,20 +1155,44 @@ def _measure(unit: str) -> str:
     return ""
 
 
+# Единица в названии колонки: `rent_usd`, `deposit_months`, `commute_minutes`.
+# Срок — только во множественном числе последним словом: `price_per_month` и
+# `rent_monthly` — цена за месяц, а не число месяцев.
+_COLUMN_MONEY = re.compile(r"(?<![^\W\d_])(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES
+                           + r")(?![^\W\d_])|[$€£¥₹₽₪₩₫₺₴₸฿₱₦]", re.I)
+_COLUMN_TERMS = {"minutes", "mins", "hours", "hrs", "days", "weeks", "months", "years", "yrs",
+                 "минут", "часов", "дней", "суток", "недель", "месяцев", "лет"}
+
+
+def _column_unit(column) -> str:
+    """Единица из названия колонки — или пусто."""
+    words = re.sub(r"[_\W]+", " ", str(column or "")).strip().lower().split()
+    if not words:
+        return ""
+    if _COLUMN_MONEY.search(" ".join(words)):
+        return "$"
+    if words[-1] in _COLUMN_TERMS and (len(words) < 2 or words[-2] not in ("per", "a", "each")):
+        return words[-1]
+    return ""
+
+
 def _row_measures(row: dict, fact_pattern) -> dict:
     """
     {число строки: меры, которыми оно записано}. Пустая мера — число записано
-    голым или с непонятной подписью: тогда оно годится для любой.
+    голым или с непонятной подписью: тогда оно годится для любой. Голое число
+    берёт меру из названия колонки, число телефона или адреса — меру `id`,
+    которая не подходит ни к цене, ни к сроку.
     """
     out = defaultdict(set)
     for column, value in (row or {}).items():
         text = _same_signs(str(value))
         strong = _numbers_in(text, fact_pattern)
         scaled = _column_scale(column) != 1
+        named = "id" if _is_identifier(column, value) else _measure(_column_unit(column))
         for raw in _numbers_of(text):
             number = _norm_number(raw)
             if number:
-                out[number].add("" if scaled else _measure(strong.get(number, "")))
+                out[number].add("" if scaled else (_measure(strong.get(number, "")) or named))
     return out
 
 
@@ -1174,12 +1273,16 @@ def _row_kinds(row: dict) -> dict:
     """{число строки: чем оно меряется} — для чисел, посчитанных из строки."""
     out = {}
     for column, value in (row or {}).items():
-        kind = "%" if _PERCENT_COLUMN.search(str(column or "")) else _kind(value)
+        # «discount: $15» — деньги, а не процент: знак ячейки сильнее колонки.
+        kind = _kind(value)
+        if kind != "money" and _PERCENT_COLUMN.search(str(column or "")):
+            kind = "%"
         # Единица в названии колонки — `rent_usd`, `deposit_months`: так хранят
         # JSON и выгрузки. Без неё $4,350 = 3 × 1450 было критичной находкой,
         # а то же с единицами в ячейках — подсказкой «просмотри глазами».
+        # Любое последнее слово единицей не было: `rent_monthly` давало «mont».
         if not kind:
-            kind = _kind(re.sub(r"[_\W]+", " ", str(column or "")))
+            kind = _kind(_column_unit(column))
         for raw in _numbers_of(_same_signs(str(value))):
             number = _norm_number(raw)
             if number:
@@ -1225,8 +1328,13 @@ def _derivation(number: str, row_numbers: set, kinds: dict = None, kind: str = N
     def product_fits(ra, rb):
         if kinds is None:
             return True
+        priced = any(k == "money" for k in kinds.values())
         for one, other in ((ra, rb), (rb, ra)):
-            if kind == "money" and of(one) == "money":
+            # Цена на цену — не итог: «$362,500 = $250 × $1,450».
+            if kind == "money" and of(one) == "money" and of(other) != "money":
+                return True
+            # Цена в строке голая (`rent: 1450`), срок — со своей единицей.
+            if kind == "money" and not priced and of(one) == "" and of(other) not in ("", "%"):
                 return True
             if kind and kind != "money" and of(one) == kind and of(other) == "":
                 return True
@@ -1304,18 +1412,36 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         return []
     fact_pattern = build_fact_pattern(fact_units)
     spelled_patterns = build_spelled_patterns(fact_units)
-    constants = _site_constants(rows)
+    constant_columns = _site_constant_columns(rows)
+    # Мера постоянной — та, которой она записана в своей колонке: «3 months»
+    # на всех строках не поддерживает «3 minutes», а «$250» — «250 months».
+    constant_measures = defaultdict(set)
+    for other in rows or ():
+        for column, numbers in constant_columns.items():
+            if (other or {}).get(column) is None:
+                continue
+            for number, have in _row_measures({column: other[column]}, fact_pattern).items():
+                if number in numbers:
+                    constant_measures[number] |= have
 
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
         row = matched.get(page.url)
         if row is None:
             continue
+        # Постоянная не прощает строку, у которой в той же колонке своё
+        # значение: «$500» на странице при `fee: $700` — устаревший шаблон.
+        constants = set()
+        for column, numbers in constant_columns.items():
+            own = {n for n in (_norm_number(raw) for raw in _numbers_of(row.get(column) or "")) if n}
+            if not own or own == numbers:
+                constants |= numbers
         allowed = _row_numbers(row) | constants
-        # Постоянные сайта сверяются без меры: срок гарантии законно стоит
-        # и рядом с ценой.
-        measures = {n: m for n, m in _row_measures(row, fact_pattern).items()
-                    if n not in constants}
+        # Постоянные сайта сверяются своей мерой — вместе с мерой строки:
+        # срок гарантии «12 months» законно стоит и рядом с «12 minutes».
+        measures = _row_measures(row, fact_pattern)
+        for number in constants:
+            measures[number] = measures.get(number, set()) | (constant_measures.get(number) or {""})
         dates = _date_parts(row) - allowed
         bare = _bare_numbers(row)
 
