@@ -957,7 +957,10 @@ def build_routes(root: str) -> tuple:
         # Каталог — маршрут, только если в нём есть страница или файл маршрута
         # (`index.html`, `page.js`): `/downloads/` с одним PDF внутри на живом
         # хостинге — 404. Сам файл — тоже адрес: `/download/setup.exe`.
-        names = ([[]] if not base else []) + [base + [os.path.splitext(f)[0]] for f in files]
+        # `oslo.json` и `photo.jpg` — только файлы: адреса /rent/oslo у них нет.
+        names = ([[]] if not base else []) + [
+            base + [os.path.splitext(f)[0]] for f in files
+            if f.rsplit(".", 1)[-1].lower() not in _DATA_EXTS]
         literal.update("/" + "/".join(base + [f]) for f in files)
         seen += len(files) + 1
         for segs in names:
@@ -994,6 +997,8 @@ ASSET_EXTS = frozenset("""
     csv tsv md yml yaml toml ics vcf epub doc docx xls xlsx ppt pptx odt mp3 mp4 m4a ogg
     wav webm mov avi wasm webmanifest
 """.split())
+# У этих файлов нет адреса без расширения (в отличие от `page.js`, `about.md`).
+_DATA_EXTS = ASSET_EXTS - {"html", "htm", "xhtml", "js", "mjs", "cjs", "md"}
 
 
 def _is_file_link(key: str, dirs: set) -> bool:
@@ -1065,6 +1070,7 @@ def broken_links(pages: list, graph: dict, base_path: str = "",
         folded.setdefault(p.key.lower(), p.url)
     dirs = set(graph.get("unresolved_dirs") or ())
     sections = keys | {_parent(k) for k in keys}
+    folded_sections = {k.lower() for k in sections}
     paths = [os.path.dirname(os.path.abspath(p.path)) for p in pages if p.path]
     try:
         root = os.path.commonpath(paths) if paths else ""
@@ -1104,7 +1110,13 @@ def broken_links(pages: list, graph: dict, base_path: str = "",
                 local = "/" + path.lstrip("/").partition("/")[2]
                 if local != base and not local.startswith(base + "/"):
                     continue
-            if _parent(path) in sections and not is_route(path):
+            # `/Rent/nowhere/` при разделе `rent/`: раздел тот же, только
+            # регистр другой, — на живом хостинге это всё равно 404.
+            # `/faq.html/`: `url_key` сняла бы `.html`, если бы за ним не шёл
+            # слэш, — файл `faq.html` по такому адресу хостинг не отдаёт.
+            slashed = path in dirs and re.search(r"\.html?$", path, re.I)
+            if ((_parent(path) in sections or _parent(path).lower() in folded_sections)
+                    and (slashed or not is_route(path))):
                 bad.append(path)
         if bad:
             found[source] = sorted(set(bad))
@@ -1126,25 +1138,27 @@ def wrong_form_issues(pages: list, case_twins: dict) -> list:
     issues = []
     for page in pages:
         written = []
-        for path, twin in sorted(set(case_twins.get(page.url, ()))):
+        twins = sorted(set(case_twins.get(page.url, ())))
+        for path, twin in twins:
             written.append(tr("{a0} вместо {a1}", a0=_local(path), a1=urlsplit(twin).path))
         if written:
             more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
-            issues.append(("warning", page.url, "wrong-link-form", tr(
+            issues.append(("warning", page.url, "wrong-link-form", Said(tr(
                 "ссылки расходятся со страницей регистром букв: {a0}{a1}. GitHub Pages, "
                 "S3 и nginx на Linux различают регистр и отдают на них 404",
-                a0=", ".join(written[:3]), a1=more)))
+                a0=", ".join(written[:3]), a1=more), [_local(path) for path, _ in twins])))
+        forms = [(key, path) for key, path in page.__dict__.get("_wrong_forms", ())
+                 if key in by_key]
         written = sorted({tr("{a0} вместо {a1}", a0=path, a1=urlsplit(by_key[key]).path)
-                          for key, path in page.__dict__.get("_wrong_forms", ())
-                          if key in by_key})
+                          for key, path in forms})
         if written:
             more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
-            issues.append(("warning", page.url, "wrong-link-form", tr(
+            issues.append(("warning", page.url, "wrong-link-form", Said(tr(
                 "ссылки в форме, которой нет в сборке: {a0}{a1}. Сервер сводит формы "
                 "адреса только по своим правилам: GitHub Pages и S3 отдают "
                 "`about/index.html` по /about/, но не по /about.html, а `faq.html` — "
                 "по /faq.html, но не по /faq/; на такие ссылки они отвечают 404",
-                a0=", ".join(written[:3]), a1=more)))
+                a0=", ".join(written[:3]), a1=more), [path for _, path in forms])))
     return issues
 
 
@@ -1191,6 +1205,22 @@ def _other_host(pages: list) -> str:
     return host if n >= max(5, len(pages) * 0.3) else ""
 
 
+def _home_resolves(pages: list, unresolved: set, base_path: str) -> bool:
+    """
+    Главная лежит в корне каталога, и её ссылки почти все сходятся: корень
+    выбран верно, а короткие ссылки — ошибка одного раздела (`/de/` ссылается
+    на /rent/… без префикса), а не сдвиг всего сайта.
+    """
+    home = "/" + base_path.strip("/") if base_path.strip("/") else "/"
+    for p in pages:
+        if (urlsplit(p.key).path or "/") != home:
+            continue
+        host = urlsplit(p.key).netloc
+        own = [k for k in (url_key(u) for u in p.links) if urlsplit(k).netloc == host]
+        return bool(own) and sum(k in unresolved for k in own) * 2 < len(own)
+    return False
+
+
 def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
     """
     Самый частый неверный вердикт: каталог не соответствует корню сайта.
@@ -1223,7 +1253,7 @@ def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
         if tail:
             shifted.add(f"//{host}/{tail}")
     hits = len(unresolved & shifted)
-    if hits >= max(2, len(unresolved) * 0.5):
+    if hits >= max(2, len(unresolved) * 0.5) and not _home_resolves(pages, unresolved, base_path):
         prefix = "/" + base_path.strip("/") if base_path.strip("/") else ""
         if prefix:
             # Сайт живёт под префиксом, а ссылки его не несут: на живом сайте

@@ -2053,6 +2053,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
                 page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own_path, "", ""))
     seen = set()
     forms = []
+    written_forms = set()
     foreign = []
     for href in hrefs:
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
@@ -2084,6 +2085,11 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             seen.add(key)
             page.links.append(absolute)
             forms.append((key, form, unquote(raw_path)))
+        elif key != page.key and (key, unquote(raw_path)) not in written_forms:
+            # Та же страница в другой записи: меню ведёт на `/about/`, а текст —
+            # на `/about.html`. Вторая форма тоже проверяется на 404.
+            forms.append((key, form, unquote(raw_path)))
+        written_forms.add((key, unquote(raw_path)))
     page.__dict__["_link_forms"] = forms
     unfollowed = []
     for href in nofollow_hrefs:
@@ -2528,8 +2534,12 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     for page in pages:
         forms = page.__dict__.pop("_link_forms", ())
         written.append((page, forms))
+        voted = set()
         for key, form, _written in forms:
-            votes[key][form] += 1
+            # Голосует первая запись ссылки на страницу, как и раньше.
+            if key not in voted:
+                voted.add(key)
+                votes[key][form] += 1
     redirects, host_rewrites = host_redirect_rules(root)
     kinds, flat, files = {}, [], {}
     for page in pages:
@@ -2564,6 +2574,8 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         wrong = []
         html = (page.path or "").lower().endswith((".html", ".htm"))
         for key, form, path in forms:
+            # `/faq/?x=1` — та же форма адреса, что и `/faq/`.
+            key = key.split("?", 1)[0]
             kind = kinds.get(key)
             # `/b/index.md`, `/c.htm` при `c.html`, `/d/INDEX.HTML`: `url_key`
             # сводит их к странице, а хостинг отдаёт файл только под его

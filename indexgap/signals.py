@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from .core import ALWAYS_SKIP, _CODE_TAG, tokenize
 from .i18n import N_, tr
+from .subject import Said
 
 # Googlebot читает первые 2 МБ поддерживаемого файла и отдаёт в индекс то, что
 # успел прочитать (developers.google.com/search/docs/crawling-indexing/googlebot,
@@ -479,6 +480,10 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
     # соседями стоит на каждой, и раньше с шести детей он прятал хаб, который
     # не ссылается ни на кого.
     own_tocs = defaultdict(list)
+    # Чужие страницы с такими ссылками — тоже: оглавление и карта сайта. Но
+    # когда их много, а общего ядра ссылок у них нет, это вращающийся блок
+    # «рядом» на страницах соседнего раздела, а не оглавление.
+    other_tocs = defaultdict(list)
     for page in pages:
         out = set(outbound.get(page.url, ()))
         if len(out) < 5:
@@ -489,10 +494,23 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                 if page.url in kid_urls[hub_key]:
                     own_tocs[hub_key].append(page.url)
                 else:
-                    listing[hub_key].add(page.url)
+                    other_tocs[hub_key].append(page.url)
+
+    def common_core(hub_key, tocs):
+        # Два вида одного списка (`/all-cities/` и `/map/`) ссылаются на одних
+        # и тех же детей; блок «рядом» у каждой страницы свой.
+        kids = kid_urls[hub_key]
+        core = set(kids)
+        for url in tocs:
+            core &= set(outbound.get(url, ()))
+        return len(core) >= max(5, 0.8 * len(kids))
+
+    for hub_key, tocs in other_tocs.items():
+        if len(tocs) <= 2 or common_core(hub_key, tocs):
+            listing[hub_key].update(tocs)
     for hub_key, tocs in own_tocs.items():
-        if len(tocs) == 1:
-            listing[hub_key].add(tocs[0])
+        if len(tocs) == 1 or common_core(hub_key, tocs):
+            listing[hub_key].update(tocs)
     # Кандидаты в списки: страница → «лист» (засчитывается, если ведёт хоть к
     # одному ребёнку) или «глубже» (если дети — большинство её ссылок в разделе).
     candidates = defaultdict(dict)
@@ -542,15 +560,27 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                 to_kids = len(links & kids)
                 if not to_kids:
                     continue
+                if cands[url] != "deeper" and url in kids:
+                    # Ребёнок со слагом-числом или буквой (`/products/100/`,
+                    # `/vitamins/c/`), который ссылается только на таких же
+                    # соседей, и немногих, — это блок «похожие», а не лист.
+                    same = sum(1 for u in links & kids if cands.get(u) == cands[url])
+                    if same == to_kids and to_kids < 5:
+                        continue
                 if cands[url] == "deeper":
                     own = key_of[url]
                     own = own[:own.rfind("/") + 1]
+                    # Хлебная крошка на своего предка-ребёнка
+                    # (`/plumbing/city0/` у `/plumbing/city0/emergency/`) —
+                    # не ссылка списка.
+                    crumb = {u for u in links & kids if own.startswith(key_of[u] + "/")}
+                    to_kids -= len(crumb)
                     # Соседи по уровню (другие буквы, другие листы) — навигация
                     # самого списка, а не чужие ссылки.
-                    inside = sum(1 for u in links if u in key_of
+                    inside = sum(1 for u in links if u in key_of and u not in crumb
                                  and key_of[u].startswith(hub_key + "/")
                                  and not key_of[u].startswith(own))
-                    if to_kids * 2 <= inside:
+                    if not to_kids or to_kids * 2 <= inside:
                         continue
                 reached.add(url)
                 listing[hub_key].add(url)
@@ -566,11 +596,12 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                          and k.url not in pagers)
         if missing:
             shown = ", ".join(urlsplit(u).path for u in missing[:3])
-            issues.append(("warning", hub.url, "hub-missing-links", tr(
+            issues.append(("warning", hub.url, "hub-missing-links", Said(tr(
                 "раздел не ссылается на {a0} из {a1} своих страниц: {a2}{a3} — до них "
                 "доходят только через sitemap или случайные ссылки",
                 a0=len(missing), a1=len(kids), a2=shown,
-                a3=tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else "")))
+                a3=tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else ""),
+                [urlsplit(u).path for u in missing])))
     return issues
 
 
