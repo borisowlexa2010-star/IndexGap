@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
@@ -73,10 +74,16 @@ def apply_project_defaults(args) -> str:
     explicit = getattr(args, "config", None)
     if explicit and os.path.isfile(explicit):
         path = explicit
-    places = [os.getcwd(), os.path.dirname(os.getcwd())]
+    places = [os.getcwd()]
     root = getattr(args, "root", None)
-    if root and os.path.isdir(root):
-        places += [os.path.abspath(root), os.path.dirname(os.path.abspath(root))]
+    if root and os.path.isdir(root) and not path:
+        # Конфиг страниц (рядом, уровнем выше или глубокий с тем же `pages`)
+        # сильнее конфига над рабочим каталогом: тот может быть чужим, а
+        # глубокий indexgap.json иначе давал пороги, но терял site и dataset.
+        here = [os.path.join(os.getcwd(), name) for name in PROJECT_FILES]
+        if not any(os.path.isfile(p) for p in here):
+            path = settings.find_config(root)
+    places += [os.path.dirname(os.getcwd())]
     for directory in ([] if path else places):
         for name in PROJECT_FILES:
             candidate = os.path.join(directory, name)
@@ -117,6 +124,10 @@ def apply_project_defaults(args) -> str:
         args.dataset = os.path.join(base, data["dataset"])
     if hasattr(args, "profile") and not args.profile and data.get("profile"):
         args.profile = data["profile"]
+    # `home` проверялся как известный ключ, но не действовал: глубина и
+    # недостижимость молча не считались.
+    if hasattr(args, "home") and not args.home and data.get("home"):
+        args.home = data["home"]
     return path
 
 
@@ -165,9 +176,17 @@ def _home_url(args, pages):
     Прежний способ на каталоге раздела объявлял недостижимыми все страницы,
     кроме одной случайно выбранной.
     """
-    if getattr(args, "home", None):
-        return args.home
     keys = {p.key for p in pages}
+    if getattr(args, "home", None):
+        # `--home /en/` — путь от --site. Главная, которой нет среди страниц,
+        # молча выключала глубину и недостижимость, а виноватым называлось --site.
+        from urllib.parse import urljoin
+        home = urljoin(args.site.rstrip("/") + "/", args.home) if args.site else args.home
+        if pages and url_key(home) not in keys:
+            raise SourceError(tr("--home {a0}: такой страницы нет среди разобранных файлов. "
+                                 "Укажи адрес страницы сборки — полный или путь от --site.",
+                                 a0=args.home))
+        return home
     return args.site if url_key(args.site) in keys else None
 
 
@@ -261,7 +280,8 @@ def _collect_indexed(args) -> tuple:
         print(tr("Прочие источники — {a0}", a0=summary))
     for name, counts in sorted(cited.items()):
         print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} цитирований",
-                 a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
+                 a0=sources.title_of(name), a1=sum(1 for n in counts.values() if n > 0),
+                 a2=sum(counts.values())))
     for line in sources.describe(list(by_engine) + list(by_source) + list(cited)):
         print(tr("  что это доказывает → {a0}", a0=line))
     for note in engines.describe_coverage(list(by_engine)):
@@ -282,7 +302,14 @@ def _describe_project(project: dict, rows: list) -> None:
     elif rows:
         parts.append(tr("единиц измерения в датасете нет — сверка идёт по всем числам"))
     if project.get("_path"):
-        parts.append(tr("конфиг: {a0}", a0=os.path.basename(project['_path'])))
+        # Одно имя не говорило, какой из indexgap.json взят: путь от рабочего каталога.
+        try:
+            shown = os.path.relpath(project['_path'])
+        except ValueError:                 # другой диск Windows
+            shown = os.path.abspath(project['_path'])
+        if shown.startswith(".." + os.sep + ".." + os.sep):
+            shown = os.path.abspath(project['_path'])
+        parts.append(tr("конфиг: {a0}", a0=shown))
     print(tr("Проект — ") + "; ".join(parts))
 
 
@@ -366,6 +393,8 @@ def report_pair(out: str) -> tuple:
 
 def _check_report_pair(out: str) -> None:
     """Оба файла отчёта проверяются до работы, а не после неё."""
+    if not (out or "").strip():
+        raise SourceError(tr("--out пустой: укажи имя файла отчёта, например indexgap-check.html"))
     html_path, json_path = report_pair(out)
     check_out_path(html_path)
     check_json_path(json_path)
@@ -393,7 +422,21 @@ def load_baseline(path: str) -> list:
         raise SourceError(tr(
             "{a0} — не данные прогона indexgap check. Базовой линией служит JSON, "
             "который пишет `indexgap check`.", a0=path))
-    return [i for i in data["issues"] if isinstance(i, dict)]
+    issues = [i for i in data["issues"] if isinstance(i, dict)]
+    for item in issues:
+        # Испорченная руками база падала трассировкой с кодом 1 — тем же,
+        # что и «есть критичные находки». Это ошибка входа.
+        subject = item.get("subject")
+        if (not all(isinstance(item.get(f), str) for f in ("level", "code"))
+                or not all(isinstance(item.get(f), (str, type(None)))
+                           for f in ("url", "message"))
+                or not (subject is None or (isinstance(subject, list) and all(
+                    isinstance(s, str) for s in subject)))):
+            raise SourceError(tr(
+                "{a0}: находка базовой линии записана не так, как её пишет "
+                "`indexgap check`: {a1}", a0=path,
+                a1=json.dumps(item, ensure_ascii=False)[:200]))
+    return issues
 
 
 # Находки, у которых на одной странице бывает разный предмет: какой бот
@@ -401,7 +444,10 @@ def load_baseline(path: str) -> list:
 # «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
 _SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-missing-links", "unfilled-slot",
                   "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
-                  "duplicate-description"}
+                  "duplicate-description", "translations-parked", "heavy-images"}
+# Предмет этих находок есть только в поле `subject`: из текста его не вынуть,
+# и база без поля сравнивается, как раньше, без предмета.
+_GIVEN_ONLY = {"translations-parked"}
 _SUBJECT = re.compile(r"https?://[^\s,;«»\"']+|(?<![\w/])/[^\s,;«»\"'()]*|«[^»]*»")
 
 
@@ -414,7 +460,7 @@ def _subject(code: str, message: str, given=None) -> tuple:
     """
     if given is not None:
         return tuple(given)
-    if code not in _SUBJECT_CODES or not message:
+    if code not in _SUBJECT_CODES or code in _GIVEN_ONLY or not message:
         return ()
     if code == "ai-crawler-blocked":
         return (message.split()[0].lower(),)
@@ -424,6 +470,19 @@ def _subject(code: str, message: str, given=None) -> tuple:
 # Находки сверки с датасетом: без датасета их не бывает, и их пропажа в
 # прогоне без --dataset — не исправление, а выключенная проверка.
 FACT_CODES = frozenset({"unsupported-number", "check-by-eye", "dataset-unbound"})
+# Находки проверок, которые выключаются флагом или профилем: `--no-aeo`
+# (машинная читаемость и robots.txt) и `--no-content` или профиль без сверки
+# (проверки текста). Их пропажа в таком прогоне — тоже не исправление.
+AEO_CODES = frozenset({
+    "ai-crawler-blocked", "answer-long", "answer-preamble", "answer-short",
+    "img-alt-filler", "img-alt-language", "img-no-alt", "js-shell", "jsonld-broken",
+    "jsonld-faq-invisible", "jsonld-mismatch", "jsonld-no-type", "long-paragraph",
+    "microdata-mismatch", "no-answer", "no-author", "no-date", "no-question-headings",
+    "no-robots", "no-structure", "robots-blocks-all", "robots-blocks-page",
+    "robots-no-sitemap", "robots-unreadable"})
+CONTENT_CODES = FACT_CODES | frozenset({
+    "brief-left", "llm-leftover", "mojibake", "same-opening", "still-draft",
+    "template-skeleton", "unfilled-slot", "vague-anchor"})
 
 
 def baseline_coverage(path: str, old: list) -> dict:
@@ -440,6 +499,10 @@ def baseline_coverage(path: str, old: list) -> dict:
     got = dict(got) if isinstance(got, dict) else {}
     if not isinstance(got.get("facts"), bool):
         got["facts"] = any(i.get("code") in FACT_CODES for i in old)
+    # База до 1.29 этих полей не хранит: проверка шла, если есть её коды.
+    for name, codes in (("aeo", AEO_CODES), ("content", CONTENT_CODES)):
+        if not isinstance(got.get(name), bool):
+            got[name] = any(i.get("code") in codes for i in old)
     return got
 
 
@@ -470,6 +533,11 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     for level, url, code, message in list(issues) + list(accepted or []):
         if code == "noindex-group":
             grouped.update(subject_of(message) or ())
+    # И наоборот: группа базы распалась (часть веток открыли) — оставшиеся
+    # закрытыми страницы не «новые» критичные и не «исчезнувшие» сведения.
+    for i in old:
+        if i.get("code") == "noindex-group" and isinstance(i.get("subject"), list):
+            grouped.update(s for s in i["subject"] if isinstance(s, str))
     for level, url, code, message in accepted or []:
         if code == "noindex-group":
             accepted_group.update(subject_of(message) or ())
@@ -487,10 +555,12 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     # База до 1.25 не хранит полный предмет: тогда обе стороны сравниваются
     # по тексту, иначе полный предмет новой стороны против укороченного
     # старого дал бы «новые» находки на ровном месте.
-    full = any(isinstance(i.get("subject"), list) for i in old)
+    # Решается по коду: в базе 1.25–1.28 полный предмет есть у битых ссылок,
+    # но не у незаполненных мест шаблона и ссылок не в той форме.
+    full = {i.get("code") for i in old if isinstance(i.get("subject"), list)}
 
     def subject(code, message, given):
-        if full and given is not None:
+        if code in full and given is not None:
             return _subject(code, message or "", given)
         return _subject(code, message or "")
 
@@ -557,6 +627,16 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
     return {"new": new, "fixed": fixed, "accepted": still, "unchecked": skipped}
 
 
+def baseline_method(path: str) -> str:
+    """Каким методом база искала дубли: попарно или LSH (с 1.10 в JSON)."""
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            got = json.load(fh).get("duplicate_method")
+    except (OSError, ValueError, AttributeError):
+        got = None
+    return got if isinstance(got, str) else ""
+
+
 def _print_baseline(path: str, diff: dict) -> None:
     new = diff["new"]
     crit = [i for i in new if i["level"] == "critical"]
@@ -569,11 +649,39 @@ def _print_baseline(path: str, diff: dict) -> None:
     if diff.get("accepted"):
         print(tr("  находок базы, принятых с тех пор через ignore: {a0} — они на "
                  "сайте и в «исчезло» не входят", a0=len(diff["accepted"])))
-    if diff.get("facts_off"):
+    unchecked = diff.get("unchecked") or []
+    facts = sum(1 for i in unchecked if i.get("code") in FACT_CODES)
+    off = diff.get("facts_off")
+    if off == "--no-content":
+        print(tr("  ! база снята со сверкой фактов по датасету, а в этом прогоне её "
+                 "выключил --no-content: {a0} находок сверки не проверены и в "
+                 "«исчезло» не входят, а новые числа не сверялись. Запусти без "
+                 "--no-content", a0=facts))
+    elif off and off is not True:
+        print(tr("  ! база снята со сверкой фактов по датасету, а профиль «{a1}» "
+                 "фактов не сверяет: {a0} находок сверки не проверены и в «исчезло» "
+                 "не входят", a0=facts, a1=off))
+    elif off:
         print(tr("  ! база снята со сверкой фактов по датасету, этот прогон — без "
                  "неё: {a0} находок сверки не проверены и в «исчезло» не входят, "
                  "а новые числа не сверялись. Передай тот же --dataset",
-                 a0=len(diff.get("unchecked") or [])))
+                 a0=facts))
+    if diff.get("checks_off"):
+        print(tr("  ! база снята с проверками, выключенными в этом прогоне ({a0}): "
+                 "{a1} находок базы не проверены и в «исчезло» не входят",
+                 a0=", ".join(diff["checks_off"]), a1=len(unchecked) - facts))
+    elif len(unchecked) > facts:
+        print(tr("  находок базы из проверок, выключенных в этом прогоне: {a0} — их "
+                 "не искали, и в «исчезло» они не входят", a0=len(unchecked) - facts))
+    if diff.get("duplicate_method_changed"):
+        # Сайт перешёл порог exact_below: LSH находит пары с вероятностью, и
+        # пропавший дубль может оказаться пропущенным, а не исправленным.
+        gone = sum(1 for i in diff["fixed"] if i.get("code") in ("near-duplicate", "similar"))
+        print(tr("  ! база искала дубли методом «{a0}», этот прогон — «{a1}» (порог "
+                 "exact_below): из исчезнувших {a2} — находки о дублях, их сравнение "
+                 "приблизительно. Для точной сверки задай тот же метод через "
+                 "checks.exact_below", a0=diff["duplicate_method_changed"][0],
+                 a1=diff["duplicate_method_changed"][1], a2=gone))
 
 
 # ── команды ───────────────────────────────────────────────────────────────────
@@ -587,6 +695,31 @@ def _sitemaps(args) -> dict:
     return cached
 
 
+def _sitemap_notes(args, sm: dict) -> list:
+    """
+    Что сказать о прочитанном sitemap в отчёте и JSON, а не только в консоли:
+    в CI остаются только они. Непрочитанный дочерний файл значит, что шаг
+    «в sitemap» и список «нет в sitemap» неполные.
+    """
+    notes = [tr("sitemap прочитан не целиком: {a0}. Шаг «в sitemap» и список «нет в "
+                "sitemap» неполные", a0=error) for error in sm.get("errors") or ()]
+    notes += list(sm.get("warnings") or ())
+    site = urlsplit(args.site or "")
+    if site.scheme and site.netloc:
+        other = [u for u in sm.get("urls") or ()
+                 if u.lower().startswith(("http://", "https://"))
+                 and doctor._host(u) == doctor._host(args.site)
+                 and (urlsplit(u).scheme.lower() != site.scheme.lower()
+                      or urlsplit(u).netloc.lower() != site.netloc.lower())]
+        if other:
+            notes.append(tr(
+                "{a0} адрес(ов) в sitemap — не на {a1}, а на другой схеме или хосте ({a2}): "
+                "каждый из них отвечает редиректом, и Search Console отметит их как "
+                "«страница с переадресацией». В sitemap нужны адреса как в --site",
+                a0=len(other), a1=f"{site.scheme}://{site.netloc}", a2=other[0]))
+    return notes
+
+
 def _sitemap_hreflang(args, pages) -> None:
     """hreflang, объявленный в sitemap, отдаётся страницам до проверок."""
     if not getattr(args, "sitemap", None):
@@ -594,7 +727,7 @@ def _sitemap_hreflang(args, pages) -> None:
     given = doctor.apply_sitemap_alternates(pages, _sitemaps(args).get("alternates"))
     if given:
         print(tr("hreflang взят из sitemap для {a0} страниц(ы): в самих страницах "
-                 "его нет", a0=given))
+                 "его нет или он неполный", a0=given))
 
 
 def _warn_stale_skills(config_path: str) -> None:
@@ -652,6 +785,7 @@ def _analyse(args, pages=None):
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
+    analysis["robots_blocked"] = sorted(blocked)
     notes = list(project.get("_config_notes") or []) + list(analysis.get("notes") or [])
 
     content_result = None
@@ -714,7 +848,15 @@ def _analyse(args, pages=None):
     analysis["issues"], accepted = checks.apply_ignore(
         analysis["issues"], project.get("ignore"), args.site)
     analysis["accepted"] = accepted
+    # Карточка отчёта и JSON считают сирот по графу, консоль — по находкам.
+    # Закрытые копии и принятые намеренно убраны из находок — и из графа.
+    graph = analysis.get("graph") or {}
+    for field, code in (("orphans", "orphan"), ("unreachable", "unreachable")):
+        if field in graph:
+            kept = {i[1] for i in analysis["issues"] if i[2] == code}
+            graph[field] = [u for u in graph[field] if u in kept]
     if accepted:
+        _drop_accepted_lists(analysis, notes, accepted)
         print(tr("Принято намеренно (ignore в indexgap.json): {a0} — в счёт и в наряды не идут",
                  a0=len(accepted)))
     return {"pages": pages, "rows": rows, "project": project,
@@ -723,6 +865,32 @@ def _analyse(args, pages=None):
                                                    len(pages), pages=pages),
             "templates": checks.template_risk(analysis["issues"], pages),
             "content": content_result, "aeo": aeo_result}
+
+
+_DUP_CODES = ("near-duplicate", "similar", "duplicate-risk")
+
+
+def _drop_accepted_lists(analysis: dict, notes: list, accepted: list) -> None:
+    """
+    Принятое намеренно уходит и из списков сирот и пар, и из совета чинить
+    группы дублей: счётчики консоли его уже не считали, а JSON и заметка — да.
+    """
+    graph = analysis.get("graph") or {}
+    for code, key in (("orphan", "orphans"), ("unreachable", "unreachable")):
+        gone = {i[1] for i in accepted if i[2] == code}
+        left = {i[1] for i in analysis["issues"] if i[2] == code}
+        if gone and isinstance(graph.get(key), list):
+            graph[key] = [u for u in graph[key] if u not in gone or u in left]
+    gone = {i[1] for i in accepted if i[2] in _DUP_CODES}
+    if not gone:
+        return
+    left = {i[1] for i in analysis["issues"] if i[2] in _DUP_CODES}
+    analysis["duplicates"] = [
+        (a, b, j) for a, b, j in analysis.get("duplicates") or []
+        if not ((a.url in gone or b.url in gone) and a.url not in left and b.url not in left)]
+    note = analysis.get("duplicate_group_note")
+    if note and note in notes and not any(i[2] == "near-duplicate" for i in analysis["issues"]):
+        notes.remove(note)
 
 
 def _given_files_exist(args) -> None:
@@ -763,8 +931,7 @@ def cmd_check(args):
             # Как у doctor: sitemap просили сверить, а он не читается — это
             # ошибка входа, а не зелёная проверка с примечанием.
             raise SourceError(tr("sitemap не прочитан: {a0}", a0=sm["errors"][0]))
-        for error in sm["errors"]:
-            print(tr("  ! sitemap не прочитан: {a0}", a0=error))
+        notes += _sitemap_notes(args, sm)
         if sm["urls"]:
             sitemap_urls = sm["urls"]
             analysis["issues"] = checks.sort_issues(
@@ -779,7 +946,8 @@ def cmd_check(args):
     if sitemap_urls is not None or by_engine or by_source or cited:
         funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                       by_engine=by_engine, by_source=by_source,
-                                      cited=cited, impressions=impressions)
+                                      cited=cited, impressions=impressions,
+                                      robots_blocked=analysis.get("robots_blocked"))
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
         segments = doctor.segments(funnel_result, pages)
@@ -793,19 +961,47 @@ def cmd_check(args):
             a0=len(listed_stubs), a1=", ".join(listed_stubs[:5])
             + (tr(" и ещё {a0}", a0=len(listed_stubs) - 5) if len(listed_stubs) > 5 else "")))
 
+    # Покрытие сверки — и в HTML: человек читает отчёт, а не консоль.
+    coverage_notes = []
+    if content_result and (content_result["matched"] or content_result["unmatched"]):
+        coverage_notes.append(tr("Сверено с датасетом: {a0} из {a1}",
+                                 a0=content_result['matched_rows'], a1=len(pages)))
+        orphan_rows = content_result.get("rows_without_page") or []
+        if orphan_rows:
+            coverage_notes.append(tr("  строк датасета без страницы: {a0} — например: {a1}",
+                                     a0=len(orphan_rows), a1=", ".join(orphan_rows[:10])).strip())
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
-                             cross=cross, notes=notes,
+                             cross=cross, notes=coverage_notes + notes,
                              title=tr("Проверка перед публикацией"),
                              templates=got["templates"], segments=segments)
     json_path = report_pair(args.out)[1]
-    coverage = {"facts": bool(content_result and content_result.get("facts_checked"))}
+    coverage = {"facts": bool(content_result and content_result.get("facts_checked")),
+                "aeo": aeo_result is not None, "content": content_result is not None}
     diff = None
     if baseline is not None:
-        unchecked = FACT_CODES if coverage_before.get("facts") and not coverage["facts"] else ()
+        facts_off = bool(coverage_before.get("facts") and not coverage["facts"])
+        unchecked, off = set(FACT_CODES if facts_off else ()), []
+        # Проверка выключена в этом прогоне, а в базе шла (или база старая и
+        # не записала, что шло): её находки не проверены, а не исправлены.
+        for name, codes in (("aeo", AEO_CODES), ("content", CONTENT_CODES)):
+            if coverage_before.get(name, True) and not coverage[name]:
+                unchecked |= codes
+                off.append(name)
         diff = compare_baseline(analysis["issues"], baseline,
                                 accepted=analysis.get("accepted"), unchecked=unchecked)
-        diff["facts_off"] = bool(unchecked)
+        if facts_off and got["project"].get("_skip_facts"):
+            # Датасет передан, сверку выключил профиль или флаг: «передай тот
+            # же --dataset» тут — неверный совет.
+            facts_off = got["project"].get("_profile") or True
+        elif facts_off and args.no_content:
+            facts_off = "--no-content"
+        diff["facts_off"] = facts_off
+        diff["checks_off"] = off
+        method_before, method_now = baseline_method(args.baseline), analysis.get("duplicate_method")
+        diff["duplicate_method_changed"] = ([method_before, method_now]
+                                            if method_before and method_now
+                                            and method_before != method_now else None)
     _write_json(json_path, {
         "site": args.site,
         "pages": len(pages),
@@ -971,6 +1167,8 @@ def cmd_brief(args):
     по тяжести. Текст по-прежнему пишет человек или агент — пакет только
     формулирует задачу.
     """
+    if args.limit < 0:
+        raise SourceError(tr("--limit не может быть отрицательным"))
     got = _analyse(args)
     pages, project, analysis = got["pages"], got["project"], got["analysis"]
 
@@ -1064,6 +1262,42 @@ def _warn_sitemap_blocked(args, pages) -> None:
                  + (" …" if len(listed) > 3 else "")))
 
 
+def _short_list(urls: list) -> str:
+    return ", ".join(urls[:3]) + (" …" if len(urls) > 3 else "")
+
+
+def _warn_sitemap_shape(args, pages) -> None:
+    """
+    Адреса sitemap, по которым хостинг ответит не страницей, и sitemap, о
+    котором robots.txt не знает. Из sitemap ничего не убирается: что неверно —
+    правило, canonical или список, решает человек.
+    """
+    listed = [p for p in pages if publish.indexable(p)]
+    rules, _found = diffs.read_redirects(args.root, urlsplit(args.site or "").netloc)
+    if rules:
+        keys = {p.key: p for p in pages}
+        shadowed = sorted(p.url for p in listed if diffs._shadowed(rules, p, keys))
+        if shadowed:
+            print(tr("  ! {a0} адрес(ов) в sitemap перехватывает правило хостинга "
+                     "(redirects в vercel.json, `301!`/`404!` в _redirects) раньше файла — "
+                     "поисковик получит редирект или ошибку, а не страницу: {a1}",
+                     a0=len(shadowed), a1=_short_list(shadowed)))
+    forms = sorted(p.url for p in listed if p.__dict__.get("_canonical_form"))
+    if forms:
+        print(tr("  ! {a0} адрес(ов) в sitemap взяты из canonical в форме, которой раскладка "
+                 "файлов не отдаёт (check: canonical-form) — хостинг ответит редиректом "
+                 "или 404: {a1}. Поправь canonical", a0=len(forms), a1=_short_list(forms)))
+    robots_path = _guess_robots(args)
+    declared = aeo.read_robots(robots_path).get("sitemaps") or [] if robots_path else []
+    if declared:
+        mine = publish._shard_loc(args.site or "", args.public_prefix, "sitemap.xml")
+        if url_key(mine) not in {url_key(publish.ascii_url(u)) for u in declared} | {
+                url_key(u) for u in declared}:
+            print(tr("  ! {a0} объявляет другой sitemap ({a1}), а записан {a2} — поисковик "
+                     "будет читать объявленный. Пропиши в robots.txt `Sitemap: {a2}`",
+                     a0=robots_path, a1=_short_list(declared), a2=mine))
+
+
 def cmd_sitemap(args):
     config_path = apply_project_defaults(args)
     pages = _load(args)
@@ -1093,12 +1327,17 @@ def cmd_sitemap(args):
             "Все {a0} страниц закрыты от индекса (noindex, canonical, черновики) — пустой "
             "sitemap не записан.\n    Проверь noindex в шаблоне и X-Robots-Tag в _headers, "
             "netlify.toml, vercel.json. Если так и задумано — добавь --force.", a0=len(pages)))
+    if "://" in (args.public_prefix or ""):
+        raise SourceError(tr(
+            "--public-prefix — путь на сайте ({a0}), а не адрес: шарды лежат на том же "
+            "хосте, что и --site. Например: --public-prefix sitemaps", a0=args.public_prefix))
     if first_run:
         _first_run_note(manifest_path)
+    before = manifest.get("_included")
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
                                    public_prefix=args.public_prefix,
-                                   base_dir=manifest_base)
+                                   base_dir=manifest_base, force=args.force)
     save_manifest(manifest_path, result["manifest"])
     print(tr("Включено: {a0}   Исключено (noindex, canonical, черновики): {a1}", a0=result['included'], a1=result['excluded']))
     if result["drafts"]:
@@ -1108,6 +1347,15 @@ def cmd_sitemap(args):
     for path in result["removed"]:
         print(tr("  удалён устаревший шард: {a0}", a0=path))
     _warn_sitemap_blocked(args, pages)
+    _warn_sitemap_shape(args, pages)
+    if (isinstance(before, int) and not isinstance(before, bool) and before >= 5
+            and result["included"] * 2 < before):
+        # Шаблон раздела получил noindex, а главная осталась открытой: запрет
+        # «всё закрыто» тут не срабатывает, а sitemap молча худеет вдвое.
+        print(tr("  ! в sitemap {a0} адрес(ов), в прошлый раз было {a1}: больше половины "
+                 "выпало разом. Проверь noindex и canonical в шаблонах и X-Robots-Tag "
+                 "хостинга — чаще всего так выглядит правило, закрывшее целый раздел",
+                 a0=result["included"], a1=before))
     if result["too_long"]:
         print(tr("  ! {a0} адрес(ов) длиннее {a1} символов — поисковик такой адрес из sitemap "
                  "не примет, укороти slug: {a2}", a0=len(result["too_long"]),
@@ -1180,8 +1428,9 @@ def cmd_notify(args):
     if args.write_key:
         target = args.key_dir or args.out_dir
         if not target:
-            print(tr("  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками."))
-            print(tr("    Укажи каталог публикации: --key-dir ./public"))
+            print(tr("  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками."),
+                  file=sys.stderr)
+            print(tr("    Укажи каталог публикации: --key-dir ./public"), file=sys.stderr)
             return 1
         path = publish.write_key_file(target, key)
         print(tr("Файл ключа: {a0}", a0=path))
@@ -1226,6 +1475,15 @@ def cmd_doctor(args):
     # База читается до работы: тот же файл может быть и базой, и результатом.
     previous = doctor.load_run(args.baseline) if getattr(args, "baseline", "") else None
     history_dir = getattr(args, "history", "") or ""
+    # Файл вместо папки истории раньше обнаруживался после записи отчёта:
+    # код 2 при готовых файлах на диске.
+    if history_dir and os.path.exists(history_dir) and not os.path.isdir(history_dir):
+        raise SourceError(tr("--history {a0} — это файл, а нужна папка истории.",
+                             a0=history_dir))
+    if history_dir and history.foreign_trend(history_dir):
+        raise SourceError(tr("{a0} уже существует и это не график пакета.\n    Перезаписывать "
+                             "чужой файл я не буду — укажи другую папку --history.",
+                             a0=history.foreign_trend(history_dir)))
     baseline_label = args.baseline if getattr(args, "baseline", "") else ""
     if previous is None and history_dir:
         previous = history.latest(history_dir)
@@ -1237,13 +1495,15 @@ def cmd_doctor(args):
     # Та же достижимость, что у check: ссылки закрытых в robots.txt страниц
     # поисковик не читает.
     robots_path = getattr(args, "robots", None) or _guess_robots(args)
-    blocked = set()
+    blocked, robots = set(), None
     if robots_path and not (urlsplit(args.site or "").path.strip("/")
                             and not getattr(args, "robots", None)):
-        blocked = aeo.blocked_urls(pages, aeo.read_robots(robots_path))
+        robots = aeo.read_robots(robots_path)
+        blocked = aeo.blocked_urls(pages, robots)
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
+    analysis["robots_blocked"] = sorted(blocked)
     notes = list(analysis.get("notes") or [])
 
     sitemap_urls = None
@@ -1252,8 +1512,7 @@ def cmd_doctor(args):
         if not sm["urls"] and sm["errors"]:
             raise SourceError(
                 tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['errors'][0]))
-        for error in sm["errors"]:
-            print(tr("  ! sitemap не прочитан: {a0}", a0=error))
+        notes += _sitemap_notes(args, sm)
         sitemap_urls = sm["urls"]
         _warn_undeclared(_guess_robots(args), args.sitemap, args.root, args.site)
     by_engine, by_source, cited, impressions = _collect_indexed(args)
@@ -1265,7 +1524,8 @@ def cmd_doctor(args):
             for url, n in counts.items():
                 merged[url] = merged.get(url, 0) + n
             print(tr("Цитирование — {a0}: {a1} страниц(ы), {a2} прогонов с цитатой",
-                     a0=sources.title_of(name), a1=len(counts), a2=sum(counts.values())))
+                     a0=sources.title_of(name), a1=sum(1 for n in counts.values() if n > 0),
+                     a2=sum(counts.values())))
     logs = crawlers.read_logs(getattr(args, "logs", None) or [], site=args.site or "")
     verdicts = None
     if logs and getattr(args, "verify_bots", False):
@@ -1277,11 +1537,12 @@ def cmd_doctor(args):
 
     funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                   by_engine=by_engine, by_source=by_source,
-                                  cited=cited, impressions=impressions)
+                                  cited=cited, impressions=impressions,
+                                  robots_blocked=analysis.get("robots_blocked"))
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
     segments = doctor.segments(funnel_result, pages)
-    crawl = crawlers.coverage(pages, logs, verified=verdicts) if logs else {}
+    crawl = crawlers.coverage(pages, logs, verified=verdicts, robots=robots) if logs else {}
     if crawl:
         funnel_result["steps"].append({
             "id": "ai-fetched", "name": tr("Открыто ИИ-поиском (по логам)"),
@@ -1353,7 +1614,13 @@ def cmd_doctor(args):
     json_path = report_pair(args.out)[1]
     run = {"site": args.site, "funnel": funnel_result, "segments": segments,
            "ai_crawlers": crawl or None, "ai_segments": ai_seg}
-    trend = doctor.compare_runs(run, previous) if previous is not None else None
+    try:
+        trend = doctor.compare_runs(run, previous) if previous is not None else None
+    except (TypeError, KeyError, AttributeError, ValueError):
+        # Прогон, поправленный руками, ронял doctor трассировкой после всей работы.
+        print(tr("  ! прошлый прогон {a0} повреждён — сравнение с ним пропущено",
+                 a0=baseline_label))
+        trend = None
     if trend is not None:
         _print_trend(trend, baseline_label)
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
@@ -1362,7 +1629,9 @@ def cmd_doctor(args):
                             **({"baseline": dict(path=baseline_label, **trend)} if trend else {}),
                             "ai_crawlers": crawl or None, "ai_segments": ai_seg,
                             "foreign": foreign, "live": live, "near_page_one": near,
-                            "notes": notes})
+                            "notes": notes,
+                            # HTML отсылает «полный список — в JSON»: он здесь.
+                            "issues": _serialize_issues(analysis.get("issues") or [])})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     if history_dir:
         saved = history.save(history_dir, run)
@@ -1415,11 +1684,25 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
     if trend.get("site_changed"):
         print(tr("  ! прогоны для разных сайтов — сравнение почти ничего не значит"))
     quiet = True
-    names = {"index": tr("индекс"), "sitemap": "sitemap"}
+    names = {"index": tr("индекс"), "sitemap": "sitemap",
+             "logs": tr("Открыто ИИ-поиском (по логам)")}
     for step in trend.get("not_compared") or ():
         quiet = False
         print(tr("  ! данные для шага «{a0}» есть только в одном из прогонов — "
                  "этот шаг и разделы не сравниваются", a0=names.get(step, step)))
+    swapped = trend.get("index_sources")
+    changed = trend.get("sources_changed") or {}
+    if swapped:
+        quiet = False
+        print(tr("  ! индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг "
+                 "индекса и разделы не сравниваются",
+                 a0=", ".join(swapped["before"]), a1=", ".join(swapped["after"])))
+    elif changed:
+        quiet = False
+        print(tr("  ! источники индекса другие (добавлены: {a0}; убраны: {a1}) — "
+                 "шаг индекса и разделы не сравниваются",
+                 a0=", ".join(changed.get("added") or ()) or "—",
+                 a1=", ".join(changed.get("removed") or ()) or "—"))
     for step in trend["steps"]:
         quiet = False
         print(tr("  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})",
@@ -1437,7 +1720,10 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
                          a0=row["segment"], a1=row["before"], a2=row["after"], a3=row["delta"]))
         if part.get("closed_gaps"):
             quiet = False
-            print(tr("  ✓ разрыв закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
+            if key == "ai_segments":
+                print(tr("  ✓ разрыв ИИ-поиска закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
+            else:
+                print(tr("  ✓ разрыв закрыт: {a0}", a0=", ".join(part["closed_gaps"])))
     for field, title in (("newly_not_indexed", tr("Выпали из индекса ({a0}):")),
                          ("newly_off_sitemap", tr("Выпали из sitemap ({a0}):"))):
         urls = trend.get(field) or []
@@ -1677,6 +1963,13 @@ def _print_citations(funnel_result: dict, limit: int = 10) -> None:
 
 
 def cmd_plan(args):
+    # Доля — от 0 до 1: `--min-filled 5` молча отбраковывал все строки,
+    # даже заполненные целиком.
+    if not 0 <= args.min_filled <= 1:
+        raise SourceError(tr("--min-filled — доля заполненных колонок, от 0 до 1 "
+                             "(например 0.5), а не {a0}", a0=args.min_filled))
+    if args.min_words < 0:
+        raise SourceError(tr("--min-words не может быть отрицательным"))
     data = generate.read_dataset(args.dataset)
     rows, fields = data["rows"], data["fields"]
     for problem in data["problems"]:
@@ -1689,8 +1982,14 @@ def cmd_plan(args):
 
     generate.check_pattern(args.pattern, fields)
 
-    cfg = {"min_fields_filled": args.min_filled} if args.min_filled else None
-    audit = generate.audit_dataset(rows, fields, args.keyword, cfg)
+    cfg = {"min_fields_filled": args.min_filled} if args.min_filled else {}
+    # Собственный slug — адрес целиком, только если шаблон пути не берёт
+    # других колонок: `{city}/{slug}` разводит одинаковые slug по каталогам.
+    names = {name.split(".")[0].split("[")[0] for _l, name, _s, _c
+             in __import__("string").Formatter().parse(args.pattern) if name}
+    cfg["own_slug_is_path"] = names <= {"slug"}
+    lines = data.get("lines")
+    audit = generate.audit_dataset(rows, fields, args.keyword, cfg, lines=lines)
     print(tr("Строк в датасете: {a0}", a0=audit['total']))
     print(tr("К генерации:      {a0}", a0=len(audit['keep'])))
     print(tr("Отбраковано:      {a0}", a0=len(audit['rejected'])))
@@ -1716,7 +2015,7 @@ def cmd_plan(args):
     if args.json:
         _write_json(args.json, {
             "total": audit["total"],
-            "keep": [{"row": i + 2, "keyword": k, "slug": s, "intent": generate.query_intent(k)}
+            "keep": [{"row": lines[i] if lines else i + 2, "keyword": k, "slug": s, "intent": generate.query_intent(k)}
                      for i, k, s, _ in audit["keep"]],
             "rejected": audit["rejected"],
             "near_synonyms": [{"kept": a, "dropped": b} for a, b, _ in audit["near_synonyms"]],
@@ -1742,9 +2041,16 @@ def cmd_plan(args):
             print(tr("  Не записано строк: {a0}", a0=len(result['failed'])))
         if result["written"]:
             print(tr("Дальше: попроси агента заполнить их по брифу внутри каждого файла."))
+        # Незаписанная строка — не успех: CI и агент читают код возврата.
+        return 1 if result["failed"] else 0
     else:
         print(tr("\nЭто разбор без записи. Чтобы создать заготовки — добавь --write."))
     return 0
+
+
+def _posix(path: str) -> str:
+    """Путь для печатной команды: с `/` вместо `\\` в Windows."""
+    return path.replace(os.sep, "/") if os.sep != "/" else path
 
 
 def cmd_init(args):
@@ -1769,8 +2075,10 @@ def cmd_init(args):
     print(tr("\nЧто установлено:"))
     for path in result["skills"]:
         print(f"  {path}")
+    written = result["config_written"]
     print(f"  {os.path.basename(result['config'])}"
-          + ("" if result["config_written"] else tr("   (уже был, не тронут)")))
+          + (tr("   (уже был, вписано из флагов: {a0})", a0=", ".join(written))
+             if isinstance(written, list) else "" if written else tr("   (уже был, не тронут)")))
     if result["gitignore"]:
         print(tr("  .gitignore — дописаны служебные файлы"))
     if result["agents"]:
@@ -1787,18 +2095,22 @@ def cmd_init(args):
         if not d["site"]:
             print(tr("\n! Адрес сайта определить не удалось."))
         print(tr("  Назови их сам:"))
-        print("  indexgap init --site " + (d["site"].rstrip("/") or "https://example.com")
-              + " --content " + (d["content"] or tr("<каталог со страницами>")) + " --force")
+        print("  indexgap init --site " + (shlex.quote(d["site"].rstrip("/")) or "https://example.com")
+              + " --content " + (shlex.quote(d["content"]) if d["content"]
+                                 else tr("<каталог со страницами>")) + " --force")
         return 1
 
     print(tr("\nСледующая команда:"))
-    dataset = f" --dataset {d['dataset']}" if d["dataset"] else ""
-    print(f"  indexgap check {d['content']} --site {d['site'].rstrip('/')}{dataset}")
+    # Каталог с пробелом (`./my pages`) без кавычек давал «unrecognized arguments».
+    # Путь в команде — с прямыми слэшами: так его понимают и POSIX-оболочки,
+    # и PowerShell, а `.\\my pages` в одинарных кавычках — только Windows.
+    dataset = f" --dataset {shlex.quote(_posix(d['dataset']))}" if d["dataset"] else ""
+    print(f"  indexgap check {shlex.quote(_posix(d['content']))} --site {shlex.quote(d['site'].rstrip('/'))}{dataset}")
     if args.key:
         key = install.new_indexnow_key()
         print(tr("\nНовый ключ IndexNow для ЭТОГО проекта: {a0}", a0=key))
         print(tr("  Он привязан к домену файлом в корне сайта. Ключ от другого проекта здесь не сработает — протокол ответит 403."))
-        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=d['content'], a1=d['site'].rstrip('/'), a2=key))
+        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=shlex.quote(_posix(d['content'])), a1=shlex.quote(d['site'].rstrip('/')), a2=key))
     return 0
 
 
@@ -1807,10 +2119,27 @@ def cmd_portfolio(args):
     specs = portfolio.read_portfolio(args.portfolio)
     print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
     results = []
+    # Файлы отчётов проектов проверяются до работы, как --out у `check`: путь
+    # из JSON портфеля затирал чужой файл, а «beta/x» и «beta x» давали одно
+    # имя в --reports, и второй отчёт молча заменял первый.
+    taken = {}
+    key_of = lambda out: os.path.normcase(os.path.abspath(report_pair(out)[0]))
     for spec in specs:
         if not spec.get("out") and args.reports:
-            spec["out"] = os.path.join(args.reports,
-                                       portfolio.report_name(spec["name"]) + ".html")
+            stem, n = portfolio.report_name(spec["name"]), 1
+            path = os.path.join(args.reports, stem + ".html")
+            while key_of(path).lower() in {k.lower() for k in taken}:
+                n += 1
+                path = os.path.join(args.reports, f"{stem}-{n}.html")
+            spec["out"] = path
+        if spec.get("out"):
+            key = key_of(spec["out"])
+            if key in taken:
+                raise SourceError(tr("{a0}: один файл отчёта у двух проектов — «{a1}» и «{a2}»",
+                                     a0=spec["out"], a1=taken[key], a2=spec["name"]))
+            taken[key] = spec["name"]
+            _check_report_pair(spec["out"])
+    for spec in specs:
         result = portfolio.run_one(spec)
         results.append(result)
         if result["error"]:
@@ -1826,10 +2155,14 @@ def cmd_portfolio(args):
     site_patterns = [p for p in patterns if p.get("scope") == "site"]
     if page_patterns:
         print(tr("\nОбщие грабли на страницах (доля страниц проекта):"))
-        for p in page_patterns[:10]:
+        # Критичное — в первую очередь: десяток сведений не должен вытеснять его.
+        shown = sorted(page_patterns, key=lambda p: p["level"] != "critical")[:10]
+        for p in shown:
             shares = ", ".join(f"{n} {p['detail'][n]['share']:.0%}" for n in p["projects"])
             mark = tr("  ← похоже на непонастроенный порог") if p.get("threshold_suspect") else ""
             print(tr("  {a0:<24} {a1} проекта: {a2}{a3}", a0=p['code'], a1=p['project_count'], a2=shares, a3=mark))
+        if len(page_patterns) > len(shown):
+            print(tr("         … и ещё {a0}", a0=len(page_patterns) - len(shown)))
         if any(p.get("threshold_suspect") for p in page_patterns):
             print(tr("    Порог, срабатывающий почти на всех страницах всех проектов, —\n    это вопрос к порогу, а не к страницам. Правится в indexgap.json\n    или профилем: `indexgap profiles`."))
     else:
@@ -1868,6 +2201,13 @@ def cmd_cite(args):
     по умолчанию ничего не отправляет: сначала показывает, кого и о чём
     спросит и сколько это будет стоить вызовов.
     """
+    # Прогонов меньше одного не бывает: раньше `--runs -3` печаталось и
+    # сохранялось как есть, хотя спрашивали по разу, а `--limit 0` всё равно
+    # брал один вопрос.
+    if args.runs < 1:
+        raise SourceError(tr("--runs — число прогонов на вопрос, не меньше 1"))
+    if args.limit < 1:
+        raise SourceError(tr("--limit — сколько вопросов взять из семантики, не меньше 1"))
     project = apply_project_defaults(args)
     baseline = cite.load_result(args.baseline) if getattr(args, "baseline", "") else None
     if getattr(args, "against", ""):
@@ -1909,11 +2249,11 @@ def cmd_cite(args):
                              a1=", ".join(sorted(cite.PROVIDERS))))
     ready = [p for p in chosen if p in cite.available()]
     if not ready:
-        print(tr("Ни одного ключа не найдено. Нужен хотя бы один:"))
+        print(tr("Ни одного ключа не найдено. Нужен хотя бы один:"), file=sys.stderr)
         for line in cite.missing_keys(chosen):
-            print(f"  {line}")
+            print(f"  {line}", file=sys.stderr)
         print(tr("\n  Это единственная часть пакета, которой нужны ключи "
-                 "и деньги. Всё остальное работает без них."))
+                 "и деньги. Всё остальное работает без них."), file=sys.stderr)
         return 2
 
     calls = len(prompts) * len(ready) * max(1, args.runs)
@@ -2087,6 +2427,14 @@ def cmd_diff(args):
                                profile=args.profile, dataset=args.dataset)
     config = apply_project_defaults(probe)
     if not probe.site:
+        # Как у check: адрес часто лежит в файлах новой сборки.
+        from .install import detect_site
+        guessed = detect_site(args.new, ".")
+        if guessed:
+            probe.site = guessed
+            print(tr("Адрес сайта взят из файлов рядом со страницами: {a0} — если не так, "
+                     "укажи --site", a0=guessed))
+    if not probe.site:
         raise SourceError(tr("Не указан адрес сайта: добавь --site https://… — или запиши "
                              "`site` в indexgap.json."))
     site = check_site_url(probe.site)
@@ -2126,21 +2474,31 @@ def cmd_diff(args):
         delta = compare_baseline(after, diffs.moved_findings(
             _serialize_issues(before), result, new_pages))
         said = {i[1] for i in items if i[2] in ("page-closed", "nosnippet-added")}
-        shown = 0
+        shown = shown_warnings = 0
+        raised = set()
         for item in delta["new"]:
-            if item["level"] != "critical":
+            if item["level"] not in ("critical", "warning"):
                 continue
             if item["code"] in _DIFF_SAID and item["url"] in said:
+                # Строка diff уже названа, но уровень берётся у check: новый
+                # запрет сниппета там критичен, и --strict должен его видеть.
+                if item["code"] == "nosnippet":
+                    raised.add(item["url"])
                 continue
-            items.append(("critical", item["url"], "new-finding",
+            # Новые «внимание» тоже строки отчёта: битая ссылка на удалённую
+            # страницу — warning, и карточка «внимание» показывала ноль.
+            items.append((item["level"], item["url"], "new-finding",
                           f"{item['code']} — {item['message']}"))
-            shown += 1
+            shown += item["level"] == "critical"
+            shown_warnings += item["level"] == "warning"
+        items = [("critical",) + tuple(i[1:]) if i[2] == "nosnippet-added" and i[1] in raised
+                 else i for i in items]
         findings = {
             "new": delta["new"], "fixed": delta["fixed"],
             # Без тех, что уже названы как закрывшиеся страницы: счёт сходится
             # с числом строк `new-finding` в отчёте.
             "new_critical": shown,
-            "new_warning": sum(1 for i in delta["new"] if i["level"] == "warning"),
+            "new_warning": shown_warnings,
             "fixed_critical": sum(1 for i in delta["fixed"] if i.get("level") == "critical"),
         }
     items = checks.sort_issues(items)
@@ -2190,7 +2548,8 @@ def cmd_diff(args):
             grouped[(level, code)].append(url)
     for (level, code), urls in grouped.items():
         more = tr(" и ещё {a0}", a0=len(urls) - 3) if len(urls) > 3 else ""
-        print(f"  {level:<8} {code:<18} {len(urls):>5}  {', '.join(urls[:3])}{more}")
+        label = tr(report.LEVEL_LABEL.get(level, ("", level))[1])
+        print(f"  {label:<8} {code:<18} {len(urls):>5}  {', '.join(urls[:3])}{more}")
     print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
     return 1 if (summary["critical"] and args.strict) else 0
 
@@ -2208,9 +2567,13 @@ def preset_language(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     lang = ""
     for i, item in enumerate(argv):
-        if item.startswith("--lang="):
-            lang = item.split("=", 1)[1]
-        elif item == "--lang" and i + 1 < len(argv):
+        # argparse принимает и сокращение (`--la en`): его надо узнать и здесь.
+        name, eq, value = item.partition("=")
+        if len(name) < 3 or not "--lang".startswith(name):
+            continue
+        if eq:
+            lang = value
+        elif i + 1 < len(argv):
             lang = argv[i + 1]
     # Неизвестное значение (`--lang xx`) argparse всё равно отвергнет, но
     # ошибка должна прийти на языке из INDEXGAP_LANG, а не на запасном
@@ -2259,7 +2622,8 @@ def build_parser():
     p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом"))
     p.add_argument("--out-dir", default="content", help=tr("куда класть заготовки"))
     p.add_argument("--pattern", default="{slug}/index.md", help=tr("шаблон пути"))
-    p.add_argument("--min-words", type=int, default=350)
+    p.add_argument("--min-words", type=int, default=350,
+                   help=tr("сколько слов требовать в брифе каждой заготовки"))
     p.add_argument("--min-filled", type=float, default=0.0,
                    help=tr("доля заполненных колонок, ниже которой строка отбраковывается (по умолчанию 0 — не отбраковывать)"))
     p.add_argument("--brief", help=tr("файл со своим шаблоном брифа вместо стандартного"))
@@ -2462,6 +2826,12 @@ def main(argv=None):
     for subparser in getattr(parser, "_subparsers_map", {}).values():
         subparser.add_argument("--lang", choices=i18n.LANGS, help=lang_help)
     args = parser.parse_args(argv)
+    if getattr(args, "lang", None):
+        # Разобранный флаг — последнее слово: сокращение, которое preset не
+        # узнал, иначе молча не действовало.
+        i18n.set_lang(args.lang)
+    out = sys.stdout
+    sys.stdout = _PipeGuard(out)
     try:
         return args.func(args)
     except SourceError as exc:
@@ -2485,6 +2855,53 @@ def main(argv=None):
         print(tr("\n{a0}: не удалось записать или прочитать ({a1}).", a0=where,
                  a1=exc.strerror or exc), file=sys.stderr)
         return 2
+    finally:
+        if sys.stdout is not out and isinstance(sys.stdout, _PipeGuard):
+            sys.stdout = out
+
+
+class _PipeGuard:
+    """
+    stdout, который переживает закрытый пайп.
+
+    `indexgap check --strict | head -1`: пайп рвётся на второй строке, ещё
+    до анализа. Раньше это обрывало команду с кодом 0 — отчёта нет, а
+    провалившийся --strict выглядел пройденным. Теперь вывод после разрыва
+    уходит в никуда, а команда доделывает работу и возвращает свой код.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._broken = False
+
+    def _silence(self):
+        self._broken = True
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, self._stream.fileno())
+            os.close(devnull)
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    def write(self, text):
+        if self._broken:
+            return len(text)
+        try:
+            return self._stream.write(text)
+        except BrokenPipeError:
+            self._silence()
+            return len(text)
+
+    def flush(self):
+        if self._broken:
+            return
+        try:
+            self._stream.flush()
+        except BrokenPipeError:
+            self._silence()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
 
 
 if __name__ == "__main__":

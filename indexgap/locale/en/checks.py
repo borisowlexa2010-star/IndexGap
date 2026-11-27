@@ -37,6 +37,8 @@ MESSAGES = {
     "canonical указывает на {a0} — страница отдаёт вес другой":
         "canonical points at {a0} — this page hands its weight to another one",
     "description {a0} символов": "description is {a0} characters",
+    " ({a0} знаков: иероглифы и полноширинные считаются за два)":
+        " ({a0} characters: CJK and fullwidth ones count as two)",
     "title {a0} символов": "title is {a0} characters",
     "title {a0} символов, обрежется в выдаче":
         "title is {a0} characters — it will be cut off in the results",
@@ -97,6 +99,10 @@ MESSAGES = {
         "and almost no text in common. That is what a template does when it takes "
         "the address from the wrong variable; this page is asking to be dropped "
         "from the index",
+    "canonical указывает на {a0}, а это другая страница: текст почти тот же, но другие имя, title и H1 — копия шаблона под другой запрос. Страница просит убрать её из индекса":
+        "the canonical points to {a0}, which is a different page: nearly the same "
+        "text, but another name, title and H1 — a template copy built for another "
+        "query. This page is asking to be dropped from the index",
     " (на эту же страницу ведут canonical ещё {a0} стр.)":
         " ({a0} more page(s) point their canonical to the same page)",
     "копия страницы {a0}: canonical указывает на неё, и та в сборке открыта — так и должно быть, если это вариант (печатная версия, второй адрес)":
@@ -227,6 +233,9 @@ MESSAGES = {
         "template has crowded out the content.",
     "Пользовательский контент и лента": "User-generated content and feeds",
     "Профиль «{a0}» неизвестен. Доступны: ": "Unknown profile “{a0}”. Available: ",
+    "раздел freshness в indexgap.json не действует: сроки дат проверяет только профиль events, а выбран «{a0}»":
+        "the freshness section in indexgap.json has no effect: dates are checked only "
+        "by the events profile, and “{a0}” is selected",
     "Прошедшее событие, открытое для индексации, — мусор в выдаче и удар по доверию. Проверка `stale-event` смотрит именно это.":
         "An event that has passed while still open to indexing is junk in the "
         "results and a hit to trust. That is exactly what `stale-event` looks at.",
@@ -289,6 +298,16 @@ MESSAGES = {
     "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. На живом сайте это 404 за редиректом":
         "the redirect stub leads to a page that is not in the build: {a0}. "
         "On the live site that is a 404 behind a redirect",
+    "заглушка-редирект ведёт по кругу: {a0}. Браузер покажет ошибку «слишком много переадресаций», поисковик страницу не получит":
+        "the redirect stub leads round in a loop: {a0}. A browser shows a "
+        "'too many redirects' error, and a search engine gets no page",
+    "страница с текстом (около {a0} слов) сразу перебрасывает на главную — текста поисковик не увидит, а редирект на главную он считает мягким 404. Чаще всего это ошибка шаблона":
+        "a page with text (about {a0} words) redirects straight to the home page: "
+        "a search engine will not see the text, and it treats a redirect to the "
+        "home page as a soft 404. Usually this is a template bug",
+    "заглушка-редирект ведёт на главную — поисковик считает такой редирект мягким 404: лучше вести на ближайшую по смыслу страницу":
+        "the redirect stub leads to the home page: a search engine treats such a "
+        "redirect as a soft 404, so point it at the closest page in meaning",
     'шаблон {a0}: {a1} страниц(ы) совпадают между собой до {a2:.0%} при пороге почти-дубля {a3:.0%}. Одна правка общего текста — и они станут критичными дублями. Разведи их своими данными, пока это сведения':
         'template {a0}: {a1} pages match each other by up to {a2:.0%}, and the near-duplicate threshold is {a3:.0%}. One edit to the shared text and they become critical duplicates. Give them their own data while this is still a warning',
     '{a0} страниц(ы) этого шаблона порог уже перешли.':

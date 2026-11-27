@@ -102,8 +102,8 @@ WHY = {
    "Informational: new pages per URL template, so a generator that suddenly "
    "produced ten thousand pages is noticed before they reach the sitemap.",
  "new-finding":
-   "A critical finding of the ordinary check that the old build did not have: the "
-   "deploy introduces it.",
+   "A critical or warning finding of the ordinary check that the old build did not "
+   "have: the deploy introduces it.",
  "unsupported-number":
    "A generated page that states a number absent from its own data row is not "
    "a traffic problem — it is a page that misinforms a reader who came looking "
@@ -199,6 +199,13 @@ WHY = {
    "template linking to a data row that a filter kept out of generation — one "
    "line in the template, repeated on every page. Links to assets, feeds and "
    "sections not present in the checked directory are not judged.",
+ "redirect-home":
+   "A redirect stub (meta refresh, a one-line JavaScript redirect or a Next.js "
+   "NEXT_REDIRECT page) whose target is the home page. Google treats a removed "
+   "page redirected to the home page as a soft 404, so the old address keeps "
+   "nothing. It is a warning when the stub still carries the text of a page — "
+   "usually a template that put the redirect on every page of a section — and "
+   "info for an empty alias.",
  "orphan":
    "A page nothing links to is discovered only through the sitemap, crawled "
    "rarely, and treated as unimportant — because in the site's own structure it "
@@ -363,6 +370,15 @@ WHY = {
    "The cluster points at a URL that is not among the pages found. Either a "
    "version was removed and the template still declares it, or the addresses "
    "drifted apart.",
+ "hreflang-conflict":
+   "Every code in a cluster names one version, and every version has one code. "
+   "Two addresses under the same code (or two x-default links), or a page that "
+   "calls itself `en` while its siblings call it `fr`, is a contradiction, and "
+   "search engines may ignore the annotations involved.",
+ "hreflang-relative":
+   "Search engines require fully qualified alternate URLs, with scheme and "
+   "host. A root-relative href such as `/de/a/` may be ignored. The package "
+   "names it, and checks the cluster as the browser would resolve it.",
  "hreflang-lang-mismatch":
    "The declared language does not match the language the page is actually "
    "written in. This is the failure that sends a Spanish reader to an English "
@@ -465,7 +481,7 @@ FAMILIES = [
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
   ["noindex", "noindex-group", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
-   "wrong-link-form", "canonical-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
+   "redirect-home", "wrong-link-form", "canonical-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
 
  ("content", "Content quality at scale",
   "The failures that only appear when pages are compared with each other. A "
@@ -489,7 +505,7 @@ FAMILIES = [
   "template gets wrong in three different ways. These checks validate the "
   "cluster as a whole rather than the tag in isolation.",
   ["translations-parked", "hreflang-missing", "hreflang-no-self", "hreflang-no-return", "hreflang-bad-code",
-   "hreflang-unknown-target", "hreflang-lang-mismatch", "lang-script-mismatch", "lang-text-mismatch", "fact-drift",
+   "hreflang-unknown-target", "hreflang-lang-mismatch", "hreflang-conflict", "hreflang-relative", "lang-script-mismatch", "lang-text-mismatch", "fact-drift",
    "hreflang-canonical-conflict",
    "hreflang-target-blocked", "hreflang-static-cluster", "hreflang-in-body"]),
 
@@ -741,8 +757,8 @@ LEVEL_OVERRIDES = {
     "template-change": {"levels": {"warning", "info"},
                         "message": "titles, H1s, descriptions, canonicals or the URL form "
                                    "changed on most pages of one URL template at once"},
-    "new-finding": {"levels": {"critical"},
-                    "message": "a critical finding that the old build did not have"},
+    "new-finding": {"levels": {"critical", "warning"},
+                    "message": "a finding that the old build did not have"},
     "ai-crawler-blocked": {"levels": {"critical", "info"},
                            "message": "OAI-SearchBot is closed: … (critical for the "
                                       "AI-search crawlers, info for training crawlers)"},
@@ -768,7 +784,7 @@ def collect() -> dict:
     literal = r'"(?:[^"\\]|\\.)*"'
     pat = re.compile(
         r'\(\s*"(critical|warning|info)"\s*,\s*[^,\n]+,\s*'
-        r'"([a-z0-9-]+)"\s*,\s*\n?\s*tr\(\s*((?:' + literal + r'\s*)+)', re.S)
+        r'"([a-z0-9-]+)"\s*,\s*\n?\s*(?:Said\(\s*)?tr\(\s*((?:' + literal + r'\s*)+)', re.S)
     seen, levels = {}, {}
     for level, code, literals in pat.findall(src):
         source = "".join(ast.literal_eval(x) for x in re.findall(literal, literals))

@@ -48,7 +48,9 @@ def _parse_date(value) -> date:
 def _ld_nodes(raw: str) -> list:
     from .aeo import _ld_items
     try:
-        return _ld_items(json.loads(raw))
+        # Событие внутри `WebPage.mainEntity` — главное содержание страницы.
+        # Элементы списка (`ItemList`) — нет: архив прошедших событий законен.
+        return _ld_items(json.loads(raw), ("mainentity",))
     except (ValueError, RecursionError):
         return []
 
@@ -110,10 +112,14 @@ def page_dates(page) -> dict:
     # <time> стоит на любой странице: «проверено 2 марта», дата публикации
     # новости. Датой события он становится, только если страница — событие.
     if is_event:
-        for match in re.finditer(r"<time\b[^<>]{0,500}?datetime=[\"']([^\"'<>]{1,60})", page.raw or "", re.I):
+        from .core import INERT, NOT_LIVE, drop_spans
+        raw = drop_spans(page.raw or "", NOT_LIVE + INERT)
+        for match in re.finditer(r"<time\b[^<>]{0,500}?datetime=[\"']([^\"'<>]{1,60})", raw, re.I):
             parsed = _parse_date(match.group(1))
             if parsed:
-                found.setdefault("time", parsed)
+                # Самая поздняя, как везде: «объявлено в 2024-м» перед датой
+                # концерта не делает концерт прошедшим.
+                found["time"] = max(found.get("time", parsed), parsed)
     return found
 
 
@@ -129,7 +135,12 @@ def check(pages: list, cfg: dict = None, today: date = None) -> dict:
 
     cfg = {**CONFIG, **(cfg or {})}
     today = today or date.today()
-    grace = timedelta(days=cfg["grace_days"])
+    # `endDate: 9999-12-31` у бессрочной выставки и огромный `grace_days`
+    # выходят за пределы календаря: такая страница не протухает.
+    try:
+        cutoff = today - timedelta(days=cfg["grace_days"])
+    except OverflowError:
+        cutoff = date.min
 
     issues = []
     dated = 0
@@ -140,7 +151,7 @@ def check(pages: list, cfg: dict = None, today: date = None) -> dict:
             continue
         dated += 1
         latest = max(dates.values())
-        if latest + grace >= today:
+        if latest >= cutoff:
             continue
         stale += 1
         if indexable(page):

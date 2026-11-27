@@ -102,7 +102,7 @@ def _fetch_sitemap(source: str) -> bytes:
     return data
 
 
-def _child_sitemap(source: str, loc: str) -> tuple:
+def _child_sitemap(source: str, loc: str, shared=()) -> tuple:
     """
     Куда идти за дочерним файлом индекса: (источник, ошибка).
 
@@ -111,7 +111,9 @@ def _child_sitemap(source: str, loc: str) -> tuple:
     путь, и тот читался, или адрес во внутренней сети, и туда уходил запрос.
     Индекс с диска ищет дочерние файлы рядом с собой — по пути из адреса
     (`/en/sitemap.xml` → `en/sitemap.xml`), потом по имени — и не выходит за
-    свой каталог.
+    свой каталог. По имени — только если это имя у дочерних файлов индекса
+    одно: `en/sitemap.xml` и `de/sitemap.xml` (`shared`) по имени не ищутся,
+    иначе пропавший `de/` подменялся посторонним `sitemap.xml` рядом.
     """
     from urllib.parse import unquote, urlsplit
     remote = loc.startswith(("http://", "https://"))
@@ -129,24 +131,34 @@ def _child_sitemap(source: str, loc: str) -> tuple:
     # таким «дочерним» файлом в сеть нельзя: это был бы запрос ради петли.
     if os.path.realpath(os.path.join(base, path)) == me:
         return "", tr("{a0}: индекс ссылается сам на себя", a0=loc)
-    for candidate in (os.path.join(base, path), os.path.join(base, os.path.basename(path))):
+    candidates = [os.path.join(base, path)]
+    if os.path.basename(path) not in shared:
+        candidates.append(os.path.join(base, os.path.basename(path)))
+    for candidate in candidates:
         real = os.path.realpath(candidate)
         inside = real == base or real.startswith(base + os.sep)
         if inside and real != me and os.path.isfile(real):
             return real, ""
+    # Индекс с диска в сеть не ходит: проверка без --live остаётся без сети,
+    # а сохранённая копия чужого индекса не выбирает, куда пакету слать запрос.
+    # Без этого sitemap.xml из чужого PR посылал запрос из CI на любой адрес,
+    # внутренний тоже, и вписывал ответ в отчёт.
     if remote:
-        return loc, ""
+        return "", tr("{a0}: дочерний файл не найден рядом с индексом, а в сеть "
+                      "индекс с диска не ведёт — передайте его отдельным --sitemap",
+                      a0=loc)
     return "", tr("{a0}: дочерний файл не найден рядом с индексом", a0=loc)
 
 
 def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
-                 fetcher=None) -> dict:
+                 fetcher=None, _stack: tuple = ()) -> dict:
     """
     Читает sitemap с диска или по URL, разворачивает sitemap-index.
 
-    Возвращает {"urls": [...], "error": "..."} — раньше при любой ошибке
-    возвращался пустой список, и опечатка в пути выглядела как «сайт
-    не попал в sitemap целиком».
+    Возвращает {"urls": [...], "error": "...", "warnings": [...]} — раньше при
+    любой ошибке возвращался пустой список, и опечатка в пути выглядела как
+    «сайт не попал в sitemap целиком». `warnings` — нарушения протокола,
+    из-за которых поисковик может отвергнуть файл; адреса из него читаются.
 
     `fetcher(source) -> bytes` заменяет чтение: `fetch` так сохраняет каждый
     файл индекса и не идёт за редиректом на чужой хост. Беда — SourceError.
@@ -158,46 +170,65 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
     key = source if source.startswith(("http://", "https://")) else os.path.realpath(source)
     # Петля — это ошибка, и молчать о ней нельзя: индекс, сославшийся на себя,
     # давал ноль адресов без единого слова, и воронка сообщала, что из sitemap
-    # выпал весь сайт.
-    if key in _seen:
+    # выпал весь сайт. Петля — это файл, который уже читается выше по цепочке;
+    # файл, прочитанный раньше по соседней ветке, — просто повтор.
+    if key in _stack:
         return {"urls": [], "error": tr("{a0}: индекс ссылается сам на себя", a0=source)}
+    if key in _seen:
+        return {"urls": [], "error": "", "repeat": True}
     if len(_seen) >= MAX_SITEMAPS:
         return {"urls": [], "error": tr(
             "больше {a0} sitemap-файлов за один прогон — остальные не читались",
             a0=MAX_SITEMAPS)}
     _seen.add(key)
     try:
-        root = parse_xml((fetcher or _fetch_sitemap)(source))
+        data = (fetcher or _fetch_sitemap)(source)
+        root = parse_xml(data)
     except SourceError as exc:
         text = str(exc)
         return {"urls": [], "error": text if source in text else f"{source}: {text}"}
 
+    warnings = []
+    namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    if namespace.split("://", 1)[-1] != SITEMAP_NS.strip("{}").split("://", 1)[-1]:
+        warnings.append(tr(
+            "{a0}: корневой элемент не в пространстве имён {a1} ({a2}) — Search Console "
+            "отвергает такой файл как «неверное пространство имён»",
+            a0=source, a1=SITEMAP_NS.strip("{}"), a2=namespace or tr("не объявлено")))
     tag = root.tag.rsplit("}", 1)[-1]
     if tag == "sitemapindex":
-        urls, errors, alternates = [], [], {}
+        urls, errors, alternates, repeated = [], [], {}, False
+        locs = []
         for sm in [e for e in root
                    if e.tag.rsplit("}", 1)[-1] == "sitemap"]:
             loc = next((c.text for c in sm
                         if c.tag.rsplit("}", 1)[-1] == "loc" and c.text), "")
-            if not loc:
-                continue
-            child, problem = _child_sitemap(source, loc.strip())
+            if loc and loc.strip() not in locs:
+                locs.append(loc.strip())
+        from urllib.parse import unquote, urlsplit
+        names = Counter(os.path.basename(unquote(urlsplit(loc).path)) for loc in locs)
+        shared = {name for name, n in names.items() if n > 1}
+        for loc in locs:
+            child, problem = _child_sitemap(source, loc, shared)
             if child:
-                result = read_sitemap(child, _depth + 1, _seen, fetcher)
+                result = read_sitemap(child, _depth + 1, _seen, fetcher, _stack + (key,))
                 urls.extend(result["urls"])
-                alternates.update(result.get("alternates") or {})
+                _merge_alternates(alternates, result.get("alternates"))
+                warnings += [w for w in result.get("warnings") or () if w not in warnings]
                 problem = result["error"]
+                repeated = repeated or bool(result.get("repeat"))
             if problem and problem not in errors:
                 errors.append(problem)
             if len(_seen) >= MAX_SITEMAPS and problem:
                 break
-        if not urls and not errors:
+        if not urls and not errors and not repeated:
             errors.append(tr("{a0}: индекс не дал ни одного адреса", a0=source))
-        return {"urls": urls, "error": "; ".join(errors[:5]), "alternates": alternates}
+        return {"urls": urls, "error": "; ".join(errors[:5]), "alternates": alternates,
+                "warnings": warnings}
 
     # Только <url>/<loc>: у <image:loc> и <video:loc> то же имя, и 831
     # картинка каталога виз засчитывалась страницами sitemap.
-    urls, alternates = [], {}
+    urls, alternates, lastmods = [], {}, []
     for url in root:
         if url.tag.rsplit("}", 1)[-1] != "url":
             continue
@@ -206,6 +237,8 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
         if not loc:
             continue
         urls.append(loc)
+        lastmods += [el.text.strip() for el in url
+                     if el.text and el.text.strip() and el.tag.rsplit("}", 1)[-1] == "lastmod"]
         # hreflang можно объявить и здесь, в `<xhtml:link>`: Google считает
         # sitemap равноправным способом. Раньше эта разметка не читалась, и
         # каждая переведённая страница получала «нет hreflang».
@@ -214,10 +247,67 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
                  if el.tag.rsplit("}", 1)[-1] == "link" and el.get("hreflang")
                  and "alternate" in (el.get("rel") or "").lower()]
         if links:
-            alternates[loc] = links
+            _merge_alternates(alternates, {loc: links})
     if not urls:
         return {"urls": [], "error": tr("{a0}: в файле нет ни одного <loc>", a0=source)}
-    return {"urls": urls, "error": "", "alternates": alternates}
+    warnings += _urlset_warnings(source, urls, lastmods, len(data))
+    return {"urls": urls, "error": "", "alternates": alternates, "warnings": warnings}
+
+
+# Пределы протокола sitemaps.org для одного файла: файл больше поисковик
+# отвергает целиком.
+MAX_SITEMAP_URLS = 50000
+MAX_SITEMAP_BYTES = 50 * 1024 * 1024
+_W3C_DATE = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2})"
+                       r"(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?)?)?$")
+
+
+def _urlset_warnings(source: str, urls: list, lastmods: list, size: int) -> list:
+    """Нарушения протокола в одном `<urlset>`, из-за которых файл или его даты не в счёт."""
+    from datetime import date, timedelta
+    warnings = []
+    if len(urls) > MAX_SITEMAP_URLS or size > MAX_SITEMAP_BYTES:
+        warnings.append(tr(
+            "{a0}: {a1} адресов, {a2} МБ — больше предела протокола ({a3} адресов и "
+            "{a4} МБ на файл). Поисковик может отвергнуть файл целиком: разбей его на "
+            "части под sitemap-индексом", a0=source, a1=len(urls),
+            a2=round(size / (1024 * 1024), 1), a3=MAX_SITEMAP_URLS,
+            a4=MAX_SITEMAP_BYTES // (1024 * 1024)))
+    relative = [u for u in urls if not u.lower().startswith(("http://", "https://"))]
+    if relative:
+        warnings.append(tr(
+            "{a0}: {a1} <loc> — не полные адреса ({a2}). Протокол требует адрес со схемой "
+            "и хостом, поисковик такие строки пропускает — и здесь они ни с одной "
+            "страницей не совпадут", a0=source, a1=len(relative), a2=", ".join(relative[:3])))
+    bad, future = [], []
+    horizon = (date.today() + timedelta(days=1)).isoformat()
+    for value in lastmods:
+        found = _W3C_DATE.match(value)
+        try:
+            day = date(*(int(n or 1) for n in found.groups())).isoformat() if found else ""
+        except ValueError:
+            day = ""
+        if not day:
+            bad.append(value)
+        elif day > horizon:
+            future.append(value)
+    if bad:
+        warnings.append(tr(
+            "{a0}: {a1} <lastmod> — не дата W3C ({a2}): поисковик такие даты не принимает",
+            a0=source, a1=len(bad), a2=", ".join(sorted(set(bad))[:3])))
+    if future:
+        warnings.append(tr(
+            "{a0}: {a1} <lastmod> — в будущем ({a2}): поисковик таким датам не верит",
+            a0=source, a1=len(future), a2=", ".join(sorted(set(future))[:3])))
+    # Одинаковая дата со временем у каждого адреса — это время сборки, а не
+    # правки. Голая дата бывает честной (сайт выложен в один день), её не трогаем.
+    if (len(lastmods) >= 5 and len(lastmods) == len(urls) and len(set(lastmods)) == 1
+            and "T" in lastmods[0]):
+        warnings.append(tr(
+            "{a0}: у всех {a1} адресов один и тот же <lastmod> {a2} — это время сборки, "
+            "а не правки, и поисковик перестаёт на него смотреть",
+            a0=source, a1=len(urls), a2=lastmods[0]))
+    return warnings
 
 
 URL_COLUMN_HINTS = sources.URL_COLUMN_HINTS
@@ -233,34 +323,56 @@ def read_sitemaps(sources, fetcher=None) -> dict:
     """
     if isinstance(sources, str):
         sources = [sources]
-    urls, seen, errors, alternates = [], set(), [], {}
+    urls, seen, errors, alternates, warnings = [], set(), [], {}, []
     for source in sources or ():
         result = read_sitemap(source, fetcher=fetcher)
         if result.get("error"):
             errors.append(f"{source}: {result['error']}")
+        warnings += [w for w in result.get("warnings") or () if w not in warnings]
         for url in result.get("urls") or ():
             if url not in seen:
                 seen.add(url)
                 urls.append(url)
-        alternates.update(result.get("alternates") or {})
-    return {"urls": urls, "errors": errors, "alternates": alternates}
+        _merge_alternates(alternates, result.get("alternates"))
+    return {"urls": urls, "errors": errors, "alternates": alternates, "warnings": warnings}
+
+
+def _merge_alternates(into: dict, more) -> None:
+    """
+    Объединяет hreflang одного адреса из разных <url> и файлов. Поисковик
+    складывает их, а `update` оставлял последний: итог зависел от порядка
+    --sitemap.
+    """
+    for loc, links in (more or {}).items():
+        have = into.setdefault(loc, [])
+        for link in links:
+            if link not in have:
+                have.append(link)
 
 
 def apply_sitemap_alternates(pages: list, alternates: dict) -> int:
     """
     Отдаёт страницам hreflang, объявленный в sitemap. Возвращает, скольким.
 
-    Разметка в самой странице сильнее: sitemap дополняет только те страницы,
-    у которых своей нет.
+    Разметка в самой странице сильнее: у страницы со своей разметкой sitemap
+    только дополняет её кодами и адресами, которых в ней нет. Тема, которая
+    печатает в <head> один `x-default`, иначе прятала весь кластер из sitemap.
     """
     by_key = {url_key(loc): links for loc, links in (alternates or {}).items()}
     given = 0
     for page in pages:
-        if getattr(page, "alternates", None):
-            continue
         links = by_key.get(page.key)
-        if links:
+        if not links:
+            continue
+        own = getattr(page, "alternates", None)
+        if not own:
             page.alternates = list(links)
+            given += 1
+            continue
+        codes = {code.strip().lower() for code, _ in own}
+        extra = [(code, href) for code, href in links if code.strip().lower() not in codes]
+        if extra:
+            page.alternates = list(own) + extra
             given += 1
     return given
 
@@ -600,30 +712,50 @@ def _url_column(rows: list) -> tuple:
 
 
 # Столбцы, где поисковик сам говорит, в индексе ли страница.
-_STATUS_HEADERS = ("coverage state", "coverage", "verdict", "index status",
+_STATUS_HEADERS = ("coverage state", "coverage", "coverage status", "abdeckung",
+                   "verdict", "index status",
                    "indexing status", "indexing state", "status", "статус",
                    "состояние", "состояние индексации")
+
+
+def _header_words(cell) -> str:
+    """`coverageState`, `coverage_state`, `Coverage State` → `coverage state`."""
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(cell or "").strip())
+    return " ".join(text.replace("_", " ").split()).lower()
+
+
+# `200 OK`, `301 Moved Permanently` — код с фразой, тоже ответ сервера.
+_HTTP_LINE = re.compile(r"(\d{3})\s+(.+)")
 # Фразы HTTP-ответа: столбец из одних таких — код сервера, а не индекс.
 _HTTP_REASONS = {"ok", "moved permanently", "found", "see other", "not modified",
                  "temporary redirect", "permanent redirect", "forbidden", "not found",
                  "gone", "internal server error", "bad gateway", "service unavailable",
                  "gateway timeout", "no response"}
 _INDEXED = re.compile(
-    r"(?<!not )(?<!не )\b(indexed|в поиске|в индексе|проиндексирован\w*|pass|valid)\b",
+    r"(?<!not )(?<!не )\b(indexed|в поиске|в индексе|проиндексирован\w*|pass|valid)\b"
+    # Вердикты панели на других языках: «Gesendet und indexiert», «Indexée, bien
+    # que bloquée…», «已编入索引». Отрицания к ним — в _NOT_INDEXED.
+    r"|\bindexiert|\bindexad[ao]s?\b|\bindexée?s?\b|\bindicizzat|geïndexeerd|zindeksowan"
+    r"|已编入索引|已建立索引|dizine eklendi|색인이 생성됨|색인되었",
     re.I)
-# «Indexed: No», «Indexed? false», «Non-indexed», «De-indexed», «В поиске нет»:
-# слово indexed здесь есть, а смысл обратный.
-_NEGATED = (r"\bindexed[\s:?()=\-]*(?:no|false|нет)\b(?!\s+\w)|\b(?:non|de|un)-?indexed\b"
-            r"|(?:в поиске|в индексе)[\s:?()=\-]*(?:нет|no)\b(?!\s+\w)|\bнет в (?:поиске|индексе)")
+# «Indexed: No», «Indexed — No», «Indexed? false», «Non-indexed», «De-indexed»,
+# «В поиске нет»: слово indexed здесь есть, а смысл обратный.
+_SEP = r"[\s:?()=\-\u2013\u2014/]*"
+_NEGATED = (r"\bindexed" + _SEP + r"(?:no|n|false|0|нет)\b(?!\s+\w)|\b(?:non|de|un)-?indexed\b"
+            r"|\b(?:not yet|never|no longer|previously|formerly|was) indexed\b"
+            r"|(?:в поиске|в индексе)" + _SEP + r"(?:нет|no)\b(?!\s+\w)|\bнет в (?:поиске|индексе)")
 _NOT_INDEXED = re.compile(
-    _NEGATED + r"|not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
+    _NEGATED + r"|nicht indexiert|sin indexar|no indexad|non index[ée]|não indexad|non indicizzat"
+    r"|niet geïndexeerd|niezindeksowan|nie zindeksowan|未编入索引|未建立索引|dizine eklenmedi"
+    r"|생성되지 않|색인되지 않"
+    r"|not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
     r"не в индексе|currently not|blocked|заблокир|duplicate|дубл|малоцен|"
     r"redirect|редирект|soft 404|not found|не найден|noindex|error|ошибк|fail",
     re.I)
 
 
 _SURELY_INDEXED = re.compile(
-    r"^\s*(?:submitted and )?indexed\b(?![\s:?()=\-]*(?:no|false|нет)\b(?!\s+\w))|\burl is on google\b|\bpage is indexed\b"
+    r"^\s*(?:submitted and )?indexed\b(?!" + _SEP + r"(?:no|n|false|0|нет)\b(?!\s+\w))|\burl is on google\b|\bpage is indexed\b"
     r"|^\s*(?:отправлена и )?проиндексирован", re.I)
 
 
@@ -633,12 +765,15 @@ def _status_column(rows: list, start: int):
         return None
     found = []
     for i, cell in enumerate(rows[0]):
-        header = str(cell or "").strip().lower()
+        header = _header_words(cell)
         if header not in _STATUS_HEADERS:
             continue
         values = [str(r[i]).strip() for r in rows[1:51] if i < len(r) and str(r[i]).strip()]
-        # «Status: 200» и «Status: OK» — ответ сервера, а не слово поисковика.
-        if not values or all(v.isdigit() or v.lower() in _HTTP_REASONS for v in values):
+        # «Status: 200», «Status: OK», «200 OK» — ответ сервера, а не слово поисковика.
+        if not values or all(v.isdigit() or v.lower() in _HTTP_REASONS
+                             or (_HTTP_LINE.fullmatch(v) and _HTTP_LINE.fullmatch(v).group(2).lower()
+                                 in _HTTP_REASONS)
+                             for v in values):
             continue
         # Порядок в _STATUS_HEADERS — от самого точного: у краулера рядом
         # стоят «Status» (ответ сервера) и «Coverage» (вердикт поисковика),
@@ -655,6 +790,8 @@ def _is_indexed_status(status: str) -> bool:
     дубль» — всё это строки с адресом, и раньше каждая засчитывалась как
     страница в индексе. Засчитывается только то, что сказано прямо.
     """
+    # Неразрывный пробел между словами — тот же пробел.
+    status = " ".join(str(status or "").split())
     if not status:
         return False
     # «Indexed, though blocked by robots.txt» — в индексе, хотя и со словом
@@ -785,7 +922,15 @@ def read_sources(specs: list, site: str = "") -> dict:
             # объявила бы непроиндексированным всё остальное.
             kinds[name] = kind
             counts = read_citations(path, site)
-            cited[name] = {**cited.get(name, {}), **counts}
+            if name in cited:
+                # Две выгрузки (январь и февраль) — цитирования складываются,
+                # как у --cite; слияние словарей молча теряло первую.
+                notes.append(tr("две выгрузки цитирований помечены как «{a0}» — "
+                                "цитирования сложены; если периоды пересекаются, "
+                                "числа завышены", a0=name))
+            merged = cited.setdefault(name, {})
+            for url, n in counts.items():
+                merged[url] = merged.get(url, 0) + n
             continue
         # «Эффективность» из Search Console — отчёт о показах: страница в индексе
         # без показов в него не попадает. Узнаётся по столбцу показов.
@@ -847,12 +992,15 @@ def read_sources(specs: list, site: str = "") -> dict:
 # поэтому «impression» ловит и «Impressions», и «Impressões».
 _POSITION_WORDS = ("position", "позиция", "позиція", "posición", "posizione", "posição",
                    "positie", "pozycja", "posisi", "konum", "sıralama", "vị trí",
+                   "pozice", "sijainti", "pozíció", "θέση", "poziție", "poziţie", "placering",
                    "掲載順位", "排名", "순위")
 _IMPRESSION_WORDS = ("impression", "impr", "показ", "impresion", "impress",
                      "affichage", "wyświetl", "vertoning", "gösterim", "visning",
-                     "tayangan", "hiển thị",
+                     "tayangan", "hiển thị", "zobrazení", "näyttökerr", "megjelenés",
+                     "εμφανίσεις", "afișări", "afişări",
                      "表示回数", "展示", "曝光", "노출", "การแสดงผล")
 _CLICK_WORDS = ("click", "клик", "клік", "переход", "clic", "klick", "klik", "tıklama",
+                "napsautu", "kattint", "κλικ",
                 "nhấp", "クリック", "点击", "點擊", "클릭", "การคลิก")
 # CTR на некоторых языках назван через клики: «Klickrate», «Tỷ lệ nhấp».
 _RATE_WORDS = ("ctr", "rate", "taux", "tasa", "quote", "oran", "rasio", "tỷ lệ",
@@ -1037,9 +1185,13 @@ def _has_impressions(header, path: str = "") -> bool:
 
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
            by_engine: dict = None, by_source: dict = None,
-           cited: dict = None, impressions: list = None) -> dict:
+           cited: dict = None, impressions: list = None,
+           robots_blocked=None) -> dict:
     """
     Строит воронку и, главное, объясняет каждую потерю.
+
+    `robots_blocked` — страницы, которые robots.txt не пускает обходить: к
+    индексации они не открыты, как и закрытые noindex.
     Возвращает как числа, так и конкретные списки URL — чинить надо адресно.
 
     Всё сравнение идёт по ключу URL: `/виза/`, `/%D0%B2%D0%B8%D0%B7%D0%B0/`
@@ -1058,7 +1210,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     # Все панели — отчёты о показах, и других свидетельств индексации нет.
     impressions_only = bool(live_panels) and not (by_source or {}) and all(
         n in shown for n in live_panels)
-    publishable = {url_key(p.url) for p in pages if indexable(p)}
+    disallowed = _keys(robots_blocked or ()) & generated
+    publishable = {url_key(p.url) for p in pages if indexable(p)} - disallowed
     blocked = generated - publishable
 
     def show(keys):
@@ -1118,7 +1271,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         {"id": "generated", "name": tr("Сгенерировано"), "count": len(generated)},
         {"id": "indexable", "name": tr("Пригодно к индексации"), "count": len(publishable),
          "lost": len(blocked),
-         "why": tr("noindex или canonical на другую страницу")},
+         "why": (tr("noindex, canonical на другую страницу или Disallow в robots.txt")
+                 if disallowed else tr("noindex или canonical на другую страницу"))},
     ]
     if in_sitemap is not None:
         steps.append({"id": "in-sitemap", "name": tr("В sitemap"),
@@ -1170,6 +1324,9 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     for name, counts in (cited or {}).items():
         merged = {}
         for u, n in (counts or {}).items():
+            if not n or n <= 0:
+                # Строка «Citations: 0» — страница, которую не цитировали.
+                continue
             for key in fold({url_key(u)}):
                 merged[key] = merged.get(key, 0) + n
                 # Печатается адрес, как его процитировали: ключ сравнения
@@ -1263,6 +1420,7 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "proves": sources.describe(list(engines_keys)),
         "display": display,
         "blocked": show(blocked),
+        "robots_blocked": show(disallowed),
         "missing_from_sitemap": missing_from_sitemap,
         "stale_in_sitemap": stale_in_sitemap,
         "stale_in_sitemap_urls": stale_listed,
@@ -1474,7 +1632,9 @@ def segments(funnel_result: dict, pages: list = None) -> dict:
 
     funnel_result = funnel_result or {}
     pages = pages or []
-    publishable = {url_key(p.url): p.url for p in pages if indexable(p)}
+    disallowed = _keys(funnel_result.get("robots_blocked") or ())
+    publishable = {url_key(p.url): p.url for p in pages
+                   if indexable(p) and url_key(p.url) not in disallowed}
 
     no_sitemap = _keys(funnel_result.get("missing_from_sitemap") or [])
     not_indexed = _keys(funnel_result.get("not_indexed") or [])
@@ -1637,7 +1797,62 @@ def load_run(path: str) -> dict:
         raise SourceError(tr("{a0}: не JSON прогона doctor ({a1})", a0=path, a1=exc))
     if not isinstance(data, dict) or not isinstance(data.get("funnel"), dict):
         raise SourceError(tr("{a0}: это не данные `indexgap doctor` — нет поля funnel", a0=path))
+    if not valid_run(data):
+        raise SourceError(tr("{a0}: данные прогона doctor повреждены или правлены руками — "
+                             "сравнивать с ними нельзя", a0=path))
     return data
+
+
+def valid_run(data) -> bool:
+    """
+    Прогон, с которым можно сравнивать: поля того вида, что пишет `doctor`.
+    Правленный руками или битый файл истории ронял сравнение трассировкой —
+    уже после того, как новый прогон был записан.
+    """
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def strs(v):
+        return v is None or (isinstance(v, list) and all(isinstance(u, str) for u in v))
+
+    if not isinstance(data, dict) or not isinstance(data.get("funnel"), dict):
+        return False
+    f = data["funnel"]
+    steps = f.get("steps")
+    if steps is not None and not (isinstance(steps, list) and all(
+            isinstance(s, dict) and (s.get("count") is None or num(s["count"]))
+            and all(isinstance(s.get(k) or "", str) for k in ("id", "name", "engine"))
+            for s in steps)):
+        return False
+    if not all(strs(f.get(k)) for k in ("not_indexed", "missing_from_sitemap", "blocked")):
+        return False
+    for key in ("engine_keys", "kinds", "display"):
+        if f.get(key) is not None and not isinstance(f[key], dict):
+            return False
+    if not all(strs(v) for v in (f.get("engine_keys") or {}).values()):
+        return False
+    for key in ("segments", "ai_segments"):
+        part = data.get(key)
+        if part is None:
+            continue
+        if not isinstance(part, dict):
+            return False
+        rows, marked = part.get("rows") or [], part.get("highlighted") or []
+        if not (isinstance(rows, list) and isinstance(marked, list)):
+            return False
+        if not all(isinstance(r, dict) and isinstance(r.get("segment"), str) and num(r.get("lost"))
+                   for r in rows):
+            return False
+        if not all(isinstance(h, dict) and isinstance(h.get("segment"), str) for h in marked):
+            return False
+    crawl = data.get("ai_crawlers")
+    if crawl is not None:
+        bots = crawl.get("bots") if isinstance(crawl, dict) else None
+        if not isinstance(crawl, dict) or not (bots is None or isinstance(bots, list) and all(
+                isinstance(b, dict) and isinstance(b.get("name"), str) and num(b.get("pages"))
+                for b in bots)):
+            return False
+    return data.get("_saved") is None or isinstance(data["_saved"], str)
 
 
 def _step_key(step: dict) -> tuple:
@@ -1655,11 +1870,21 @@ def compare_runs(current: dict, previous: dict) -> dict:
     """
     cur_f, old_f = current.get("funnel") or {}, previous.get("funnel") or {}
 
+    # Индекс из другого источника (краулер вместо панели Google, Bing вместо
+    # Google) — не «страницы вернулись в индекс»: сравнивать шаг нечем.
+    def sources_of(funnel):
+        got = funnel.get("engine_keys")
+        return sorted(got) if isinstance(got, dict) and got else None
+    src_now, src_was = sources_of(cur_f), sources_of(old_f)
+    swapped = bool(src_now and src_was and src_now != src_was)
+
     old_steps = {_step_key(s): s for s in old_f.get("steps") or () if isinstance(s, dict)}
     steps = []
     for step in cur_f.get("steps") or ():
         before = old_steps.get(_step_key(step))
         if before is None:
+            continue
+        if swapped and step.get("id") in ("indexed", "with-impressions"):
             continue
         delta = (step.get("count") or 0) - (before.get("count") or 0)
         if delta:
@@ -1672,20 +1897,66 @@ def compare_runs(current: dict, previous: dict) -> dict:
     def has(funnel, flag):
         return bool(funnel.get(flag, True))
 
+    # Набор источников индекса сменился (добавили выгрузку Bing) — шаг индекса
+    # вырос не потому, что страницы вернулись. Имена из файлов без метки не
+    # считаются: недельная выгрузка под новым именем — тот же источник.
+    def named(funnel):
+        return {n for n in (funnel.get("kinds") or funnel.get("engine_keys") or {})
+                if str(n).lower() in sources.TOOLS}
+    sources_changed = {}
+    if has(cur_f, "has_index") and has(old_f, "has_index") and named(cur_f) != named(old_f):
+        sources_changed = {"added": sorted(named(cur_f) - named(old_f)),
+                           "removed": sorted(named(old_f) - named(cur_f))}
+        steps = [s for s in steps if s["id"] not in ("indexed", "with-impressions")]
+
+    def in_index(funnel):
+        keys = funnel.get("engine_keys")
+        if not isinstance(keys, dict):
+            return None
+        return {k for urls in keys.values() for k in urls or ()}
+
     def moved(field, flag):
         if not (has(cur_f, flag) and has(old_f, flag)):
             return [], []
+        if field == "not_indexed" and sources_changed:
+            return [], []
         now, was = _keys(cur_f.get(field) or ()), _keys(old_f.get(field) or ())
         shown = {url_key(u): u for u in list(old_f.get(field) or ()) + list(cur_f.get(field) or ())}
-        return (sorted(shown[k] for k in now - was), sorted(shown[k] for k in was - now))
+        gone, came = was - now, now - was
+        # Страница уходит из списка и тогда, когда выпала раньше по воронке:
+        # стала noindex, удалена, ушла из sitemap. Это не «вернулась».
+        if field == "not_indexed":
+            idx_now, idx_was = in_index(cur_f), in_index(old_f)
+            if idx_now is not None:
+                gone = {k for k in gone if k in idx_now}
+            if idx_was is not None:
+                came = {k for k in came if k in idx_was}
+        elif isinstance(cur_f.get("display"), dict):
+            live = set(cur_f["display"]) - _keys(cur_f.get("blocked") or ())
+            gone = {k for k in gone if k in live}
+        return (sorted(shown[k] for k in came), sorted(shown[k] for k in gone))
 
-    newly_lost, recovered = moved("not_indexed", "has_index")
+    newly_lost, recovered = moved("not_indexed", "has_index") if not swapped else ([], [])
+    in_index_now = cur_f.get("engine_keys")
+    if isinstance(in_index_now, dict) and in_index_now:
+        # Ушла из «не в индексе» — ещё не «вернулась»: страницу удалили,
+        # закрыли noindex или убрали из sitemap. Вернулась та, что в индексе.
+        now_keys = set().union(*(set(v) for v in in_index_now.values()))
+        recovered = [u for u in recovered if url_key(u) in now_keys]
     newly_off_map, back_on_map = moved("missing_from_sitemap", "has_sitemap")
-    same_inputs = all(has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap"))
+    same_inputs = (not swapped and not sources_changed
+                   and all(has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap")))
+    # Логи ботов были только в одном прогоне: шаг «открыто ИИ-поиском» и
+    # разделы ИИ-поиска сравнивать не с чем.
+    logs_differ = bool(current.get("ai_crawlers")) != bool(previous.get("ai_crawlers"))
 
     def sections(key):
-        if key == "segments" and not same_inputs:
+        if (key == "segments" and not same_inputs) or (key == "ai_segments" and logs_differ):
             # Потери раздела считаются по другим шагам — разница ничего не значит.
+            return {"rows": [], "new_gaps": [], "closed_gaps": []}
+        if key == "ai_segments" and not (current.get(key) and previous.get(key)):
+            # Без --logs в одном из прогонов разделов ИИ-поиска нет вовсе:
+            # «разрыв закрыт» значило бы только «логов не дали».
             return {"rows": [], "new_gaps": [], "closed_gaps": []}
         cur = {r["segment"]: r for r in ((current.get(key) or {}).get("rows") or ())}
         old = {r["segment"]: r for r in ((previous.get(key) or {}).get("rows") or ())}
@@ -1719,6 +1990,8 @@ def compare_runs(current: dict, previous: dict) -> dict:
         "bots": bots,
         # Шаги, которые были только в одном из прогонов: «индекс», «sitemap».
         "not_compared": [f[4:] for f in ("has_index", "has_sitemap")
-                         if has(cur_f, f) != has(old_f, f)],
+                         if has(cur_f, f) != has(old_f, f)] + (["logs"] if logs_differ else []),
+        "sources_changed": sources_changed,
         "site_changed": (current.get("site") or "") != (previous.get("site") or ""),
+        "index_sources": {"before": src_was, "after": src_now} if swapped else None,
     }

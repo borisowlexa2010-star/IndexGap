@@ -35,12 +35,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
+from functools import lru_cache
 from urllib.parse import urlsplit
 from collections import Counter, defaultdict
 from .subject import Said
 from .core import (BRIEF_MARKERS, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, brief_prose,
                    find_slots, tokenize, visible_text)
+from .core import NOT_SHOWN, drop_spans
 from .i18n import tr
+from .settings import unit_word
 
 CONFIG = {
     "template_share": 0.70,      # доля страниц с одинаковым скелетом заголовков
@@ -79,17 +83,42 @@ _HYPHEN_SIGNS = r"\-\u2010\u2011"
 _SAME_SIGNS = str.maketrans({"٫": ".", "٬": ",", "٪": "%",
                              "％": "%", "﹪": "%", "’": "'",
                              "ʼ": "'", "，": ",", "．": ".",
+                             # Полноширинные «￥9,900» и «＄99» — те же иена и
+                             # доллар, «45㎡» — те же квадратные метры.
+                             "￥": "¥", "＄": "$", "㎡": "m²",
                              # Невидимые знаки направления письма: RTL-редакторы
                              # ставят `&rlm;` рядом с числом, и «35‏ دولارا» не
                              # читалось как цена.
                              "\u200e": None, "\u200f": None, "\u061c": None,
                              "\u2066": None, "\u2067": None, "\u2068": None,
                              "\u2069": None, "\u202a": None, "\u202b": None,
-                             "\u202c": None, "\u202d": None, "\u202e": None})
+                             "\u202c": None, "\u202d": None, "\u202e": None,
+                             # Гершаим: «ש״ח» — та же запись, что «ש"ח».
+                             "\u05f4": '"',
+                             # Невидимые знаки без ширины и мягкий перенос:
+                             # «$&#8203;1,900» и «1,6&shy;00» на экране — одно число.
+                             "\u200b": None, "\u2060": None, "\ufeff": None,
+                             "\u180e": None, "\u00ad": None})
+
+# Невидимые знаки у самой цифры: ZWNJ, ZWJ, ZWSP, word joiner, мягкий перенос.
+# «۹۹‌٪» с ZWNJ не читалось как процент. Внутри слов ZWNJ нужен (персидский),
+# поэтому снимается только рядом с цифрой.
+_GLUE_AT_DIGIT = re.compile(r"(?<=\d)[\u200b-\u200d\u2060\u00ad\ufeff]+|[\u200b-\u200d\u2060\u00ad\ufeff]+(?=\d)")
+# Арабская запятая между разрядами: «١،٦٠٠ دولار» — 1600, а не 1 и 600.
+_ARABIC_THOUSANDS = re.compile(r"(?<![\d.,،])\d{1,3}(?:،\d{3})+(?![\d.,،]?\d)")
+# Персидская дробь через косую черту: «۳/۵ درصد» — 3.5%. Только между
+# персидскими или арабскими цифрами и перед процентом, множителем или валютой:
+# дату «۱۴۰۳/۰۵/۱۲» и оценку «۴/۵» это не трогает.
+_PERSIAN_SLASH = re.compile(
+    r"(?<![\d/])([\u0660-\u0669\u06f0-\u06f9]+)/([\u0660-\u0669\u06f0-\u06f9]+)(?![\d/])"
+    r"(?=[ \u00a0\u200c]?(?:%|٪|درصد|هزار|میلیون|میلیارد|تومان|تومن|ریال|دلار|یورو))")
 
 
 def _same_signs(text: str) -> str:
-    return (text or "").translate(_SAME_SIGNS)
+    text = _GLUE_AT_DIGIT.sub("", text or "")
+    text = _ARABIC_THOUSANDS.sub(lambda m: m.group(0).replace("،", ","), text)
+    text = _PERSIAN_SLASH.sub(r"\1.\2", text)
+    return text.translate(_SAME_SIGNS)
 
 
 # Множители после числа. «3万円» — тридцать тысяч иен, «1,5 млн» — полтора
@@ -99,6 +128,8 @@ def _same_signs(text: str) -> str:
 SCALES = {
     "万": 10**4, "萬": 10**4, "만": 10**4, "億": 10**8, "亿": 10**8, "억": 10**8,
     "千": 10**3, "천": 10**3,
+    # «8千万円», «2천만원» — десять миллионов: раньше читалось как тысяча.
+    "千万": 10**7, "千萬": 10**7, "천만": 10**7,
     "тыс": 10**3, "тысяч": 10**3, "тысячи": 10**3, "тысяча": 10**3,
     "млн": 10**6, "миллион": 10**6, "миллиона": 10**6, "миллионов": 10**6,
     "млрд": 10**9, "миллиард": 10**9, "миллиарда": 10**9, "миллиардов": 10**9,
@@ -112,26 +143,82 @@ SCALES = {
     # «$1.6k», «1.45K»: так цену пишут в карточках и объявлениях. Без «k»
     # верные $1,600 читались как $1.6 и становились критичной находкой.
     "k": 10**3,
+    # Арабский, персидский, урду, иврит, хинди, бенгали, индонезийский и
+    # тайский: «٣ ملايين دولار», «۹۹ هزار تومان», «₹15 लाख», «Rp 8,5 juta».
+    # Без них выдумка в тысячу раз проходила молча, а верная цена с
+    # множителем объявлялась выдуманной.
+    "ألف": 10**3, "الف": 10**3, "آلاف": 10**3, "ألاف": 10**3,
+    "مليون": 10**6, "ملايين": 10**6, "مليار": 10**9,
+    "هزار": 10**3, "میلیون": 10**6, "میلیارد": 10**9,
+    "ہزار": 10**3, "لاکھ": 10**5, "کروڑ": 10**7,
+    "אלף": 10**3, "אלפים": 10**3, "מיליון": 10**6, "מיליארד": 10**9,
+    "हज़ार": 10**3, "हजार": 10**3, "\u0939\u095b\u093e\u0930": 10**3, "लाख": 10**5,
+    "करोड़": 10**7, "\u0915\u0930\u094b\u095c": 10**7,
+    "হাজার": 10**3, "লাখ": 10**5, "লক্ষ": 10**5, "কোটি": 10**7,
+    "lacs": 10**5, "cr": 10**7,
+    "ribu": 10**3, "rb": 10**3, "juta": 10**6, "jt": 10**6, "miliar": 10**9,
+    "triliun": 10**12,
+    "พัน": 10**3, "หมื่น": 10**4, "แสน": 10**5, "ล้าน": 10**6,
 }
 _CJK_SCALES = "万萬만億亿억千천"
+# Тайские множители, как и CJK, пишутся слитно с валютой: «15 ล้านบาท».
+_GLUED_SCALES = ("พัน", "หมื่น", "แสน", "ล้าน")
 _SCALE_WORDS = "|".join(re.escape(w) for w in sorted(
-    (k for k in SCALES if k[0] not in _CJK_SCALES), key=len, reverse=True))
+    (k for k in SCALES if k[0] not in _CJK_SCALES and k not in _GLUED_SCALES),
+    key=len, reverse=True))
+_CJK_SCALE = r"千[万萬]|천만|[" + _CJK_SCALES + r"]"
 _SCALE_AFTER = re.compile(
-    _SP + r"?(?:([" + _CJK_SCALES + r"])|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
+    _SP + r"?(?:(" + _CJK_SCALE + "|" + "|".join(_GLUED_SCALES) + r")|("
+    + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
 
 
-def _scale_in(unit: str) -> tuple:
+# Множители, которые пишут только при цене: «$2.54M», «£2.6m», «₹2.5 Cr»,
+# «₹25.2 L», «R$ 2,67 mi», «$2.58B». Без валюты «5 m» — это метры, поэтому
+# они читаются только после знака или кода валюты. Одна строчная «m» — только
+# вплотную к числу.
+_PRICE_SCALES = {"m": 10**6, "mm": 10**6, "mn": 10**6, "mi": 10**6, "b": 10**9,
+                 "cr": 10**7, "l": 10**5}
+# «$50 B&B» и «$5 M-F» — не миллиарды и не миллионы.
+_PRICE_SCALE_AFTER = re.compile(
+    r"(?:" + _SP + r"?(?:((?i:mm|mn|mi|cr))|([MBL]))|(m))(?![\w&'’/\-]|\.\w)\.?")
+
+
+def _price_scale_at(text: str, end: int) -> tuple:
+    """Как `_scale_at`, но ещё и с множителями, которые пишут только при цене."""
+    factor, length = _scale_at(text, end)
+    if factor != 1:
+        return factor, length
+    match = _PRICE_SCALE_AFTER.match(text, end)
+    if not match:
+        return 1, 0
+    word = (match.group(1) or match.group(2) or match.group(3)).lower()
+    return _PRICE_SCALES[word], match.end() - end
+
+
+# Подпись и название колонки повторяются на каждой странице: без кэша разбор
+# одних и тех же пяти заголовков стоил семь секунд на десять тысяч страниц.
+@lru_cache(maxsize=4096)
+def _scale_in(unit: str, price: bool = False) -> tuple:
     """(слово, множитель) множителя внутри подписи единицы — или ("", 1).
 
     Слово множителя — целым словом: «k» в «kg» и «mil» в «miles» — не тысяча.
+    С `price` — и множитель цены («$ M»), если в подписи есть валюта.
     """
     lowered = (unit or "").lower()
     for word, factor in sorted(SCALES.items(), key=lambda kv: -len(kv[0])):
         if word[0] in _CJK_SCALES:
             if word in lowered:
                 return word, factor
+        elif word in _GLUED_SCALES:
+            if re.search(r"(?:^|(?<=[\s\d]))" + word, lowered):
+                return word, factor
         elif re.search(r"(?<![^\W\d_])" + re.escape(word) + r"(?![^\W\d_])", lowered):
             return word, factor
+    if price and _MONEY.search(unit or ""):
+        for word in re.findall(r"[^\W\d_]+", unit or ""):
+            if word.lower() in _PRICE_SCALES and (word.lower() != "l" or word == "L") \
+                    and (len(word) > 1 or word in "MBLm"):
+                return word.lower(), _PRICE_SCALES[word.lower()]
     return "", 1
 
 
@@ -150,7 +237,7 @@ PERCENT = re.compile(NOT_INSIDE + r"(" + NUMBER + r")\s*%")
 PERCENT_WORDS = (
     "per\\s?cent|percent|pct|процент(?:ов|а|ы)?|відсотк(?:ів|а|и)|prozent|por\\s?ciento|"
     "pour\\s?cent|per\\s?cento|por\\s?cento|procent|persen|peratus|phần\\s?trăm|"
-    "درصد|بالمائة|بالمئة|في\\s?المائة|प्रतिशत|শতাংশ|فیصد|เปอร์เซ็นต์|אחוז(?:ים)?"
+    "درصد|بالمائة|بالمئة|في\\s?المائة|في\\s?المئة|प्रतिशत|শতাংশ|فیصد|เปอร์เซ็นต์|אחוז(?:ים)?"
 )
 # Знак процента перед числом: так пишут по-турецки («%85'i»), по-курдски и
 # по-баскски. Перед знаком — начало, пробел или скобка, а не буква, цифра или
@@ -165,17 +252,26 @@ PERCENT_WORD = re.compile(
 # вовсе, и единственная настоящая выдумка на странице — `$95` при `$60`
 # в данных — была единственным, о чём проверка молчала.
 CURRENCY_CODES = ("USD|EUR|GBP|JPY|CNY|INR|AUD|CAD|CHF|SGD|AED|RUB|BRL|MXN|KRW|TRY|"
-                  "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH")
+                  "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH|"
+                  "CZK|HUF|BGN|EGP|PKR|KES|NGN|TWD|CLP")
+# Коды, совпадающие со словами («ron» — ром, «ils» — «они», «cop»), — только
+# заглавными.
+_CASED_CODES = "RON|ILS|NIS|COP|ARS"
+_ALL_CODES = frozenset((CURRENCY_CODES + "|" + _CASED_CODES).split("|"))
 # Доллар с буквой страны и местные сокращения: `S$35`, `HK$200`, `R$ 90`,
 # `RM 35`, `Rp 350.000`. Раньше такие цены не находились вовсе.
-LOCAL_PREFIXES = r"(?:US|S|A|AU|C|CA|HK|NZ|NT|R|MX|COL|CL)\$|RM|Rp\.?|Rs\.?|₱|₫|₩|₪|₺|₴|₸|৳"
+LOCAL_PREFIXES = (r"(?:US|S|A|AU|C|CA|HK|NZ|NT|R|MX|COL|CL)\$|RM|Rp\.?|Rs\.?|₱|₫|₩|₪|₺|₴|₸|৳|"
+                  r"฿|₦|₵|₡|₲|₭|₮|﷼|kr\.?|Dhs\.?|KSh|SFr\.")
 _LOCAL_PREFIX = re.compile(LOCAL_PREFIXES)
 # Знак с пробелом — «$ 2,900», «€ 1.900» — та же цена: так пишут в нидерландской,
 # немецкой и французской типографике. Но знак, перед которым стоит число
 # («1.900 € 12 Monate»), — это валюта после числа, а не перед следующим.
+# Иероглифы, кана и хангыль — буквы для `\w`, но пробелов в этих письменностях
+# нет: «价格为$450。», «料金は¥9,900。» — знак валюты стоит вплотную к слову.
+_CJK_LETTERS = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
 PREFIX_PRICE = re.compile(
-    r"(?<![\w.,$])((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽]" + _SP
-    + r"|(?:" + CURRENCY_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
+    r"(?:(?<![\w.,$])|(?<=[" + _CJK_LETTERS + r"]))((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽฿](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽฿]" + _SP
+    + r"|(?:" + CURRENCY_CODES + "|" + _CASED_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
 
 # Валюта после числа: `9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `3万円`. Раньше
 # ценой считалась только валюта перед числом, и выдуманная цена на испанском,
@@ -186,23 +282,30 @@ CURRENCY_WORDS = (
     "доллар(?:ов|а|ы)?|евро|фунт(?:ов|а)?|"
     "francs?|lira|lire|zł|złotych|kronor|kroner|kč|lei|"
     "руб(?:л[а-яё]*)?|грн|гривен[а-яё]*|гривн[а-яё]*|тенге|сум|сомов|лари|"
-    "دولار[ًا]?|دولارات|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
+    "دولار[ًا]?|دولارات|يورو|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
     "שקל|שקלים|ש\"ח|"
     "रुपये|रुपया|रुपए|บาท|đồng|"
     "دلار|یورو|تومن|ڈالر|روپے|روپیہ|ডলার|টাকা|রুপি|डॉलर|डालर|यूरो|"
     "ดอลลาร์|ยูโร|דולר|דולרים|יורו|долар(?:ів|а|и)?|гривень|"
-    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|TL|"
-    "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로|엔"
+    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|TL|kr|лв|Dhs|KSh|ر\\.س|د\\.إ|"
+    "us-dollars?|(?:abd[  \u00a0])?(?:doları|dolarları)|dolarów|dolary|dolarů|долл|đô[  \u00a0]la|"
+    "米ドル|ドル|ユーロ|美元|美金|欧元|港元|新元|人民币|달러|유로|엔"
 )
 # Валютные слова CJK пишутся вплотную к следующему слову («35ドルです»), поэтому
 # для них граница слова не нужна, в отличие от `dollar` в `dollars-and-sense`.
-CJK_CURRENCY_WORDS = "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로"
+# Тайский тоже пишется без пробелов: «15 ล้านบาทต่อเดือน».
+CJK_CURRENCY_WORDS = "米ドル|ドル|ユーロ|美元|美金|欧元|港元|新元|人民币|달러|유로|บาท|ดอลลาร์|ยูโร"
+# «1.540,– €», «1508,-- €», «1510.-€», «18,000.- บาท», «2,50,000/- रुपये»:
+# прочерк вместо копеек перед валютой.
+_NO_CENTS = r"(?:[.,](?:--?|[–—])|/-)"
 SUFFIX_PRICE = re.compile(
-    NOT_INSIDE + r"(" + NUMBER + r")"
+    NOT_INSIDE + r"(" + NUMBER + r")" + _NO_CENTS + r"?"
     # Слово-множитель — целым словом: «18945 kgbp» — не тысячи фунтов.
-    r"(?:" + _SP + r"?(?:[" + _CJK_SCALES + r"]|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))))?"
+    r"(?:" + _SP + r"?(?:" + _CJK_SCALE + "|" + "|".join(_GLUED_SCALES) + r"|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))"
+    r"|(?-i:Cr|mn|mi)(?![^\W\d_]))|(?-i:MM|M|B)(?![^\W\d_]))?"
     + _SP + r"?(?:" + CJK_CURRENCY_WORDS + r"|[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS
-    + "|" + CURRENCY_CODES + r")(?![^\W\d_]))", re.I | re.U)
+    + "|" + CURRENCY_CODES + "|(?-i:" + _CASED_CODES + r"))(?:(?![^\W\d_])|(?<=[a-zA-Z])(?=[" + _CJK_LETTERS + r"])))",
+    re.I | re.U)
 
 
 # Общее «число + слово»: ловит «12 лет», «25 тонн», «3500 заказов» —
@@ -210,7 +313,8 @@ SUFFIX_PRICE = re.compile(
 # Отрицательный просмотр назад отсекает «топ-10», «айфон-15», «ГОСТ-12»:
 # число, приклеенное к слову дефисом, — часть названия, а не мера.
 GENERIC_FACT = re.compile(
-    r"(?<![^\W\d_]-)" + NOT_INSIDE + "(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|[^\\W\\d_]{1,14}|[%°$€£₽¥₹])", re.U)
+    r"(?<![^\W\d_]-)" + NOT_INSIDE + "(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|" + unit_word(14)
+    + "|[%°$€£₽¥₹])", re.U)
 
 # Слова, которые после числа не делают его фактом: это нумерация и служебное.
 NON_UNITS = {
@@ -231,10 +335,15 @@ NON_UNITS = {
     "правила", "штука", "штуки", "часть", "части", "человек", "минимум",
     "максимум", "топ", "номер", "версия", "версии", "этап", "этапа", "этапов",
     "step", "steps", "ways", "way", "reasons", "tips", "things", "times",
+    # Порядковые окончания: «the 20th of each month», «a 19th-century house».
+    "st", "nd", "rd", "th",
     "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
     "сентября", "октября", "ноября", "декабря",
     "january", "february", "march", "april", "may", "june", "july", "august",
     "september", "october", "november", "december",
+    # Порядковые суффиксы и время суток: «31st», «the 3rd deadline», «7 pm» —
+    # не мера, а дата, номер и час.
+    "st", "nd", "rd", "th", "pm",
 }
 
 # То же для других языков: служебные слова, счётные контексты и месяцы.
@@ -284,25 +393,54 @@ NON_UNITS |= {
 # та же единица. Без них ошибка уходила из критичных в «просмотри глазами».
 _UNIT_SHORT = {"minutes": ("min", "mins"), "hours": ("hr", "hrs"),
                "seconds": ("sec", "secs"), "months": ("mo", "mos"),
-               "years": ("yr", "yrs")}
+               "years": ("yr", "yrs"), "weeks": ("wk", "wks"),
+               "kilograms": ("kg", "kgs"), "kilometres": ("km", "kms")}
 # И обратно: в таблице `34 min` и `3 mo`, в тексте — «44 minutes» и «5 months».
 # Раньше короткая форма в данных не давала длинной, и выдумка уходила в
 # «просмотри глазами».
 _UNIT_LONG = {short: (long, long[:-1]) + shorts
               for long, shorts in _UNIT_SHORT.items() for short in shorts}
+_UNIT_LONG["km"] += ("kilometers", "kilometer")
+_UNIT_LONG["kms"] += ("kilometers", "kilometer")
+_UNIT_SHORT["kilometers"] = _UNIT_SHORT["kilometres"]
+
+# Формы одной единицы, которые после числа значат одно и то же: падежи и
+# число в русском, немецком, испанском, итальянском, португальском, японские
+# написания месяца и площадь. Только слова, которые после числа не бывают ничем
+# другим: «год» и «an» сюда не входят — «в 2026 году», «$5 an hour».
+_UNIT_FAMILIES = (
+    {"месяц", "месяца", "месяцев"}, {"минута", "минуты", "минут", "минуту"},
+    {"час", "часа", "часов"}, {"день", "дня", "дней"},
+    {"неделя", "недели", "недель", "неделю"},
+    {"monat", "monate", "monaten", "monats"}, {"minute", "minuten"},
+    {"stunde", "stunden"}, {"woche", "wochen"}, {"jahr", "jahre", "jahren"},
+    {"mes", "meses"}, {"minuto", "minutos", "minuti"}, {"semana", "semanas"},
+    {"año", "años"}, {"día", "días"}, {"mese", "mesi"},
+    {"giorno", "giorni"}, {"mês", "meses"}, {"dia", "dias"}, {"ano", "anos"},
+    {"ヶ月", "か月", "カ月", "ヵ月", "ケ月"}, {"个月", "個月"},
+    {"m²", "m2", "sqm", "sq m", "square metres", "square meters", "square metre", "square meter"},
+    {"м²", "м2", "кв. м", "кв.м", "кв м"},
+)
 
 
 def _unit_forms(units: list) -> list:
     """Единицы проекта вместе с единственным числом и сокращениями: months → month."""
     out = set()
     for unit in units or ():
-        unit = (unit or "").strip()
+        unit = _same_signs(unit or "").strip()
         if not unit:
             continue
         out.add(unit)
         lowered = unit.lower()
-        if re.fullmatch(r"[a-z]{4,}s", lowered) and not lowered.endswith("ss"):
+        # «days» → «day», «beds» → «bed»: «a 9-day wait», «a 5-bed house».
+        if re.fullmatch(r"[a-z]{3,}s", lowered) and not lowered.endswith(("ss", "us", "is")):
             out.add(unit[:-1])
+        # Другие формы того же слова: в данных «3 месяца», на странице —
+        # «5 месяцев» и «1 месяц»; в данных «3ヶ月», на странице «5か月».
+        for family in _UNIT_FAMILIES:
+            if lowered in family or (_CJK_CHAR.search(lowered)
+                                     and any(lowered.startswith(f) for f in family)):
+                out.update(family)
         out.update(_UNIT_SHORT.get(lowered, ()))
         out.update(_UNIT_SHORT.get(lowered + "s", ()))
         out.update(_UNIT_LONG.get(lowered, ()))
@@ -325,7 +463,8 @@ def build_fact_pattern(units: list):
     spaced = [re.escape(u) for u in units if not _CJK_CHAR.search(u)]
     glued = [re.escape(u) for u in units if _CJK_CHAR.search(u)]
     alternatives = "|".join(
-        (["(?:" + "|".join(spaced) + r")(?![^\W\d_])"] if spaced else [])
+        # «45kmです», «45min到达»: за латинской единицей вплотную идёт CJK.
+        (["(?:" + "|".join(spaced) + r")(?![^\W\d_" + _CJK_LETTERS + r"])"] if spaced else [])
         + (["(?:" + "|".join(glued) + ")"] if glued else []))
     # Через дефис — составное прилагательное: «a 4-month deposit», «a 44-minute
     # ride». Раньше такое число не читалось вовсе. «5 min read» — подпись блога.
@@ -386,7 +525,21 @@ def _scaled(raw: str, factor: int) -> str:
 _CJK_COMPOUND = re.compile(r"(?<![\d.,])(\d{1,4})([万萬]|만" + _SP + r"?)(\d{1,4})([千천])?(?![\d.,]?\d)")
 
 
+# «1億2000万円», «3억 2천만원» — тоже одно число: 120000000 и 320000000.
+_CJK_OKU = re.compile(r"(?<![\d.,])(\d{1,4})([億亿]|억" + _SP + r"?)(\d{1,4})(千[万萬]|천만|[万萬]|만)"
+                      r"(?![\d.,]?\d)")
+
+
 def _cjk_compounds(text: str) -> str:
+    def oku(match):
+        scale = 10**7 if match.group(4)[0] in "千천" else 10**4
+        tail = int(match.group(3)) * scale
+        if tail >= 10**8:
+            return match.group(0)
+        return str(int(match.group(1)) * 10**8 + tail)
+
+    text = _CJK_OKU.sub(oku, text or "")
+
     def joined(match):
         head = int(match.group(1)) * 10**4
         tail = int(match.group(3)) * (10**3 if match.group(4) else 1)
@@ -422,20 +575,24 @@ def _numbers_in(text: str, fact_pattern) -> dict:
             found.setdefault(number, "%")
     if fact_pattern:
         for match in fact_pattern.finditer(text or ""):
-            number = _norm_number(match.group(1))
+            unit = match.group(0)[len(match.group(1)):].strip(" -\u2010\u2011\u00a0\u202f")
+            # Единица данных — сам множитель («15 लाख», «8,5 juta»): число — с ним.
+            word, factor = _scale_in(unit)
+            number = _scaled(match.group(1), factor if word and word == unit.lower() else 1)
             if number:
-                found[number] = match.group(0)[len(match.group(1)):].strip(" -\u2010\u2011\u00a0\u202f")
+                found[number] = unit
                 for earlier in _listed_before(text, match.start(1)):
                     found.setdefault(earlier, found[number])
     for match in PREFIX_PRICE.finditer(text or ""):
         sign = match.group(1).strip()
-        factor, length = _scale_at(text, match.end())
+        factor, length = _price_scale_at(text, match.end())
         # «$1,600–2,400», «$950 to 1,900»: второй край — та же валюта, а
         # множитель в конце («$1.5–2 million») относится к обоим краям.
         second = _RANGE_SECOND.match(text, match.end() + length)
         # Голое «2026» после цены — обычно год («from $1,450 – 2026 guide»), но
         # «$1450-2000 a month» — диапазон цен: за ним идёт срок оплаты.
-        if second and re.fullmatch(r"\d{4}", second.group(1)) and _year_like(second.group(1)) \
+        if second and re.fullmatch(r"\d{4}", second.group(1)) \
+                and (_year_like(second.group(1)) or sign == "฿" and 2400 <= int(second.group(1)) <= 2700) \
                 and not _PER_PERIOD.match(text, second.end()):
             second = None
         # «$1,450 – 1600 Oak Avenue»: за голым числом — имя собственное, это
@@ -445,7 +602,7 @@ def _numbers_in(text: str, fact_pattern) -> dict:
                 and not _SUFFIX_AFTER.match(text, second.end()):
             second = None
         if second:
-            more, more_length = _scale_at(text, second.end())
+            more, more_length = _price_scale_at(text, second.end())
             more_scale = text[second.end():second.end() + more_length].strip().rstrip(".")
             value = _scaled(second.group(1), more)
             # Диапазон идёт вверх. «From $1,450 - 2 bedrooms» — не диапазон цен.
@@ -464,10 +621,10 @@ def _numbers_in(text: str, fact_pattern) -> dict:
                 scale = ""
             found.setdefault(number, (sign + " " + scale).strip())
     for match in SUFFIX_PRICE.finditer(text or ""):
-        factor, _ = _scale_at(text, match.end(1))
+        factor, _ = _price_scale_at(text, match.end(1))
         number = _scaled(match.group(1), factor)
         if number:
-            unit = match.group(0)[len(match.group(1)):].strip()
+            unit = re.sub(r"^" + _NO_CENTS, "", match.group(0)[len(match.group(1)):]).strip()
             found.setdefault(number, unit)
             if factor == 1:
                 for earlier in _listed_before(text, match.start(1)):
@@ -482,8 +639,11 @@ def _numbers_in(text: str, fact_pattern) -> dict:
 # и 149 долларов», «۲۹، ۴۹، ۱۴۹ و ۲۴۹ دلار», «10, 20 or 30%». Без этого
 # цена бралась одна, и перевод, где так и пишут, «терял» остальные цифры.
 # Перед последним числом нужен союз: «In 2026, 15%» — не перечисление.
-_LIST_AND = (_SP + r"+(?:and|or|и|или|و|یا|und|oder|et|ou|y|o|e|dan|atau|và|hoặc|และ|"
-             r"หรือ|ve|veya|और|या|এবং|ও|та|або|ו)" + _SP + r"+")
+_LIST_AND = (r"(?:" + _SP + r"+(?:and|or|и|или|و|یا|und|oder|et|ou|y|o|e|dan|atau|và|hoặc|และ|"
+             r"หรือ|ve|veya|और|या|এবং|ও|та|або|ו)" + _SP + r"+"
+             # Арабское «و» пишется слитно со следующим словом («و١٤٩»),
+             # ивритское «ו» — через макаф или дефис («ו-149»).
+             r"|" + _SP + r"+(?:و|ו[\-\u05be]?))")
 _LIST_COMMA = _SP + r"*[,،、;]" + _SP + r"*"
 _LIST_LAST = re.compile(NOT_INSIDE + r"(" + NUMBER + r")(?:" + _LIST_COMMA + r")?" + _LIST_AND + r"$", re.I)
 _LIST_MORE = re.compile(NOT_INSIDE + r"(" + NUMBER + r")" + _LIST_COMMA + r"$")
@@ -524,13 +684,29 @@ def _year_like(number: str) -> bool:
     return number.isdigit() and 1900 <= int(number) <= 2100
 
 
+# Год буддийской эры — «ปี 2569», «พ.ศ. 2569», «2569 BE» — тоже год, но только
+# с подписью эры: голое 2569 бывает и ценой.
+_BE_BEFORE = re.compile(r"(?:ปี|พ\.\s?ศ\.)" + _SP + r"*$")
+_BE_AFTER = re.compile(_SP + r"*(?:B\.\s?E\.|BE(?![^\W\d_]))")
+
+
+def _year_at(text: str, start: int, end: int, number: str) -> bool:
+    """Год ли число на этом месте: обычный или буддийской эры с подписью."""
+    if _year_like(number):
+        return True
+    return (number.isdigit() and 2400 <= int(number) <= 2700
+            and bool(_BE_BEFORE.search(text, max(0, start - 12), start)
+                     or _BE_AFTER.match(text, end)))
+
+
 def _listed_before(text: str, start: int) -> list:
     """Числа перечисления прямо перед числом с единицей — без своей единицы."""
     match = _RANGE_FIRST.search(text, max(0, start - 40), start)
     if match:
         number = _norm_number(match.group(1))
         last = re.match(NUMBER, text[start:])
-        if number and not _year_like(number) and last and _ascending(number, _norm_number(last.group(0))):
+        if number and not _year_at(text, match.start(1), match.end(1), number) \
+                and last and _ascending(number, _norm_number(last.group(0))):
             return [number]
         return []
     out, end, pattern = [], start, _LIST_LAST
@@ -543,16 +719,32 @@ def _listed_before(text: str, start: int) -> list:
             break
         # Год в начале перечисления — не его член: «In 2026, 15 or 20 minutes».
         # Посреди перечисления — член: «$1,450, 1950 or 2100 dollars».
-        if _year_like(number) and not _LIST_MORE.search(text, max(0, match.start() - 40),
-                                                         match.start()):
+        if _year_at(text, match.start(1), match.end(1), number) \
+                and not _LIST_MORE.search(text, max(0, match.start() - 40), match.start()):
             break
         out.append(number)
         end, pattern = match.start(), _LIST_MORE
     return out
 
 
-_SCALE = re.compile(r"(?:\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|/\s?)(?:5|10|100)\b(?!\s?%)",
-                    re.I)
+# Только после оценки: «4.6 out of 5», «4,6 из 5», «4.6/5». «A deposit of 10
+# weeks» и «Kaution von 5 Monaten» — не шкала, и число не должно пропадать.
+_SCALE = re.compile(r"(\d(?:\s+(?!out\b)[^\W\d_]{1,12})?)(?:\s*\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|\s?/\s?)"
+                    r"(?:5|10|100)\b(?!\s?%)", re.I)
+
+
+# Дата «2026年11月18日», «11월 18일» — не два количества: «November 18»
+# второй эшелон тоже не читает (месяцы — в `NON_UNITS`).
+_CJK_DATE = re.compile(r"(?<![\d.,])(?:\d{4}" + _SP + r"?[年년]" + _SP + r"?)?(\d{1,2})" + _SP
+                       + r"?[月월]" + _SP + r"?(\d{1,2})" + _SP + r"?[日일]")
+
+
+def _without_cjk_dates(text: str) -> str:
+    def blank(match):
+        if 1 <= int(match.group(1)) <= 12 and 1 <= int(match.group(2)) <= 31:
+            return " "
+        return match.group(0)
+    return _CJK_DATE.sub(blank, text)
 
 
 def _generic_numbers_in(text: str) -> dict:
@@ -560,10 +752,15 @@ def _generic_numbers_in(text: str) -> dict:
     found = {}
     # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
     # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
-    text = _SCALE.sub(" ", _cjk_compounds(_same_signs(text)))
+    text = _without_cjk_dates(_SCALE.sub(r"\1 ", _cjk_compounds(_same_signs(text))))
     for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
+            continue
+        # «$2.54M», «2.68M USD»: множитель цены — часть цены первого эшелона.
+        if unit in _PRICE_SCALES and (
+                _MONEY.search(text[max(0, match.start(1) - 4):match.start(1)])
+                or _MONEY.match(text[match.end():match.end() + 6].lstrip(_SP[1:-1]))):
             continue
         factor, _ = _scale_at(text, match.end(1))
         number = _scaled(match.group(1), factor)
@@ -572,7 +769,8 @@ def _generic_numbers_in(text: str) -> dict:
         # Год в тексте — не факт строки: «в 2026 году», «с 1998 г.» Годом
         # считается только голое четырёхзначное число: `1,900` с разделителем
         # разрядов — это тысяча девятьсот чего-то, а не год.
-        if re.fullmatch(r"\d{4}", match.group(1)) and 1900 <= int(number) <= 2100:
+        if re.fullmatch(r"\d{4}", match.group(1)) and _year_at(
+                text, match.start(1), match.end(1), number):
             continue
         found.setdefault(number, match.group(2).strip())
     return found
@@ -774,11 +972,55 @@ def _dates_in(text: str) -> list:
         if not (1 <= first <= 31 and 1 <= second <= 31 and min(first, second) <= 12):
             continue
         out.append((match.start(), match.end(), (year, str(first), str(second))))
-    return out
+    # Дата словами — «18 Nov 2026», «November 18, 2026» — и короткая —
+    # «2026-11», «11/2026», «18/11/26». Раньше её день и год становились числами
+    # строки, а одна дата на все строки — постоянными сайта: «залог 18 месяцев»
+    # и «$2026» проходили молча.
+    for match in _NAMED_DATE_IN_CELL.finditer(text):
+        if any(s <= match.start() < e for s, e, _ in out):
+            continue
+        month = _MONTH_NUMBER.get((match.group("nm") or match.group("mm"))[:3].lower(), "")
+        day = match.group("nd") or match.group("md")
+        year = match.group("ny") or match.group("my")
+        if month and 1 <= int(day) <= 31:
+            out.append((match.start(), match.end(), (year, month, str(int(day)))))
+    for match in _SHORT_DATE_IN_CELL.finditer(text):
+        if any(s <= match.start() < e for s, e, _ in out):
+            continue
+        if match.group("ym"):
+            year, month, rest = match.group("ym"), match.group("mo"), ()
+        elif match.group("my2"):
+            year, month, rest = match.group("my2"), match.group("mo2"), ()
+        else:
+            first, second = int(match.group("p")), int(match.group("q"))
+            if not (1 <= first <= 31 and 1 <= second <= 31 and min(first, second) <= 12):
+                continue
+            year, month, rest = "20" + match.group("yy"), str(min(first, second)), (str(max(first, second)),)
+        if 1900 <= int(year) <= 2100 and 1 <= int(month) <= 12:
+            out.append((match.start(), match.end(), (year, str(int(month))) + rest))
+    return sorted(out)
+
+
+_MONTH_NUMBER = {m: str(i) for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_MONTH_NAME = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
+               r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
+_NAMED_DATE_IN_CELL = re.compile(
+    r"(?<![\w.,])(?:(?P<nd>\d{1,2})(?:st|nd|rd|th)?" + _SP + r"+(?P<nm>" + _MONTH_NAME + r")\.?,?"
+    + _SP + r"+(?P<ny>\d{4})|(?P<mm>" + _MONTH_NAME + r")\.?" + _SP + r"+(?P<md>\d{1,2})"
+    r"(?:st|nd|rd|th)?,?" + _SP + r"+(?P<my>\d{4}))(?![\w.,]?\d)", re.I)
+_SHORT_DATE_IN_CELL = re.compile(
+    r"(?<![\w.,\-/:])(?:(?P<ym>\d{4})[\-/](?P<mo>\d{1,2})|(?P<mo2>\d{1,2})/(?P<my2>\d{4})"
+    r"|(?P<p>\d{1,2})(?P<t>[/.])(?P<q>\d{1,2})(?P=t)(?P<yy>\d{2}))(?![\w.,\-/:]?\d)")
+# Время дня в ячейке — «8:30», «9:00-18:00» — не количество минут или часов.
+_CLOCK_IN_CELL = re.compile(
+    r"(?<![\w.,:])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:" + _SP + r"?(?:[ap]\.?m\.?)(?!\w))?(?![\w.,:]?\d)",
+    re.I)
 
 
 def _without_dates(text: str) -> str:
     text = _URL_IN_CELL.sub(" ", text)
+    text = _CLOCK_IN_CELL.sub(" ", text)
     for start, end, _ in reversed(_dates_in(text)):
         text = text[:start] + " " + text[end:]
     return text
@@ -793,9 +1035,15 @@ def _date_parts(row: dict) -> set:
     return out
 
 
+# Иероглиф или кана перед числом — граница слова, а не артикул: «徒歩5分»,
+# «押金3个月», «月租4500元» пишут без пробела. Латиница перед числом («A90») —
+# по-прежнему артикул.
+_CJK_BEFORE_DIGIT = re.compile(r"([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff])(?=\d)")
+
+
 def _numbers_of(value) -> list:
     """Числа из одного значения строки — кроме тех, что сидят в артикуле."""
-    text, out = _without_dates(str(value)), []
+    text, out = _CJK_BEFORE_DIGIT.sub(r"\1 ", _without_dates(str(value))), []
     for match in _GLUED_UNIT.finditer(text):
         out.append(match.group(1))
     for match in ROW_NUMBER.finditer(text):
@@ -807,6 +1055,7 @@ def _numbers_of(value) -> list:
     return out
 
 
+@lru_cache(maxsize=4096)
 def _column_scale(column) -> int:
     """Множитель из названия колонки — «цена, млн», `price_k` — или 1."""
     words = re.sub(r"[_\W]+", " ", str(column or "")).strip()
@@ -817,10 +1066,16 @@ def _column_scale(column) -> int:
     return factor
 
 
+# «Free» в ячейке цены — это ноль: «Entry is $0» на такой странице верно.
+_FREE = re.compile(r"free|gratis|gratuit[eo]?|gratuita|kostenlos|бесплатно|безкоштовно", re.I)
+
+
 def _row_numbers(row: dict) -> set:
     out = set()
     for column, value in (row or {}).items():
         text = _same_signs(str(value))
+        if _FREE.fullmatch(text.strip()):
+            out.add("0")
         # Колонка в тысячах или миллионах — «цена, млн», `price_k`, «价格(万元)»:
         # её число значит и само себя, и себя с множителем. Раньше множитель
         # со страницы снимался с любого числа строки, и «$34k» при «34 minutes»
@@ -841,10 +1096,18 @@ def _row_numbers(row: dict) -> set:
             if factor != 1:
                 out.add(_norm_number(match.group(1)))
                 out.add(_scaled(match.group(1), factor))
+        # «$2.54M», «₹2.5 Cr» в ячейке: множитель цены читается при валюте.
+        for number, unit in _numbers_in(text, None).items():
+            if _scale_in(unit, price=True)[0]:
+                out.add(number)
     return out
 
 
 def _site_constants(rows: list, share: float = 0.5) -> set:
+    return set().union(*_site_constant_columns(rows, share).values())
+
+
+def _site_constant_columns(rows: list, share: float = 0.5) -> dict:
     """
     Числа, постоянные для всего сайта: фиксированная пошлина, срок гарантии,
     год основания — то, что законно стоит на каждой странице.
@@ -857,7 +1120,7 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
     """
     rows = list(rows or ())
     if not rows:
-        return set()
+        return {}
     # Считаются не отдельные числа, а набор чисел ячейки: «3-5 days» во всех
     # строках — это постоянные 3 и 5 вместе. Постоянной колонку делает одно
     # значение, которое встречается чаще других. Если два значения делят колонку
@@ -867,12 +1130,16 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
     per_column = defaultdict(Counter)
     for row in rows:
         for column, value in (row or {}).items():
+            # Телефон и адрес на каждой строке — не постоянные: «2000» из
+            # «+1 555 010 2000» и «400» из «Suite 400» прощали выдуманные цены.
+            if _is_identifier(column, value):
+                continue
             numbers = frozenset(n for n in (_norm_number(raw) for raw in _numbers_of(value)) if n)
             if numbers:
                 per_column[column][numbers] += 1
     threshold = max(2, int(len(rows) * share))
-    out = set()
-    for counter in per_column.values():
+    out = {}
+    for column, counter in per_column.items():
         top = counter.most_common(2)
         if top[0][1] < threshold:
             continue
@@ -883,8 +1150,36 @@ def _site_constants(rows: list, share: float = 0.5) -> set:
         # постоянную не отменяет.
         if len(top) > 1 and top[1][1] >= 2 and top[1][1] * 4 >= top[0][1]:
             continue
-        out |= top[0][0]
+        # Исключения, каждое из которых единично, — тоже данные строки, если их
+        # больше одного на пятерых: «3 months» в четырёх строках из восьми и
+        # 1, 2, 4, 5 в остальных делали тройку постоянной.
+        if (sum(counter.values()) - top[0][1]) * 4 > top[0][1]:
+            continue
+        out[column] = top[0][0]
     return out
+
+
+# Телефон, адрес, индекс — номер, а не величина: его числа не меряются ничем.
+_ID_COLUMN = re.compile(
+    r"(?<![^\W\d_])(?:phones?|tel|telephone|mobile|fax|whatsapp|address|addr|street|zip|zipcode|"
+    r"postcode|postal|телефон|тел|адрес|улица|индекс)(?![^\W\d_])", re.I)
+_PHONE_CELL = re.compile(r"\+?\(?\d[\d \u00a0().\-]{5,}\d")
+_ADDRESS_CELL = re.compile(
+    r"(?<![^\W\d_])(?:street|avenue|ave|road|suite|blvd|boulevard|lane|floor|"
+    r"улица|ул|проспект|офис)(?![^\W\d_])", re.I)
+
+
+def _is_identifier(column, value) -> bool:
+    """Колонка телефона или адреса — или ячейка, похожая на телефон."""
+    if _ID_COLUMN.search(re.sub(r"[_\W]+", " ", str(column or ""))):
+        return True
+    text = _same_signs(str(value or "")).strip()
+    if _ADDRESS_CELL.search(text):
+        return True
+    if not _PHONE_CELL.fullmatch(text) or re.fullmatch(NUMBER, text) or _dates_in(text):
+        return False
+    return (sum(c.isdigit() for c in text) >= 7
+            and (text[0] in "+(" or len(re.findall(r"\d+", text)) >= 3))
 
 
 def _stems(text: str) -> set:
@@ -916,10 +1211,12 @@ def _slug_column(rows: list, keyword_field: str) -> str:
 
 def _path_forms(value: str) -> tuple:
     """`berlin`, `/rent/berlin/`, `rent/berlin.html`, `https://x.com/rent/berlin` → (полный путь, последний сегмент)."""
-    from urllib.parse import urlsplit
+    from urllib.parse import unquote, urlsplit
     text = (value or "").strip()
     if "://" in text:
         text = urlsplit(text).path
+    # `k%C3%B6ln` из выгрузки краулера и `köln` в NFD из macOS — тот же адрес.
+    text = unicodedata.normalize("NFC", unquote(text))
     text = re.sub(r"(^|/)index\.(html?|md|markdown)$", r"\1", text, flags=re.I)
     text = re.sub(r"\.(html?|md|markdown)$", "", text, flags=re.I).strip("/").lower()
     return text, text.rsplit("/", 1)[-1] if text else ""
@@ -955,12 +1252,16 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
     # демо с колонками `query` и `slug` давало «сверено 0 из 10», и выдуманная
     # цена пропадала из отчёта.
     slug_field = _slug_column(rows, keyword_field)
-    by_path, by_last, last_clash = {}, {}, set()
+    by_path, by_last, last_clash, path_clash = {}, {}, set(), set()
     if slug_field:
         for row in rows:
             full, last = _path_forms(row.get(slug_field) or "")
             if not last:
                 continue
+            # Один адрес у двух строк — та же неоднозначность, что два одинаковых
+            # ключа: раньше молча побеждала первая строка.
+            if full in by_path and by_path[full] is not row:
+                path_clash.add(full)
             by_path.setdefault(full, row)
             if last in by_last and by_last[last] is not row:
                 last_clash.add(last)
@@ -973,25 +1274,76 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
     # villa» получали ещё и хаб `/austin/`, и статья блога с теми же словами в
     # заголовке — и их числа сверялись с чужими данными.
     claimed, pending = set(), []
+    # Ключ, проставленный шаблоном на всех страницах, — не связь: `<meta
+    # name="keyword" content="berlin">` на странице мюнхена сверял её с
+    # берлином, и чужие числа на ней проходили молча.
+    key_pages = Counter((page.meta.get("keyword") or "").strip().lower() for page in pages)
+    slug_bound = defaultdict(list)
     for page in pages:
         key = (page.meta.get("keyword") or "").strip().lower()
         row = by_keyword.get(key) if key else None
-        if row is None and slug_field:
-            rel = os.path.relpath(page.path, root).replace(os.sep, "/")
-            full, last = _path_forms(rel)
-            row = by_path.get(full) or (by_last.get(last) if last not in last_clash else None)
-        if row is None:
-            slug = _slug_of(page, root)
-            if slug in slug_clash:
-                ambiguous.append(page.url)
-                continue
-            row = by_slug.get(slug)
+        if row is None or key_pages[key] > 1:
+            slug_row, clash = None, False
+            if slug_field:
+                rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+                full, last = _path_forms(rel)
+                if full in path_clash or (full not in by_path and last in last_clash):
+                    clash = True
+                else:
+                    slug_row = by_path.get(full) or by_last.get(last)
+            if slug_row is None and not clash:
+                # Папка `Berlin`, `köln`, `аренда-берлин` — тот же ключ, что
+                # `berlin`, `koln`, `arenda-berlin`.
+                slug = _slug_of(page, root)
+                if slug not in by_slug and slug not in slug_clash:
+                    slug = slugify(unicodedata.normalize("NFC", slug))
+                clash = slug in slug_clash
+                slug_row = None if clash else by_slug.get(slug)
+            if row is None:
+                if clash:
+                    ambiguous.append(page.url)
+                    continue
+                row = slug_row
+                if row is not None:
+                    slug_bound[id(row)].append(page)
+            elif slug_row is not None and slug_row is not row:
+                row = slug_row
+                slug_bound[id(row)].append(page)
         if row is not None:
             matched[page.url] = row
             claimed.add(id(row))
         else:
             pending.append(page)
+
+    # Одна строка по последнему сегменту у страниц из разных разделов —
+    # `/rent/berlin/` и `/buy/berlin/`: строка принадлежит разделу, в котором
+    # лежат остальные страницы датасета. Без перевеса неизвестно, чья она.
+    def parent(page):
+        rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+        return _path_forms(rel)[0].rpartition("/")[0]
+    sections = Counter(parent(page) for group in slug_bound.values() for page in group)
+    for group in slug_bound.values():
+        if len(group) < 2:
+            continue
+        best = max(sections[parent(page)] for page in group)
+        winners = [page for page in group if sections[parent(page)] == best]
+        for page in group:
+            if len(winners) > 1 or page is not winners[0]:
+                matched.pop(page.url, None)
+                if len(winners) > 1:
+                    ambiguous.append(page.url)
     free = sorted(k for k, r in by_keyword.items() if id(r) not in claimed)
+    # Основы слов ключей считаются один раз, а не для каждой страницы, и
+    # кандидатами берутся только ключи с общим словом: при пороге выше нуля
+    # остальные всё равно не проходят. Иначе 4 тысячи страниц шли полторы минуты.
+    free_stems = [(k, _stems(k)) for k in free]
+    free_stems = [(k, t) for k, t in free_stems if t]
+    key_slugs = {k: set(re.findall(r"[a-z]+", slugify(k))) for k, _ in free_stems}
+    by_length = {}
+    for candidate_key, tokens in free_stems:
+        postings = by_length.setdefault(len(tokens), {})
+        for token in tokens:
+            postings.setdefault(token, []).append(candidate_key)
 
     for page in pending:
         row = None
@@ -1000,10 +1352,43 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
         # Без нормализации словоформ сопоставлялось 10 страниц из 100,
         # и сверка фактов молча выключалась на девяти десятых сайта.
         haystack_tokens = _stems(haystack)
+        # Страница, которая называет в заголовке свой адрес, — о нём, а не о
+        # ключе: `/rent/potsdam/` с заголовком «Renting in Potsdam near Berlin»
+        # сверялась со строкой berlin, и её верные числа становились выдумкой.
+        own_slug = slugify(_slug_of(page, root))
+        own_slug = set() if own_slug.startswith("p-") else (
+            {t for t in re.findall(r"[a-z]+", own_slug) if len(t) > 2}
+            & set(re.findall(r"[a-z]+", slugify(haystack, max_len=10 ** 6))))
+
+        def fits(candidate_key):
+            return not own_slug or bool(own_slug & key_slugs[candidate_key])
+
+        if cfg["match_min_score"] > 0:
+            # Совпадения считаются по спискам ключей с общим словом, отдельно
+            # для каждой длины ключа: доля — совпавшие слова / длина.
+            best = None
+            for length, postings in by_length.items():
+                counts = Counter()
+                for token in haystack_tokens:
+                    counts.update(k for k in postings.get(token, ()) if fits(k))
+                if not counts:
+                    continue
+                top = max(counts.values())
+                if best is None or top * best[1] > best[0] * length \
+                        or (top * best[1] == best[0] * length and length > best[1]):
+                    best = (top, length, counts)
+            if best is not None and best[0] / best[1] >= cfg["match_min_score"]:
+                values = list(best[2].values())
+                if values.count(best[0]) > 1:
+                    ambiguous.append(page.url)
+                else:
+                    row = by_keyword[list(best[2])[values.index(best[0])]]
+            if row is not None:
+                matched[page.url] = row
+            continue
         scored = []
-        for candidate_key in free:
-            key_tokens = _stems(candidate_key)
-            if not key_tokens:
+        for candidate_key, key_tokens in free_stems:
+            if not fits(candidate_key):
                 continue
             scored.append((len(key_tokens & haystack_tokens) / len(key_tokens),
                            len(key_tokens), candidate_key))
@@ -1026,27 +1411,30 @@ def _shown(number: str, unit: str) -> str:
     # Множитель показывается так, как стоит на странице: «5万元», а не
     # «50000 万元», которое читается как пятьсот миллионов.
     lowered = (unit or "").lower()
-    word, factor = _scale_in(unit)
+    word, factor = _scale_in(unit, price=True)
     if word:
         try:
             raw = _norm_number(repr(round(float(number) / factor, 6)))
         except ValueError:
             raw = ""
         if raw:
-            glue = "" if word[0] in _CJK_SCALES and lowered.startswith(word) else " "
-            if unit and unit[0] in "$€£¥₹₽":
-                parts = unit.split()
+            glue = "" if (word[0] in _CJK_SCALES or word in _GLUED_SCALES) \
+                and lowered.startswith(word) else " "
+            parts = unit.split()
+            code = parts[0].upper() in _ALL_CODES
+            if unit and (unit[0] in "$€£¥₹₽" or _LOCAL_PREFIX.fullmatch(parts[0]) or code):
                 rest = " ".join(parts[1:])
+                sign = parts[0] + (" " if code else "")
                 # «$1.6k» — множитель в одну букву пишут вплотную.
                 if len(rest) == 1:
-                    return f"{parts[0]}{raw}{rest}"
-                return f"{parts[0]}{raw} {rest}".strip()
+                    return f"{sign}{raw}{rest}"
+                return f"{sign}{raw} {rest}".strip()
             return f"{raw}{glue}{unit}".strip()
     if unit and unit in "$€£¥₹₽":
         return f"{unit}{number}"
     if unit and _LOCAL_PREFIX.fullmatch(unit):
         return f"{unit}{number}" if unit.endswith("$") or len(unit) == 1 else f"{unit} {number}"
-    if unit and unit.upper() in CURRENCY_CODES.split("|"):
+    if unit and unit.upper() in _ALL_CODES:
         return f"{unit} {number}"
     return f"{number} {unit}".strip()
 
@@ -1054,6 +1442,11 @@ def _shown(number: str, unit: str) -> str:
 # Чем меряется число — по подписи, в которой не ошибиться. Остальные подписи
 # мерой не считаются, и число с ними сверяется как раньше, без единицы.
 _MEASURES = (
+    # Секунды, ночи и десятилетия — тоже мера: без неё «34 seconds» и «2 nights»
+    # прощались за «34 minutes» и «2 months».
+    ("second", r"secs?|seconds?|секунд[аы]?|сек|sekunden?|secondes?|segundos?|secondi|秒|秒間|초"),
+    ("night", r"nights?|ноч[ьи]|ночей|nächte|nacht|nuits?|noches?|nott[ei]|泊|박"),
+    ("decade", r"decades?|десятилети[еяй]|jahrzehnte?n?|décennies?|décadas?|decenni?o?"),
     ("minute", r"min|mins|minutes?|минут[аы]?|мин|minuten?|minutos?|minuti|分|分間|分钟|分鐘|분"),
     ("hour", r"hrs?|hours?|час|часа|часов|stunden?|heures?|horas?|ore|ora|時間|小时|小時|시간"),
     ("day", r"days?|день|дня|дней|суток|tage?n?|tag|jours?|d[ií]as?|giorn[oi]|日|日間|天|일"),
@@ -1061,7 +1454,26 @@ _MEASURES = (
     ("month", r"mos?|months?|месяц|месяца|месяцев|мес|monate?n?|monat|mois|mes|meses|mesi|mese|"
               r"mês|ヶ月|か月|カ月|ヵ月|ケ月|个月|個月|개월"),
     ("year", r"yrs?|years?|год|года|лет|jahre?n?|jahr|ans?|années?|años?|ann[oi]|anos?|年|년"),
+    # Расстояние, площадь и вес: «34 km» при `34 minutes` в строке — тоже
+    # перестановка полей шаблона.
+    ("km", r"km|kms|kilomet(?:er|re)s?|км|километр(?:а|ов)?|kilómetros?|kilometri"),
+    ("m2", r"m²|m2|sqm|sq\.?" + _SP + r"?m|square" + _SP + r"+met(?:er|re)s?|м²|м2|кв\.?" + _SP + r"?м|㎡|平米"),
+    ("kg", r"kgs?|kilos?|kilogram(?:me)?s?|кг|килограмм(?:а|ов)?"),
 )
+# Хинди, бенгали, тайский, индонезийский, арабский, персидский, урду, иврит:
+# без них «залог 34 মাস» при «34 মিনিট» в строке проходило молча.
+_MEASURES_MORE = {
+    "minute": r"मिनट|মিনিট|นาที|menit|دقيقة|دقائق|دقیقه|منٹ|דקות|דקה",
+    "hour": r"घंटे|घंटा|ঘণ্টা|ชั่วโมง|jam|ساعة|ساعات|ساعت|گھنٹے|שעות|שעה",
+    "day": r"दिन|দিন|วัน|hari|يوم|أيام|روز|دن|ימים|יום",
+    "week": r"सप्ताह|हफ्ते|সপ্তাহ|สัปดาห์|minggu|أسبوع|أسابيع|هفته|ہفتے|שבועות|שבוע",
+    "month": r"महीने|महीना|माह|মাস|เดือน|bulan|شهر|أشهر|شهور|ماه|مہینے|חודשים|חודש",
+    # «ปี», «वर्ष», «tahun», «سال» стоят и перед годом («฿1,450 ปี 2569»):
+    # мерой они сделали бы цену сроком. Только счётные формы.
+    "year": r"বছর|سنوات|שנים",
+}
+_MEASURES = tuple((name, words + "|" + _MEASURES_MORE[name] if name in _MEASURES_MORE else words)
+                  for name, words in _MEASURES)
 _MEASURE = [(name, re.compile(r"(?:" + words + r")\.?", re.I)) for name, words in _MEASURES]
 
 
@@ -1080,21 +1492,97 @@ def _measure(unit: str) -> str:
     return ""
 
 
+# Единица в названии колонки: `rent_usd`, `deposit_months`, `commute_minutes`.
+# Срок — только во множественном числе последним словом: `price_per_month` и
+# `rent_monthly` — цена за месяц, а не число месяцев.
+_COLUMN_MONEY = re.compile(r"(?<![^\W\d_])(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES
+                           + r")(?![^\W\d_])|[$€£¥₹₽₪₩₫₺₴₸฿₱₦]", re.I)
+_COLUMN_TERMS = {"minutes", "mins", "hours", "hrs", "days", "weeks", "months", "years", "yrs",
+                 "минут", "часов", "дней", "суток", "недель", "месяцев", "лет"}
+
+
+def _column_unit(column) -> str:
+    """Единица из названия колонки — или пусто."""
+    words = re.sub(r"[_\W]+", " ", str(column or "")).strip().lower().split()
+    if not words:
+        return ""
+    if _COLUMN_MONEY.search(" ".join(words)):
+        return "$"
+    if words[-1] in _COLUMN_TERMS and (len(words) < 2 or words[-2] not in ("per", "a", "each")):
+        return words[-1]
+    return ""
+
+
 def _row_measures(row: dict, fact_pattern) -> dict:
     """
     {число строки: меры, которыми оно записано}. Пустая мера — число записано
-    голым или с непонятной подписью: тогда оно годится для любой.
+    голым или с непонятной подписью: тогда оно годится для любой. Голое число
+    берёт меру из названия колонки, число телефона или адреса — меру `id`,
+    которая не подходит ни к цене, ни к сроку.
     """
     out = defaultdict(set)
     for column, value in (row or {}).items():
         text = _same_signs(str(value))
         strong = _numbers_in(text, fact_pattern)
         scaled = _column_scale(column) != 1
+        # Единица только в названии колонки — `deposit_months: 3`, `rent_usd`:
+        # голое число меряется ею. Номер телефона или адреса — мерой `id`,
+        # которая не подходит ни к цене, ни к сроку.
+        ident = _is_identifier(column, value)
+        named = "" if ident else (_column_unit(column) or column_unit(column))
         for raw in _numbers_of(text):
             number = _norm_number(raw)
             if number:
-                out[number].add("" if scaled else _measure(strong.get(number, "")))
+                unit = strong.get(number, "")
+                if scaled:
+                    out[number].add("")
+                    continue
+                if ident and not unit:
+                    out[number].add("id")
+                    continue
+                measure = _measure(unit) or _measure(named)
+                out[number].add(measure)
+                if measure == "money":
+                    # Валюта числа: «€1,296» при `$1,296` — не та же цена.
+                    out[number].add("cur:" + _currency(unit))
     return out
+
+
+# Единица времени в конце названия колонки: `deposit_months`, `commute_min`.
+# «price_per_month» — цена за месяц, а не месяцы, и сюда не подходит.
+_COLUMN_UNIT = re.compile(
+    r"(?<![^\W_])(?<!per_)(?<!per )(minutes|mins|hours|hrs|days|weeks|months|years|yrs)$", re.I)
+
+
+def column_unit(column) -> str:
+    """Единица из названия колонки — `deposit_months` → `months` — или пусто."""
+    match = _COLUMN_UNIT.search(str(column or "").strip())
+    return match.group(1).lower() if match else ""
+
+
+# Валюты, которые пишут одним знаком или словом: «$» — и доллар США, и
+# канадский, и песо; «£» — и фунт, и египетский фунт. Внутри одной семьи
+# валюта не сверяется: различаются только явно разные — доллар и евро.
+_CURRENCY_FAMILIES = (
+    {"USD", "CAD", "AUD", "NZD", "SGD", "HKD", "TWD", "MXN", "COP", "CLP", "ARS", "BRL", "PHP"},
+    {"JPY", "CNY"}, {"GBP", "EGP"}, {"INR", "PKR", "LKR", "NPR"},
+    {"KR", "SEK", "NOK", "DKK", "ISK"}, {"RON", "MDL"},
+    {"DINAR", "KWD", "BHD", "JOD", "IQD", "LYD", "TND", "DZD", "RSD"},
+    {"SAR", "QAR", "OMR", "IRR", "YER"}, {"TRY", "LBP", "SYP"}, {"AED", "MAD"},
+)
+
+
+def _currency(unit: str) -> str:
+    """Код валюты подписи цены — `USD`, `EUR` — или пусто, если её не прочесть."""
+    from .facts import _kind
+    code = _kind(unit)
+    return code if code != "%" else ""
+
+
+def _same_currency(one: str, other: str) -> bool:
+    if one == other:
+        return True
+    return any(one in family and other in family for family in _CURRENCY_FAMILIES)
 
 
 def _bare_numbers(row: dict) -> set:
@@ -1138,7 +1626,15 @@ def _supported(number: str, unit: str, allowed: set, measures: dict = None,
     if not wanted:
         return True
     have = measures[number]
-    return "" in have or wanted in have
+    if "" in have:
+        return True
+    if wanted == "money" and wanted in have:
+        page = _currency(unit)
+        codes = {h[4:] for h in have if h.startswith("cur:")}
+        if page and codes and "" not in codes \
+                and not any(_same_currency(page, code) for code in codes):
+            return False
+    return wanted in have
 
 
 # Число, которое страница посчитала из своей строки: «три месяца аренды
@@ -1153,8 +1649,12 @@ DERIVED_MAX_INPUTS = 12   # в строке длиннее совпадение 
 
 
 _MONEY = re.compile(
-    r"(?:" + LOCAL_PREFIXES + r"|[" + CURRENCY_SIGNS + r"]|" + CJK_CURRENCY_WORDS + r")|"
-    r"(?<![^\W\d_])(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES + r")(?![^\W\d_])", re.I | re.U)
+    # Сокращения из букв — целым словом: «rs» в «hours» и «rm» в «rms» — не
+    # рупии и не ринггиты, иначе срок в часах считался ценой.
+    r"(?<![^\W\d_])(?:" + LOCAL_PREFIXES + r")(?![^\W\d_])|[" + CURRENCY_SIGNS + r"]|"
+    + CJK_CURRENCY_WORDS + r"|"
+    r"(?<![^\W\d_])(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES + "|(?-i:" + _CASED_CODES
+    + r"))(?![^\W\d_])", re.I | re.U)
 _PERCENT_COLUMN = re.compile(r"%|percent|pct|процент|discount|скидк", re.I)
 
 
@@ -1174,12 +1674,16 @@ def _row_kinds(row: dict) -> dict:
     """{число строки: чем оно меряется} — для чисел, посчитанных из строки."""
     out = {}
     for column, value in (row or {}).items():
-        kind = "%" if _PERCENT_COLUMN.search(str(column or "")) else _kind(value)
+        # «discount: $15» — деньги, а не процент: знак ячейки сильнее колонки.
+        kind = _kind(value)
+        if kind != "money" and _PERCENT_COLUMN.search(str(column or "")):
+            kind = "%"
         # Единица в названии колонки — `rent_usd`, `deposit_months`: так хранят
         # JSON и выгрузки. Без неё $4,350 = 3 × 1450 было критичной находкой,
         # а то же с единицами в ячейках — подсказкой «просмотри глазами».
+        # Любое последнее слово единицей не было: `rent_monthly` давало «mont».
         if not kind:
-            kind = _kind(re.sub(r"[_\W]+", " ", str(column or "")))
+            kind = _kind(_column_unit(column))
         for raw in _numbers_of(_same_signs(str(value))):
             number = _norm_number(raw)
             if number:
@@ -1225,8 +1729,13 @@ def _derivation(number: str, row_numbers: set, kinds: dict = None, kind: str = N
     def product_fits(ra, rb):
         if kinds is None:
             return True
+        priced = any(k == "money" for k in kinds.values())
         for one, other in ((ra, rb), (rb, ra)):
-            if kind == "money" and of(one) == "money":
+            # Цена на цену — не итог: «$362,500 = $250 × $1,450».
+            if kind == "money" and of(one) == "money" and of(other) != "money":
+                return True
+            # Цена в строке голая (`rent: 1450`), срок — со своей единицей.
+            if kind == "money" and not priced and of(one) == "" and of(other) not in ("", "%"):
                 return True
             if kind and kind != "money" and of(one) == kind and of(other) == "":
                 return True
@@ -1256,6 +1765,11 @@ def _derivation(number: str, row_numbers: set, kinds: dict = None, kind: str = N
 # Число даты на странице: «11月18日», «2026年». Только эти подписи берут
 # поддержку из даты строки.
 _DATE_UNIT = re.compile(r"[年月日년월일]")
+
+
+_HOURS_MINUTES = re.compile(
+    r"(?<![\w.,])(\d{1,2})" + _SP + r"?(?:hours?|hrs?|h|час(?:а|ов)?|ч)\.?,?" + _SP + r"*(?:and" + _SP
+    + r"+|и" + _SP + r"+)?(\d{1,2})" + _SP + r"?(?:minutes?|mins?|минут[аы]?|мин)(?!\w)", re.I)
 
 
 def _descending_before(text: str, fact_pattern) -> dict:
@@ -1304,24 +1818,60 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         return []
     fact_pattern = build_fact_pattern(fact_units)
     spelled_patterns = build_spelled_patterns(fact_units)
-    constants = _site_constants(rows)
+    constant_columns = _site_constant_columns(rows)
+    # Мера постоянной — та, которой она записана в своей колонке: «3 months»
+    # на всех строках не поддерживает «3 minutes», а «$250» — «250 months».
+    constant_measures = defaultdict(set)
+    for other in rows or ():
+        for column, numbers in constant_columns.items():
+            if (other or {}).get(column) is None:
+                continue
+            for number, have in _row_measures({column: other[column]}, fact_pattern).items():
+                if number in numbers:
+                    constant_measures[number] |= have
 
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
         row = matched.get(page.url)
         if row is None:
             continue
-        allowed = _row_numbers(row) | constants
-        # Постоянные сайта сверяются без меры: срок гарантии законно стоит
-        # и рядом с ценой.
-        measures = {n: m for n, m in _row_measures(row, fact_pattern).items()
-                    if n not in constants}
+        # Постоянная не прощает строку, у которой в той же колонке своё
+        # значение: «$500» на странице при `fee: $700` — устаревший шаблон.
+        constants = set()
+        for column, numbers in constant_columns.items():
+            own = {n for n in (_norm_number(raw) for raw in _numbers_of(row.get(column) or "")) if n}
+            if not own or own == numbers:
+                constants |= numbers
+        own = _row_numbers(row)
+        allowed = own | constants
+        # Постоянные сайта сверяются своей мерой — вместе с мерой строки:
+        # срок гарантии «12 months» законно стоит и рядом с «12 minutes».
+        measures = _row_measures(row, fact_pattern)
+        for number in constants:
+            measures[number] = measures.get(number, set()) | (constant_measures.get(number) or {""})
         dates = _date_parts(row) - allowed
         bare = _bare_numbers(row)
+        # Голое число до множителя прощается, только если цены в строке нет
+        # другой: при `price: $1,200,000` «$3k» не берётся из `beds: 3`, а
+        # «$4.5M» — из `rating: 4.5`.
+        if any(_MONEY.search(str(v)) and re.search(r"\d", str(v)) for v in row.values()):
+            bare = set()
+
+        # «1 hour 30 minutes» при `90 minutes`: обе части верны вместе.
+        compound = set()
+        for match in _HOURS_MINUTES.finditer(_same_signs(_with_head(page))):
+            total = _norm_number(str(int(match.group(1)) * 60 + int(match.group(2))))
+            if _supported(total, "minutes", allowed, measures, bare):
+                compound |= {(_norm_number(match.group(1)), "hour"),
+                             (_norm_number(match.group(2)), "minute")}
 
         def supported(number, unit):
+            if (number, _measure(unit)) in compound:
+                return True
             if number in dates:
-                return bool(_DATE_UNIT.fullmatch((unit or "").strip()))
+                # «15日です»: после 日 идёт слово, а не другая единица.
+                return bool(_DATE_UNIT.fullmatch((unit or "").strip()[:1])) \
+                    and not re.search(r"[^\u3040-\u309f]", (unit or "").strip()[1:])
             return _supported(number, unit, allowed, measures, bare)
 
         # Заголовок и описание — тот текст, который человек видит в выдаче:
@@ -1350,7 +1900,6 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             return text
 
         unknown_strong = {n: u for n, u in strong.items() if not supported(n, u)}
-        own = _row_numbers(row)
         kinds = _row_kinds(row)
         derived = {n: how for n, u in unknown_strong.items()
                    for how in [_derivation(n, own, kinds, _kind(u))] if how}
@@ -1401,9 +1950,25 @@ def _opening(page) -> list:
     её H1 — или первого заголовка, если H1 нет.
     """
     words = page.words
+    # Крошки и подпись автора — не начало текста. Крошка обычно кончается
+    # тем же H1, и начало искалось с названия города; подпись «By the
+    # Editorial Team» одинакова у всех статей блога.
     heads = page.headings or []
     title = next((t for level, t in heads if level == 1), heads[0][1] if heads else "")
     marker = tokenize(title) if title else []
+    # Каждый блок снимается один раз, где встретился первым: крошка «Visa ›»
+    # — одно слово, и снимать её везде значило вырезать «visa» из текста.
+    # Последняя крошка — сам H1: по нему ищется начало текста, он остаётся.
+    service = [w for w in (tokenize(t) for t in getattr(page, "service", None) or ())
+               if w and w != marker]
+    if service:
+        window = list(words[:400])
+        for block in service:
+            for at in range(len(window) - len(block) + 1):
+                if window[at:at + len(block)] == block:
+                    del window[at:at + len(block)]
+                    break
+        words = window + list(words[400:])
     if marker:
         window = words[:300]
         for at in range(len(window) - len(marker) + 1):
@@ -1415,6 +1980,24 @@ def _opening(page) -> list:
 SLOT_MARK = "…"
 
 
+def _inflected(word: str, slots: set) -> bool:
+    """
+    Слово — другая форма значения из H1: «Москва» в H1 и «в Москве» в
+    подзаголовках, «Уфа» и «в Уфе». Отличаться может только окончание: у
+    короткого из двух слов — последняя буква, у длинного — до трёх.
+    """
+    if len(word) < 3 or word.isdigit():
+        return False
+    for slot in slots:
+        if len(slot) < 3 or slot.isdigit():
+            continue
+        n = len(os.path.commonprefix([word, slot]))
+        if (n >= 2 and n >= min(len(word), len(slot)) - 1
+                and n >= max(len(word), len(slot)) - 3):
+            return True
+    return False
+
+
 def _slot_skeletons(pages: list, skip: set) -> dict:
     """Скелеты заголовков, где слова-подстановки из H1 заменены меткой."""
     h1_words = {}
@@ -1422,7 +2005,8 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
     for page in pages:
         heads = page.headings or []
         h1 = next((t for level, t in heads if level == 1), "")
-        own = {w.lower() for w in tokenize(h1) if len(w) >= 2 and not w.isdigit()}
+        # Число — тоже значение подстановки: индекс 90210, «District 3».
+        own = {w.lower() for w in tokenize(h1) if len(w) >= 2 or w.isdigit()}
         h1_words[page.url] = own
         df.update(own)
     half = len(pages) / 2
@@ -1438,7 +2022,8 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
             if level < 2:
                 continue
             tokens = [w.lower() for w in tokenize(text)]
-            kept = [SLOT_MARK if w in slots else w for w in tokens]
+            kept = [SLOT_MARK if w in slots or _inflected(w, slots) else w
+                    for w in tokens]
             # Заголовок из одного значения («Alpha») — не шаблонная фраза:
             # такой скелет совпал бы у любых страниц со списком городов.
             if SLOT_MARK in kept and any(w != SLOT_MARK for w in kept):
@@ -1452,6 +2037,8 @@ def _slot_skeletons(pages: list, skip: set) -> dict:
 
 
 SECTION_SEAM_MIN = 5
+# Доля раздела, с которой скелет считается одним из его шаблонов.
+TEMPLATE_PART = 0.3
 
 
 _SLUG_TOKEN = re.compile(r"[-_.]+")
@@ -1545,18 +2132,40 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     in_section = _section_counter(
         pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2)
 
-    def stamped_here(urls):
+    # Два шаблона в одном каталоге: тридцать страниц аренды и тридцать
+    # услуг под /rent/ — у каждого скелета половина раздела, и порог в 70%
+    # не брал ни один. Скелеты, каждый из которых занимает заметную долю
+    # раздела, складываются: вместе они и есть раздел. Только скелеты из
+    # трёх заголовков и больше: «Введение, Итоги» бывают у любых статей.
+    covered = Counter()
+
+    def cover(groups):
+        for skeleton, urls in groups:
+            if len(skeleton) >= 3 and len(urls) >= SECTION_SEAM_MIN:
+                size, prefix = in_section(urls)
+                if size and len(urls) >= size * TEMPLATE_PART:
+                    covered[prefix] += len(urls)
+
+    def stamped_here(urls, skeleton=()):
         if len(urls) >= threshold:
             return True
         if len(urls) < SECTION_SEAM_MIN:
             return False
-        size, _ = in_section(urls)
-        return size >= cfg["min_pages_for_seams"] and len(urls) >= size * cfg["template_share"]
+        size, prefix = in_section(urls)
+        if size < cfg["min_pages_for_seams"]:
+            return False
+        return (len(urls) >= size * cfg["template_share"]
+                or (len(skeleton) >= 3 and len(urls) >= size * TEMPLATE_PART
+                    and covered[prefix] >= size * cfg["template_share"]))
 
+    cover(skeletons.items())
+
+    stamped_groups = []
     for skeleton, urls in sorted(skeletons.items()):
-        if stamped_here(urls):
+        if stamped_here(urls, skeleton):
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             stamped.update(urls)
+            stamped_groups.append((skeleton, urls))
             for url in sorted(urls):
                 issues.append((
                     "warning", url, "template-skeleton",
@@ -1567,8 +2176,14 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     # одной пары. Слово из H1, которое есть меньше чем у половины страниц, —
     # значение подстановки; оно заменяется меткой, и скелеты сравниваются
     # ещё раз. Только для страниц, которых точное сравнение не нашло.
-    for skeleton, urls in sorted(_slot_skeletons(pages, stamped).items()):
-        if stamped_here(urls):
+    slotted = _slot_skeletons(pages, stamped)
+    # Страница не должна попасть в сумму дважды: раз точным скелетом, раз —
+    # с меткой подстановки.
+    covered.clear()
+    cover(stamped_groups)
+    cover(slotted.items())
+    for skeleton, urls in sorted(slotted.items()):
+        if stamped_here(urls, skeleton):
             repeated.append({"headings": list(skeleton), "count": len(urls)})
             for url in sorted(urls):
                 issues.append((
@@ -1669,6 +2284,9 @@ _IDENT = re.compile(r"[A-Za-z_]\w*")
 def _docs_page(page) -> bool:
     """Страница с примерами кода: `{FOLDER_NAME}` и `undefined` на ней — нотация автора."""
     raw = (page.raw or "")[:400_000].lower()
+    if "<pre" not in raw and "<code" not in raw:
+        return False
+    raw = drop_spans(raw, NOT_SHOWN)
     return "<pre" in raw or "<code" in raw
 
 
@@ -1772,6 +2390,9 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
             if not docs and _EMPTY_SLOT.search(value):
                 # `opt_*()`, `if ()`, «| — побитовое ИЛИ» — заголовки справочника.
                 empty.append(value.strip())
+            if not mojibake:
+                # title и description видны в выдаче, а visible_text их не видит.
+                mojibake += [s for k, s in find_slots(value, markdown=True) if k == "mojibake"]
         for block in page.jsonld or []:
             try:
                 data = json.loads(block)
@@ -1786,7 +2407,8 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
         if critical or empty:
             shown = ", ".join(f"«{s}»" for s in (critical or empty)[:3])
             issues.append(("critical" if critical else "warning", page.url, "unfilled-slot",
-                           tr("незаполненные места шаблона: {a0}", a0=shown)))
+                           Said(tr("незаполненные места шаблона: {a0}", a0=shown),
+                                (f"«{s}»" for s in critical or empty))))
         if llm:
             issues.append(("warning", page.url, "llm-leftover",
                            tr("в тексте остался ответ модели, а не текст страницы: «{a0}»",
@@ -1914,7 +2536,9 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
         "notes": notes,
         "unmatched": sorted(p.url for p in pages if p.url not in matched) if rows else [],
         # В обратную сторону: строка без страницы — сбой генерации или фильтр.
+        # Строка без ключа называется номером: раньше она шла пустой строкой.
         "rows_without_page": sorted(
-            str(r.get(keyword_field) or "") for r in (rows or [])
-            if id(r) not in {id(v) for v in matched.values()}),
+            str(r.get(keyword_field) or "").strip() or f"#{n}"
+            for matched_ids in [{id(v) for v in matched.values()}]
+            for n, r in enumerate(rows or [], 1) if id(r) not in matched_ids),
     }

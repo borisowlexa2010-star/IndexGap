@@ -155,11 +155,29 @@ def load_config(root: str = ".", explicit: str = "") -> dict:
 
 # ── вывод настроек из данных проекта ──────────────────────────────────────────
 
+# Огласовки и знаки гласных (бенгали, деванагари, тайский, арабский) — не
+# `\w` для `re`: «মাস» и «মিনিট» обрезались до одной «ম», и месяцы с минутами
+# становились одной единицей. Слово единицы — буква, за ней буквы и такие знаки.
+LETTER_MARKS = ("\u0300-\u036f\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u064b-\u065f\u0670"
+                "\u0900-\u0903\u093a-\u094f\u0951-\u0957\u0962\u0963"
+                "\u0981-\u0983\u09bc\u09be-\u09cd\u09d7\u09e2\u09e3"
+                "\u0a01-\u0a03\u0a3c-\u0a51\u0a70\u0a71\u0a75\u0a81-\u0a83\u0abc-\u0acd\u0ae2\u0ae3"
+                "\u0b01-\u0b03\u0b3c-\u0b57\u0b62\u0b63\u0b82\u0bbe-\u0bcd\u0bd7"
+                "\u0c00-\u0c04\u0c3c-\u0c56\u0c62\u0c63\u0c81-\u0c83\u0cbc-\u0cd6\u0ce2\u0ce3"
+                "\u0d00-\u0d03\u0d3b-\u0d4d\u0d57\u0d62\u0d63\u0dca-\u0ddf\u0df2\u0df3"
+                "\u0e31\u0e34-\u0e3a\u0e47-\u0e4e\u0eb1\u0eb4-\u0ebc\u0ec8-\u0ecd")
+
+
+def unit_word(longest: int) -> str:
+    """Выражение слова единицы: буква, за ней буквы или знаки гласных."""
+    return "[^\\W\\d_](?:[^\\W\\d_]|[" + LETTER_MARKS + "]){0,%d}" % (longest - 1)
+
+
 # Единица — это то, что стоит сразу после числа: буквы, символ валюты,
 # м², %, °C. Намеренно широко: список валют и мер мира в код не помещается
 # и устаревает, а в данных проекта нужное уже есть.
 UNIT_AFTER_NUMBER = re.compile(
-    "\\d[\\d\\s.,]*\\s*([^\\W\\d_]{1,12}|[%°$€£₽¥₹]|м²|м2|km²)",
+    "\\d[\\d\\s.,]*\\s*(" + unit_word(12) + "|[%°$€£₽¥₹]|м²|м2|km²)",
     re.U)
 
 
@@ -172,6 +190,9 @@ NOT_A_UNIT = {
     "это", "как", "что", "год", "года", "году", "годов", "г", "гг", "стр",
     "and", "or", "the", "a", "an", "of", "in", "on", "at", "to", "for", "by",
     "is", "are", "no", "am", "pm",
+    # Порядковые окончания: колонка этажей «4th», «5th» не делает «19th-century»
+    # фактом.
+    "st", "nd", "rd", "th", "er", "ème", "º", "ª",
 }
 
 
@@ -185,14 +206,28 @@ def units_from_dataset(rows: list, keyword_field: str = None, min_count: int = 2
     Единица должна встретиться не в одной строке: единичное совпадение —
     это почти всегда кусок описания, а не мера.
     """
+    from .content import NUMBER, _COLUMN_TERMS, _column_unit, _is_identifier
     counter = Counter()
     for row in rows or ():
         for field, value in (row or {}).items():
             if keyword_field and field == keyword_field:
                 continue
+            # «12 Main Street» — адрес, а не двенадцать «main».
+            if _is_identifier(field, value):
+                continue
+            # Голое число в `deposit_months` — те же «months».
+            unit = _column_unit(field)
+            if unit in _COLUMN_TERMS and re.fullmatch(NUMBER, str(value).strip()):
+                counter[unit] += 1
             for match in UNIT_AFTER_NUMBER.finditer(str(value)):
                 unit = match.group(1).strip().lower()
                 if unit and not unit.isdigit() and unit not in NOT_A_UNIT:
+                    counter[unit] += 1
+            # Единица только в названии колонки: `deposit_months: 3`.
+            if re.fullmatch(r"\s*\d+(?:[.,]\d+)?\s*", str(value)):
+                from .content import column_unit
+                unit = column_unit(field)
+                if unit:
                     counter[unit] += 1
     return [unit for unit, count in counter.most_common() if count >= min_count]
 
@@ -259,7 +294,12 @@ def display_width(text: str) -> int:
     # бирманское письмо — обычной ширины, а их надстрочные гласные и тоны
     # (и любые комбинируемые знаки) места в строке не занимают: тайский
     # заголовок из 35 видимых знаков считался шириной 90.
-    wide = len(_WIDE_SCRIPT.findall(text))
+    # Плюс всё, что Unicode сам называет широким (East Asian Width W/F):
+    # полноширинные буквы и цифры, 【】｜、。, расширения CJK за BMP. Эмодзи
+    # (So) — как раньше, в один знак.
+    wide = sum(1 for ch in text if _WIDE_SCRIPT.match(ch) or (
+        ch > "\u2fff" and unicodedata.east_asian_width(ch) in ("W", "F")
+        and unicodedata.category(ch) != "So"))
     marks = sum(1 for ch in text if unicodedata.category(ch) in ("Mn", "Me", "Cf"))
     return len(text) + wide - marks
 
@@ -340,11 +380,20 @@ def check_section(section: str, values) -> list:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise SourceError(tr("настройка «{a0}» должна быть числом, а в конфиге стоит {a1}",
                                  a0=name, a1=json.dumps(value, ensure_ascii=False)))
+        # NaN, бесконечность (`1e400`) и миллиард дней проходили проверку
+        # нижней границы и роняли прогон трассировкой из timedelta.
+        if not (abs(value) <= 10 ** 8):
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
+                                 a2=tr("нужно конечное число не больше 100000000")))
         if key in _SHARES:
             low_ok = _SHARES[key]
             if not ((0 <= value if low_ok else 0 < value) and value <= 1):
                 raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
                                      a2=tr("нужна доля от 0 до 1 — например 0.8, а не 80")))
+        elif key == "grace_days" and not value <= 36500:
+            # timedelta на миллиарды дней роняла прогон трассировкой.
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
+                                 a2=tr("нужно число дней не больше 36500")))
         elif value < (0 if key in _ZERO_OK else 1):
             raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
                                  a2=tr("нужно целое число не меньше 1") if key not in _ZERO_OK

@@ -4,9 +4,17 @@
 MESSAGES = {
     "страница выпала из индексируемых": "the page dropped out of the indexable set",
     "появился noindex: meta robots «{a0}»": "noindex appeared: meta robots “{a0}”",
+    "появился noindex: заголовок X-Robots-Tag ({a0})":
+        "noindex appeared: X-Robots-Tag header ({a0})",
     "canonical теперь ведёт на {a0}": "the canonical now points to {a0}",
     "страница стала черновиком": "the page became a draft",
     "страница стала заглушкой-редиректом на {a0}": "the page became a redirect stub to {a0}",
+    "страница стала заглушкой-редиректом на {a0}, а оттуда редирект ведёт по кругу — на живом сайте это ошибка вместо страницы":
+        "the page became a redirect stub to {a0}, and from there the redirects go "
+        "round in a loop: on the live site that is an error instead of a page",
+    "страница стала заглушкой-редиректом на главную — поисковик считает это мягким 404":
+        "the page became a redirect stub to the home page: a search engine treats "
+        "that as a soft 404",
     "появился запрет сниппета: страница останется в индексе, но пропадёт из ответов ИИ-поиска":
         "a snippet ban appeared: the page stays indexed but disappears from AI-search answers",
     "текста стало меньше на {a0:.0%}: {a1} → {a2} слов":
@@ -14,6 +22,12 @@ MESSAGES = {
     "{a0} изменился на {a1} страницах из {a2}; например {a3}: «{a4}» → «{a5}»":
         "{a0} changed on {a1} of {a2} pages; for example {a3}: “{a4}” → “{a5}”",
     "страница стала открытой для индекса": "the page became open to indexing",
+    "редирект на главную поиск считает мягким 404: страница выпадет из индекса":
+        "search engines treat a redirect to the home page as a soft 404: the page drops out "
+        "of the index",
+    "а цепочка редиректов приводит к странице, закрытой от индекса: {a0}":
+        "and the redirect chain ends on a page closed from indexing: {a0}",
+    "а дальше редиректы идут по кругу": "and from there the redirects go round in a loop",
     "новых страниц: {a0}": "new pages: {a0}",
     "страницы нет, редирект ведёт на {a0} — а этой страницы в новой сборке тоже нет":
         "the page is gone and redirects to {a0} — which is not in the new build either",

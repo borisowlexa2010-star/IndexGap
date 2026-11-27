@@ -411,6 +411,8 @@ def read_table(path: str) -> tuple:
 
 
 _BARE_URL = re.compile(r"^(?:https?://|/)\S*$")
+# `sep=;` — подсказка Excel о разделителе в первой строке CSV.
+_SEP_HINT = re.compile(r'^\s*"?sep=.?"?\s*$', re.I)
 
 
 def _rows_from_text(text: str) -> list:
@@ -423,8 +425,19 @@ def _rows_from_text(text: str) -> list:
     lines = text.splitlines(keepends=True)
     start = 0
     while start < len(lines) and (not lines[start].strip()
-                                  or lines[start].lstrip().startswith("#")):
+                                  or lines[start].lstrip().startswith("#")
+                                  or _SEP_HINT.match(lines[start])):
         start += 1
+    # Заголовок отчёта над таблицей («Pages report», пустая строка, шапка):
+    # строки без разделителя, за которыми идёт таблица, — не список адресов.
+    probe = start
+    while (probe < len(lines) and probe - start < 3
+           and not any(ch in lines[probe] for ch in ",;\t|")
+           and not _BARE_URL.match(lines[probe].strip())):
+        probe += 1
+    if (probe > start and probe < len(lines) and any(ch in lines[probe] for ch in ",;\t|")
+            and not _BARE_URL.match(lines[probe].strip())):
+        start = probe
     text = "".join(lines[start:])
     first = text.splitlines()[0] if text.strip() else ""
     if not any(ch in first for ch in ",;\t|"):
@@ -478,15 +491,22 @@ def _read_zip_tables(path: str) -> list:
         with zipfile.ZipFile(path) as archive:
             members = [n for n in archive.namelist()
                        if not n.endswith("/") and "__MACOSX" not in n]
-            for name in members:
-                if not name.lower().endswith((".csv", ".tsv", ".txt")):
-                    continue
+            # Потолок — на все таблицы архива вместе, а не на каждую: zip в
+            # 2,5 МБ из десяти таблиц по 99 МБ занимал doctor на минуты.
+            tables = [n for n in members if n.lower().endswith((".csv", ".tsv", ".txt"))]
+            total = sum(archive.getinfo(n).file_size for n in tables)
+            for name in tables:
+                if core.too_big(total):
+                    raise SourceError(tr("{a0}: таблицы внутри архива вместе больше {a1} МБ — "
+                                         "читать не стал", a0=path,
+                                         a1=core.MAX_INPUT_BYTES // (1024 * 1024)))
                 try:
                     raw = _member(archive, name, path)
                 except SourceError:
                     raise
                 except Exception:
                     continue
+                total += max(0, len(raw) - archive.getinfo(name).file_size)
                 for codec in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
                     try:
                         text = raw.decode(codec)
@@ -516,7 +536,7 @@ def _read_zip_tables(path: str) -> list:
 # одной причины из отчёта «Индексирование страниц». Есть она только у причин,
 # по которым страница НЕ в индексе.
 _ISSUE_KEYS = {"issue", "reason", "проблема", "причина", "problem", "problème",
-               "problema", "grund", "motivo", "問題"}
+               "problema", "grund", "motivo", "問題", "问题", "probleem", "sorun", "문제"}
 
 
 def zip_issue(path: str) -> str:
@@ -530,6 +550,8 @@ def zip_issue(path: str) -> str:
     """
     try:
         with zipfile.ZipFile(path) as archive:
+            if any(n.startswith("xl/") for n in archive.namelist()):
+                return _xlsx_issue(archive, path)
             for name in archive.namelist():
                 if name.endswith("/") or "__MACOSX" in name:
                     continue
@@ -538,14 +560,53 @@ def zip_issue(path: str) -> str:
                 if archive.getinfo(name).file_size > 64 * 1024:
                     continue
                 try:
-                    text = archive.read(name).decode("utf-8-sig", "replace")
+                    raw = archive.read(name)
                 except Exception:
                     continue
+                # Как у Table.csv рядом: Metadata.csv, пересохранённый в Excel,
+                # бывает в UTF-16 или cp1251 — и тогда «не в индексе» терялось.
+                if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+                    text = raw.decode("utf-16", "replace")
+                else:
+                    for codec in ("utf-8-sig", "cp1251"):
+                        try:
+                            text = raw.decode(codec)
+                            break
+                        except UnicodeDecodeError:
+                            text = raw.decode("utf-8-sig", "replace")
                 for row in _rows_from_text(text):
                     if (len(row) >= 2 and str(row[0]).strip().lower() in _ISSUE_KEYS
                             and str(row[1]).strip()):
                         return str(row[1]).strip()
     except (zipfile.BadZipFile, OSError):
+        return ""
+    return ""
+
+
+def _issue_in(rows: list) -> str:
+    for row in rows:
+        if (len(row) >= 2 and str(row[0]).strip().lower() in _ISSUE_KEYS
+                and str(row[1]).strip()):
+            return str(row[1]).strip()
+    return ""
+
+
+def _xlsx_issue(book, path: str) -> str:
+    """Та же строка «Issue» на листе Metadata книги xlsx."""
+    names = book.namelist()
+    try:
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            root = core.parse_xml(_member(book, "xl/sharedStrings.xml", path))
+            for si in root:
+                shared.append("".join(t.text or "" for t in si.iter(_XML_NS + "t")))
+        for sheet in sorted(n for n in names if _SHEET_RE.search(n)):
+            if book.getinfo(sheet).file_size > 64 * 1024:
+                continue
+            found = _issue_in(_sheet_rows(core.parse_xml(_member(book, sheet, path)), shared))
+            if found:
+                return found
+    except (SourceError, ValueError, SyntaxError):
         return ""
     return ""
 
@@ -582,6 +643,10 @@ def identify(path: str, header: list) -> tuple:
     named = _tool_in_name(path)
     if named:
         return named, TOOLS[named]["kind"], True
+
+    # Строка «Issue» в Metadata — подпись выгрузки причины из Search Console.
+    if zip_issue(path):
+        return "google", TOOLS["google"]["kind"], True
 
     scores = {}
     for tool, meta in TOOLS.items():

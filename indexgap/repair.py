@@ -52,8 +52,8 @@ FIX = {
     "still-draft": N_("Допиши страницу и убери `status: draft` из фронтматтера. "
                       "Пока метка стоит, страница не попадёт ни в sitemap, "
                       "ни в IndexNow."),
-    "noindex": N_("Убери мета-тег robots, если закрытие от индексации не было "
-                  "задумано. Если было — оставь и не трогай эту находку."),
+    "noindex": N_("Убери мета-тег robots или заголовок X-Robots-Tag, если закрытие "
+                  "от индексации не было задумано. Если было — оставь и не трогай эту находку."),
     "nosnippet": N_("Убери `nosnippet` или `max-snippet:0`: без права на сниппет "
                     "страница не попадёт ни в расширенную выдачу, ни в ответы "
                     "ИИ-поиска."),
@@ -76,6 +76,7 @@ FIX = {
     "broken-link": N_("Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт "
                       "эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер "
                       "перенаправляет эти адреса — проверь, что перенаправление действительно есть."),
+    "redirect-home": N_("Веди заглушку не на главную, а на страницу, которая заменила старую по смыслу. Если редирект на главную поставил шаблон на страницы с текстом, найди в шаблоне meta refresh и убери его."),
     "wrong-link-form": N_("Пиши ссылку в той форме, в какой страница лежит в сборке: тот же регистр букв, /about/ для about/index.html, /faq.html или /faq для faq.html. Если хостинг сам перенаправляет эту форму — добавь правило в _redirects, netlify.toml или vercel.json, и находка уйдёт."),
     "canonical-form": N_("Пиши canonical в той форме, в какой страница лежит в сборке: /about/ для about/index.html, /about.html или /about для about.html — обычно это настройка trailingSlash генератора. Если хостинг отдаёт эту форму сам — cleanUrls или trailingSlash в vercel.json, правило в _redirects или netlify.toml, — находка уйдёт."),
     "orphan": N_("Поставь ссылки на эту страницу с хабовых страниц раздела. "
@@ -163,6 +164,9 @@ FIX = {
     "hreflang-missing": N_("Добавь альтернативы для языковых версий этой страницы."),
     "hreflang-bad-code": N_("Поправь код языка: чаще всего вместо языка написана "
                             "страна."),
+    "hreflang-conflict": N_("Оставь у каждого кода один адрес и называй каждую версию "
+                            "одним и тем же кодом на всех страницах кластера."),
+    "hreflang-relative": N_("Пиши в href альтернатив полный адрес: схему, хост и путь."),
     "robots-blocks-page": N_("Найди правило Disallow, которое закрывает этот раздел, и реши: если раздел должен быть в поиске — убери правило; если нет — убери страницы из sitemap и поставь на них noindex (его поисковик увидит, только если обход разрешён)."),
     "robots-blocks-all": N_("Убери `Disallow: /` — сейчас сайт закрыт от всех "
                             "поисковиков."),
@@ -216,9 +220,28 @@ SITE_LEVEL = {"robots-blocks-all", "ai-crawler-blocked", "robots-no-sitemap",
 HEADER = "<!-- indexgap-brief -->"
 
 
+# Предел имени файла — 255 байт; кириллица — два байта на букву.
+_NAME_BYTES = 150
+
+
+def _fit(name: str) -> str:
+    """Часть пути, которая влезет в имя файла: длинная — обрезка и хеш."""
+    if len(name.encode("utf-8")) <= _NAME_BYTES:
+        return name
+    import hashlib
+    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=4).hexdigest()
+    cut = name.encode("utf-8")[:_NAME_BYTES - len(digest) - 1].decode("utf-8", "ignore")
+    return f"{cut.rstrip('-')}-{digest}"
+
+
 def _slug(url: str) -> str:
-    path = re.sub(r"^https?://[^/]+", "", url or "").strip("/")
+    from urllib.parse import unquote
+    path = re.sub(r"^https?://[^/]+", "", url or "")
+    # Адрес страницы закодирован (%D0%B0…): без раскодирования кириллический
+    # путь давал имя из обломков кодировки длиннее 255 байт, и запись падала.
+    path = unquote(path).strip("/")
     path = re.sub(r"[^\w\-/]+", "-", path, flags=re.UNICODE).strip("-/")
+    path = "/".join(_fit(part) for part in path.split("/"))
     return path or "index"
 
 
@@ -368,8 +391,16 @@ def build(pages: list, analysis: dict, cfg: dict = None,
     # ── группы дублей ─────────────────────────────────────────────────────────
     from .checks import _clusters
 
+    # Пара, оба конца которой приняты через ignore, — решение владельца:
+    # «в счёт и в наряды не идут» касается и наряда на группу.
+    accepted_dup = {url for _l, url, code, _m in analysis.get("accepted") or ()
+                    if code == "near-duplicate"}
+    still_dup = {url for _l, url, code, _m in analysis.get("issues", ())
+                 if code == "near-duplicate"}
+    accepted_dup -= still_dup
     pairs = [(a.url, b.url, j) for a, b, j in analysis.get("duplicates", ())
-             if j >= cfg.get("near_duplicate", 0.8)]
+             if j >= cfg.get("near_duplicate", 0.8)
+             and not (a.url in accepted_dup and b.url in accepted_dup)]
     edges = [(a, b) for a, b, _j in pairs]
     alike = defaultdict(float)
     for a, b, j in pairs:
@@ -394,6 +425,17 @@ def build(pages: list, analysis: dict, cfg: dict = None,
                         "дублирует их шаблон, а не интент. Чини шаблон: больше данных "
                         "своей строки, разделы, которые зависят от данных. Склеивать их "
                         "canonical'ом нельзя — пропадут настоящие страницы.")
+        elif not all(rows):
+            # Строки датасета известны не для всех страниц группы: франкфурт
+            # и штутгарт без --dataset выглядят одинаково. Приказ склеить их
+            # убрал бы настоящую страницу города.
+            advice = tr("Что делать: сначала реши, один ли это интент. Если страницы "
+                        "отвечают на разные запросы (город, модель, услуга) — дублирует "
+                        "их шаблон: дай каждой больше данных своей строки и разделы, "
+                        "которые от них зависят; canonical здесь спрятал бы настоящие "
+                        "страницы. Если интент один — оставь одну страницу основной, "
+                        "а с остальных поставь canonical на неё или убери лишнюю строку "
+                        "из датасета (её покажет `indexgap plan`).")
         else:
             advice = tr("Что делать: выбери одну страницу как основную и разведи "
                         "остальные по разным интентам — у каждой должен быть свой "
@@ -416,7 +458,7 @@ def build(pages: list, analysis: dict, cfg: dict = None,
         # Имя — от первого адреса группы, а не от её номера: одна новая пара
         # раньше перенумеровывала сотни файлов, и каждый коммит нарядов был
         # шумом во всю их ширину.
-        briefs.append({"name": f"_duplicates/{_slug(sorted(group)[0]).replace('/', '--')}.md",
+        briefs.append({"name": f"_duplicates/{_fit(_slug(sorted(group)[0]).replace('/', '--'))}.md",
                        "kind": "group",
                        "title": tr("Группа почти-дублей №{a0}", a0=number),
                        "body": "\n".join(body), "count": len(group)})

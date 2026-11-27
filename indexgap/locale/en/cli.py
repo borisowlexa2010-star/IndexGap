@@ -2,6 +2,16 @@
 """cli — English. Всё, что человек видит в терминале."""
 
 MESSAGES = {
+    "--home {a0}: такой страницы нет среди разобранных файлов. Укажи адрес страницы сборки — полный или путь от --site.":
+        "--home {a0}: there is no such page among the parsed files. Give the address "
+        "of a page in the build — a full one or a path from --site.",
+    "{a0} уже существует и это не график пакета.\n    Перезаписывать чужой файл я не буду — укажи другую папку --history.":
+        "{a0} already exists and is not this tool's chart.\n    I will not overwrite "
+        "someone else's file — pick another --history folder.",
+    "  ! прошлый прогон {a0} повреждён — сравнение с ним пропущено":
+        "  ! the previous run {a0} is damaged — the comparison with it was skipped",
+    "{a0}: один файл отчёта у двух проектов — «{a1}» и «{a2}»":
+        "{a0}: two projects share one report file — “{a1}” and “{a2}”",
     "в тексте страницы есть «TODO» — если это пометка автора, а не предмет текста, страница не дописана":
         "the page text contains “TODO” — if it is the author's note rather than "
         "the subject of the text, the page is unfinished",
@@ -95,10 +105,10 @@ MESSAGES = {
         "    Name the publish directory: --key-dir ./public",
     "   (угадано — проверь)": "   (guessed — check it)",
     "   (уже был, не тронут)": "   (already there, untouched)",
+    "   (уже был, вписано из флагов: {a0})": "   (already there; updated from the flags: {a0})",
     "  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками.":
         "  ! --write-key without --key-dir: the key file must sit at the SITE ROOT, "
         "not next to your sources.",
-    "  ! sitemap не прочитан: {a0}": "  ! sitemap not read: {a0}",
     "  ! колонка с ключом не названа `keyword` — взята «{a0}». Если это не она, укажи явно: --keyword <имя колонки>":
         "  ! the keyword column is not called `keyword` — took “{a0}”. If that is "
         "the wrong one, say so: --keyword <column name>",
@@ -632,6 +642,20 @@ MESSAGES = {
         '  baseline findings accepted since then through ignore: {a0} — they are still on the site and are not counted as gone',
     '  ! база снята со сверкой фактов по датасету, этот прогон — без неё: {a0} находок сверки не проверены и в «исчезло» не входят, а новые числа не сверялись. Передай тот же --dataset':
         '  ! the baseline was made with fact-checking against a dataset, this run without it: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Pass the same --dataset',
+    '  ! база искала дубли методом «{a0}», этот прогон — «{a1}» (порог exact_below): из исчезнувших {a2} — находки о дублях, их сравнение приблизительно. Для точной сверки задай тот же метод через checks.exact_below':
+        '  ! the baseline searched for duplicates with “{a0}”, this run with “{a1}” (the exact_below threshold): {a2} of the gone findings are about duplicates, and that comparison is approximate. For an exact comparison set the same method with checks.exact_below',
+    '  ! база снята со сверкой фактов по датасету, а в этом прогоне её выключил --no-content: {a0} находок сверки не проверены и в «исчезло» не входят, а новые числа не сверялись. Запусти без --no-content':
+        '  ! the baseline was made with fact-checking against a dataset, and in this run --no-content turned it off: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Run without --no-content',
+    '  ! база снята со сверкой фактов по датасету, а профиль «{a1}» фактов не сверяет: {a0} находок сверки не проверены и в «исчезло» не входят':
+        '  ! the baseline was made with fact-checking against a dataset, and the "{a1}" profile does not check facts: {a0} fact findings were not checked and are not counted as gone',
+    '  находок базы из проверок, выключенных в этом прогоне: {a0} — их не искали, и в «исчезло» они не входят':
+        '  baseline findings from checks turned off in this run: {a0} — they were not looked for and are not counted as gone',
+    '{a0}: находка базовой линии записана не так, как её пишет `indexgap check`: {a1}':
+        '{a0}: a baseline finding is not written the way `indexgap check` writes it: {a1}',
+    '  ! индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг индекса и разделы не сравниваются':
+        '  ! the runs took the index from different sources ({a0} → {a1}) — the index step and the sections are not compared',
+    '  ✓ разрыв ИИ-поиска закрыт: {a0}':
+        '  ✓ AI-search gap closed: {a0}',
     'индекс':
         'index',
     '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':
@@ -643,4 +667,36 @@ MESSAGES = {
     "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как страницы с переадресацией — в sitemap нужен адрес, куда они ведут.":
         "the sitemap lists redirect stubs ({a0}): {a1}. Search engines will report them as pages with redirect — the sitemap needs the address they lead to.",
     " и ещё {a0}": " and {a0} more",
+    'sitemap прочитан не целиком: {a0}. Шаг «в sitemap» и список «нет в sitemap» неполные':
+        'the sitemap was not read in full: {a0}. The “in the sitemap” step and the “missing from the sitemap” list are incomplete',
+    '  ! {a0} адрес(ов) в sitemap взяты из canonical в форме, которой раскладка файлов не отдаёт (check: canonical-form) — хостинг ответит редиректом или 404: {a1}. Поправь canonical':
+        '  ! {a0} sitemap address(es) come from a canonical in a form the file layout does not serve (check: canonical-form) — the host will answer with a redirect or a 404: {a1}. Fix the canonical',
+    '--public-prefix — путь на сайте ({a0}), а не адрес: шарды лежат на том же хосте, что и --site. Например: --public-prefix sitemaps':
+        '--public-prefix is a path on the site ({a0}), not an address: the shards live on the same host as --site. For example: --public-prefix sitemaps',
+    '  ! в sitemap {a0} адрес(ов), в прошлый раз было {a1}: больше половины выпало разом. Проверь noindex и canonical в шаблонах и X-Robots-Tag хостинга — чаще всего так выглядит правило, закрывшее целый раздел':
+        '  ! the sitemap has {a0} address(es), last time it had {a1}: more than half dropped out at once. Check noindex and canonical in the templates and the host’s X-Robots-Tag — this is usually a rule that closed a whole section',
+    '{a0} адрес(ов) в sitemap — не на {a1}, а на другой схеме или хосте ({a2}): каждый из них отвечает редиректом, и Search Console отметит их как «страница с переадресацией». В sitemap нужны адреса как в --site':
+        '{a0} sitemap address(es) are not on {a1} but on another scheme or host ({a2}): each of them answers with a redirect, and Search Console will report them as “page with redirect”. The sitemap needs addresses as in --site',
+    '  ! {a0} адрес(ов) в sitemap перехватывает правило хостинга (redirects в vercel.json, `301!`/`404!` в _redirects) раньше файла — поисковик получит редирект или ошибку, а не страницу: {a1}':
+        '  ! {a0} sitemap address(es) are caught by a host rule (redirects in vercel.json, `301!`/`404!` in _redirects) before the file — the search engine gets a redirect or an error, not the page: {a1}',
+    '  ! {a0} объявляет другой sitemap ({a1}), а записан {a2} — поисковик будет читать объявленный. Пропиши в robots.txt `Sitemap: {a2}`':
+        '  ! {a0} declares a different sitemap ({a1}), but {a2} was written — search engines will read the declared one. Add `Sitemap: {a2}` to robots.txt',
+    '  ! источники индекса другие (добавлены: {a0}; убраны: {a1}) — шаг индекса и разделы не сравниваются':
+        '  ! the index sources are different (added: {a0}; removed: {a1}) — the index step and the sections are not compared',
+    '--min-filled — доля заполненных колонок, от 0 до 1 (например 0.5), а не {a0}':
+        '--min-filled is the share of filled columns, from 0 to 1 (for example 0.5), not {a0}',
+    '--min-words не может быть отрицательным':
+        '--min-words cannot be negative',
+    'сколько слов требовать в брифе каждой заготовки':
+        'how many words the brief of each stub asks for',
+    '--runs — число прогонов на вопрос, не меньше 1':
+        '--runs is the number of runs per question, at least 1',
+    '--limit — сколько вопросов взять из семантики, не меньше 1':
+        '--limit is how many questions to take from the keyword set, at least 1',
+    '--history {a0} — это файл, а нужна папка истории.':
+        '--history {a0} is a file, but a history folder is needed.',
+    '--out пустой: укажи имя файла отчёта, например indexgap-check.html':
+        '--out is empty: give the report a file name, for example indexgap-check.html',
+    '  ! база снята с проверками, выключенными в этом прогоне ({a0}): {a1} находок базы не проверены и в «исчезло» не входят':
+        '  ! the baseline was taken with checks that are off in this run ({a0}): {a1} baseline findings were not checked and are not counted as gone',
 }

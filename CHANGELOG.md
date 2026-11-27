@@ -1,5 +1,265 @@
 # Changelog
 
+## 1.29.0 — 2026-11-27
+
+A third round of 50 adversarial testers reported 413 weak spots. All were
+reproduced against 1.28.0. 396 are fixed, each with a regression test. 3 are
+working as designed. 14 need new design work and are deferred. The fixes were
+measured on the demo site, on a large real multilingual build and on every
+adversarial test site from the earlier rounds.
+
+### New findings and notes
+
+* `hreflang-relative` (warning): an alternate href without a scheme and host.
+  Before, it showed up as a missing self-link or an unknown target.
+* `hreflang-conflict` (warning): one code or x-default points at several
+  addresses, or a page calls a sibling by a language the sibling does not claim.
+* `redirect-home`: a stub that redirects to the home page. It is a warning when
+  the stub still carries page text, and info for an empty alias.
+* New notes:
+  * sitemap protocol problems: over 50,000 URLs or 50 MB, relative `<loc>`,
+    wrong namespace, invalid or future `<lastmod>`, one build timestamp on every
+    URL, and `http://` or `www.` URLs when `--site` uses another form;
+  * a declared charset that contradicts the bytes;
+  * two pages that differ only in letter case;
+  * hidden or service folders whose pages were skipped.
+
+### Fact check against the dataset
+
+* Prices with a scale letter are read at full value: `$2.54M`, `£2.6m`,
+  `₹2.5 Cr`, `R$ 2,67 mi`. `$50 B&B` is not a billion.
+* The same number in a clearly different currency (`$1,296` in the row,
+  `€1,296` on the page) is critical.
+* More price forms are read:
+  * a dash for cents (`1.540,– €`, `18,000.- บาท`, `2,50,000/- रुपये`);
+  * superscript cents;
+  * many more currency signs and codes.
+* Scale words multiply the number in Chinese, Japanese, Korean, Hindi, Bengali,
+  Indonesian, Thai, Arabic and Persian (`1億2000万円`, `₹1.5 लाख`,
+  `1.5 แสนบาท`, `٣ ملايين`). A price 100× or 1000× off is now critical.
+* Arabic, Persian, Hebrew and Urdu pages are read correctly:
+  * Arabic comma thousands and the Persian slash decimal;
+  * the shekel with gershayim;
+  * invisible joiners next to digits.
+* Currency signs glued to CJK or Thai text are read.
+* Units are read in more forms:
+  * declensions and plurals (месяц/месяцев, Monat/Monate, ヶ月/か月);
+  * seconds, nights and decades;
+  * distance, area and weight, so a value swapped between those columns is
+    caught;
+  * units in column names (`rent_usd`, `deposit_months`).
+* Dates, times and ordinals no longer pass as facts. Dates with month names,
+  short dates, times of day, `15th` and `2026年11月18日` no longer excuse or
+  produce numbers. A Buddhist-era year is a year.
+* `1 hour 30 minutes` against a 90-minute row is correct.
+* Site constants are stricter:
+  * a value with many differing rows is not a constant;
+  * a constant does not cover a row with its own value;
+  * a constant is checked in its own unit;
+  * phone numbers and addresses never count.
+* Dataset binding:
+  * a stamped keyword meta tag no longer overrides the page slug;
+  * a page is not tied to a row just because its title mentions the key;
+  * duplicate slugs make the page ambiguous;
+  * capitalised, non-ASCII, percent-encoded and NFD folder names bind;
+  * ł, ø, æ, ß are transliterated.
+* The check report shows dataset coverage and the rows that have no page.
+* Zero-width characters and soft hyphens inside a price no longer hide a wrong
+  number.
+
+### Languages and hreflang
+
+* `fact-drift` changes:
+  * it reads more currencies and spellings;
+  * it compares `<title>` and the meta description;
+  * it keeps a price that shares its number with a percentage;
+  * a single price off by exactly 10× is reported as a typo.
+* A translation parked after the baseline is a new finding, so `--strict` fails.
+* The exact-address rule takes the site address only from links to the site's
+  own pages. It handles mixed http/https clusters, and it flags return links
+  missing the slash or ending in `/index.html`.
+* Sitemap hreflang is merged with partial in-page markup.
+* `hreflang-in-body` stays quiet when `<head>` or the sitemap already links the
+  versions.
+* Language detection ignores model names, place names and lists of foreign
+  titles. It judges text by its own `lang` attribute, and code in comments or
+  hidden blocks no longer hides an untranslated page.
+
+### noindex, canonical, redirects and robots.txt
+
+* X-Robots-Tag:
+  * it is read after directives with a value;
+  * `netlify.toml` header syntax is read in full;
+  * a www-only header rule no longer closes the bare domain.
+* `<meta property="robots">` is not noindex.
+* Several canonicals on one page give a warning, and the page counts as having
+  none. A canonical in `<body>` is ignored with a note.
+* Template copies with their own title and H1 whose canonical points at one
+  page are critical.
+* Redirect stubs are recognised in more forms:
+  * `content="0; /path/"` without `url=`;
+  * one-line JavaScript redirects;
+  * Next.js `NEXT_REDIRECT` pages with layout text.
+
+  Loops between stubs and stubs into a missing section are reported.
+* robots.txt parsing is closer to Google's:
+  * blank lines between User-agent lines do not split a group;
+  * accepted typos are read;
+  * rules are compared in percent-encoded form;
+  * an allowlist file is not "whole site closed".
+
+  New warnings: a full block of other search engines, and a partial AI-search
+  block shown alongside a Googlebot block.
+
+### Sitemaps
+
+* A local sitemap index never fetches a missing child over the network and
+  never swaps it for an unrelated file.
+* `indexgap sitemap` changes:
+  * it refuses to overwrite a foreign `sitemap-N.xml` without `--force`;
+  * it encodes `--public-prefix` and writes IDN hosts in punycode;
+  * it warns about URLs that a host redirect rule catches, URLs taken from a
+    canonical in a form the build does not serve, a large drop since the last
+    run, and robots.txt naming another sitemap.
+
+### Duplicates, templates and the link graph
+
+* Doorway clones are found more reliably:
+  * clones where the city appears every few words;
+  * multi-word or hyphenated cities;
+  * LSH mode on large sites (498 of 500 test clones, up from 428).
+  On a site built from one template per city or country, pairs that 1.28 called
+  `similar` can now be critical `near-duplicate`. On a large real multilingual
+  build about a hundred pages moved, all of them clones that differ in the
+  place name and one paragraph.
+* `check --baseline` warns when the baseline used a different duplicate method.
+* `template-skeleton`:
+  * two templates in one directory are found;
+  * numeric and inflected slots are masked.
+* Flat URLs (`/rent-town-N/`) count as a section.
+* `same-opening` skips breadcrumbs and bylines.
+* `thin` ignores the site-wide header and footer on pages without `<main>`.
+* One-way hreflang no longer saves a page from being an orphan. A JavaScript
+  language-selector root is a redirect stub.
+* Broken links found in more cases:
+  * a wrong letter case in the section;
+  * a slash after a file name (`/faq.html/`);
+  * a dangling symlink;
+  * a folder with only a feed or asset.
+
+  A folder named like a file (`c.html/index.html`) matches `/c.html`.
+* `wrong-link-form` checks every form a page uses and links with a query
+  string.
+* `hub-missing-links` is no longer hidden by rotating "nearby" blocks.
+
+### AI-search and structured data
+
+* More question headings are recognised:
+  * quoted, numbered, "Q:" or emoji headings;
+  * question words in more languages.
+
+  Imperatives like "Do your research first" are not questions.
+* `no-structure` measures text by script, so it works on Thai, Khmer and Lao.
+  `answer-short` and `answer-long` thresholds are scaled for CJK.
+* JSON-LD:
+  * `@id` references, schema.org IRIs and the `schema:` prefix resolve;
+  * `1999` against `19,99 €` is caught;
+  * identical blocks repeated on a page give one finding;
+  * blocks inside `<template>`, `<noscript>` or `<svg>` are not read.
+* Microdata and RDFa:
+  * author and date count on pages of any size;
+  * placeholder values do not count;
+  * a hidden copy of a price no longer silences `microdata-mismatch`.
+* Freshness no longer crashes on `9999-12-31` or a huge `grace_days`.
+
+### Titles, images and HTML parsing
+
+* Duplicate titles are grouped by the language of the text, not by `/ca/` or
+  `/de/` path prefixes.
+* An invisible-only title counts as missing.
+* Widths count fullwidth characters as double.
+* Alt checks cover images after `</main>` and respect `role="presentation"`.
+  `img-alt-filler` catches template variables and stock file names.
+* `heavy-images` scans the whole build root.
+* HTML parsing is closer to a browser:
+  * self-closed `<script/>` behaves as it does in a browser;
+  * declarative shadow DOM counts as content;
+  * an inline `<svg>` ends `<head>`;
+  * stray `<![CDATA[` and meta refresh in attributes are handled.
+* Decoding handles more broken input:
+  * more mojibake (UTF-8 read as cp1251 or cp1252);
+  * a UTF-8 page with a short legacy footer;
+  * UTF-16 with an odd byte;
+  * non-UTF-8 directory names.
+
+### Frameworks and layouts
+
+* Hugo `_index.md` and front matter `permalink`, `url` and `slug` set page
+  addresses. Jekyll `_` directories are not pages, and `_posts` follow
+  `permalink`.
+* Next.js `.next/server` builds:
+  * unlinked pages get route addresses;
+  * the default locale has no prefix;
+  * fallback shells are skipped.
+* `init` finds Nuxt, VitePress, Astro and React Router build folders.
+* `index.html` beats an old `index.htm`. Links to symlinked folders resolve.
+
+### diff, baseline, doctor and portfolio
+
+* `diff` changes:
+  * it follows redirect targets through stubs and rules;
+  * a redirect into noindex, a missing page or a loop is a warning;
+  * redirects to the home page are critical;
+  * vercel.json `routes` are read;
+  * a new nosnippet is critical;
+  * new check warnings are shown.
+* `check --baseline` changes:
+  * findings of checks turned off with `--no-aeo`, `--no-content` or a profile
+    are listed as unchecked, not as gone;
+  * full subjects make the 4th new item visible;
+  * a malformed baseline is an input error.
+* `doctor`:
+  * new xlsx and zip index exports are read, with more column names and more
+    GSC languages;
+  * more log formats are read, with robots.txt checked against the logs;
+  * pages blocked in robots.txt are not counted as indexable;
+  * Copilot rows with 0 citations no longer count.
+* `doctor --baseline` and `--history` changes:
+  * pages that were deleted or closed are not "back in the index";
+  * a change of index source or of logs is reported as "not compared";
+  * damaged runs are skipped;
+  * runs are ordered by save time with a timezone.
+* `portfolio`:
+  * keyword and path handling match `check`;
+  * a failure stays with its project;
+  * reports never overwrite foreign files or each other.
+
+### Configuration, init and CLI
+
+* `indexgap.json` next to the pages is found when check runs from elsewhere.
+* `home` in the config works like `--home`.
+* An ignore rule for `/` no longer accepts site-wide findings.
+* `init` changes:
+  * it checks a root-level static site from `.`;
+  * it reads an existing config instead of shadowing it;
+  * it rejects bad flags;
+  * it quotes paths with spaces.
+* `plan` and `brief` fixes:
+  * single-letter intents are kept;
+  * slug collisions use the dataset's own column;
+  * long Cyrillic file names are capped.
+* Piping into `head` no longer hides a failing `--strict`. An abbreviated
+  `--lang` takes effect.
+
+### Safety and speed
+
+* robots.txt and hosting rules with many `*` wildcards are matched in linear
+  time.
+* A sitemap index on disk never goes to the network.
+* `plan` briefs cannot be broken out of their comment.
+* The zip size cap covers all tables together.
+* `--dataset` checks on large sites no longer slow down quadratically.
+
 ## 1.28.0 — 2026-11-25
 
 This release covers the five findings 1.27 deferred because the fix needed new

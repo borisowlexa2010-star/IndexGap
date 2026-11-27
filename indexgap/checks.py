@@ -32,8 +32,9 @@ from collections import Counter, defaultdict, deque
 
 from . import hreflang
 from .core import EMPTY_MOUNT, INERT, NOT_LIVE, SourceError, drop_spans, is_dense
+from .core import drop_markup_attributes
 from .core import ALWAYS_SKIP, tokenize, url_key
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from .publish import indexable
 from .settings import display_width, text_volume
 from .i18n import tr
@@ -220,11 +221,17 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         # треть пропадала. Словарь у них почти один и тот же, поэтому
         # кандидатов дают и полосы по множеству слов — длинные, чтобы разные
         # тексты на одну тему кандидатами не становились. Проверка пары та же.
-        word_rows = min(perms, max(rows * 2, 1))
+        # Четырёх полос мало: у клона с тридцатью подстановками словарь
+        # совпадает на 0,85, и пара становилась кандидатом в трёх случаях из
+        # четырёх — пары и тройки клонов пропадали целиком. Подпись словаря
+        # считается за один проход, поэтому полос шестнадцать, а строк в
+        # полосе на две больше, чтобы случайных кандидатов прибавилось меньше.
+        word_rows = min(perms, max(rows * 2 + 2, 1))
+        word_perms = word_rows * 16
         for url in urls:
             own = words.get(url, [])
-            sig = _minhash(_shingles(own, 1), perms)
-            for b in range(perms // word_rows):
+            sig = _minhash(_shingles(own, 1), word_perms)
+            for b in range(word_perms // word_rows):
                 band = sig[b * word_rows:(b + 1) * word_rows]
                 key = ("w", b, hashlib.blake2b(repr(band).encode(), digest_size=8).digest())
                 buckets[key].append(url)
@@ -288,6 +295,7 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         candidates = sorted(candidate_set)
 
     by_url = {p.url: p for p in pages}
+    vocab = functools.lru_cache(maxsize=4096)(lambda url: frozenset(words.get(url, ())))
     out = []
     for a, b in candidates:
         sa, sb = get(a), get(b)
@@ -298,7 +306,11 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         if not union:
             continue
         j = inter / union
-        if cfg["slot_floor"] <= j < cfg["near_duplicate"]:
+        # Дорвей, где город стоит через каждые пять слов, портит все шинглы:
+        # сходство 0,1, и худшие клоны не перепроверялись вовсе. Ниже порога
+        # пару перепроверяем, только если словарь почти тот же.
+        if (cfg["slot_floor"] <= j < cfg["near_duplicate"]
+                or j < cfg["slot_floor"] and _few_differ(vocab(a), vocab(b), cfg)):
             j = max(j, _without_slots(words.get(a, []), words.get(b, []), k, cfg,
                                       _anchor_words(by_url[a]), _anchor_words(by_url[b])))
         if j >= cfg["similar"]:
@@ -388,7 +400,7 @@ def _anchor_words(page) -> set:
     return {w.lower() for a in (getattr(page, "anchors", None) or ()) for w in tokenize(a)}
 
 
-def _short_runs(words: list, differing: set, longest: int = 3, linked: set = frozenset()) -> bool:
+def _short_runs(words: list, differing: set, longest: int = 6, linked: set = frozenset()) -> bool:
     run = 0
     for word in words:
         # Слово из текста ссылки не удлиняет кусок своего текста: список
@@ -397,6 +409,44 @@ def _short_runs(words: list, differing: set, longest: int = 3, linked: set = fro
         run = run + 1 if word in differing and word not in linked else 0
         if run > longest:
             return False
+    return True
+
+
+def _masked(words: list, slot: set) -> list:
+    """
+    Слова подстановки — меткой; несколько подряд — одной. Одно общее слово
+    между ними — часть того же значения: «Ростове-на-Дону» против «Уфе».
+    """
+    out = []
+    for i, w in enumerate(words):
+        if w in slot:
+            if out and out[-1] == "\x00":
+                continue
+            w = "\x00"
+        elif out and out[-1] == "\x00" and i + 1 < len(words) and words[i + 1] in slot:
+            continue
+        out.append(w)
+    return out
+
+
+def _few_differ(va: frozenset, vb: frozenset, cfg: dict) -> bool:
+    """
+    Различаются ли словари двух страниц лишь несколькими словами — при том,
+    что общих слов много: две страницы из одного заголовка различаются одним
+    словом, но общего текста, в котором стоит подстановка, у них нет.
+    """
+    limit = max(cfg["slot_words"], int(min(len(va), len(vb)) * cfg["slot_share"]))
+    if abs(len(va) - len(vb)) > limit or min(len(va), len(vb)) < 5 * limit:
+        return False
+    # Счёт с ранним выходом: у разных страниц лишнее слово находится сразу,
+    # а пар на четыреста страниц — восемьдесят тысяч.
+    for one, other in ((va, vb), (vb, va)):
+        extra = 0
+        for w in one:
+            if w not in other:
+                extra += 1
+                if extra > limit:
+                    return False
     return True
 
 
@@ -432,8 +482,10 @@ def _without_slots(a: list, b: list, k: int, cfg: dict,
     if not (few_words or rare):
         return 0.0
     k = k * 2 if is_dense(a) else k
-    sa = _shingles(["\x00" if w in only_a else w for w in a], k)
-    sb = _shingles(["\x00" if w in only_b else w for w in b], k)
+    # Подстановка разной длины — «Austin» и «St. Louis» — одна метка, а не
+    # одна и две: иначе каждый шингл через «St. Louis» не совпадал с парным.
+    sa = _shingles(_masked(a, only_a), k)
+    sb = _shingles(_masked(b, only_b), k)
     inter = len(sa & sb)
     union = len(sa) + len(sb) - inter
     return inter / union if union else 0.0
@@ -654,6 +706,11 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
             rest = _locale_split(p.url)[2]
             if "/" in rest:
                 sections[rest.split("/", 1)[0]].append(p)
+            elif rest:
+                # Плоские адреса (`/rent-town-1/`): раздел — первое слово адреса.
+                head = [t for t in re.split(r"[-_.]+", rest.lower()) if t]
+                if len(head) > 1:
+                    sections[("-", head[0])].append(p)
         for part in sections.values():
             if cfg["boilerplate_min_pages"] <= len(part) < len(members):
                 for url, share in measure(part).items():
@@ -681,9 +738,22 @@ _META_TAG = re.compile(r"<meta\b[^>]{0,2000}>", re.I)
 _REFRESH = re.compile(r"http-equiv\s*=\s*[\"']?refresh", re.I)
 # Кавычки у атрибута необязательны: минификатор HTML пишет
 # `content=0;url=/en/`, и главная-заглушка не узнавалась.
+# `url=` по спецификации HTML необязателен: `content="0; /path/"` браузер
+# тоже исполняет как переадресацию.
 _REFRESH_CONTENT = re.compile(
-    r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?"
+    r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*(?:url\s*=\s*)?['\"]?"
     r"([^\"'\s>]+)", re.I)
+# Заглушка на одном скрипте: весь <script> — это `location.replace("/x/")`
+# (`assign`) или `window.location.href = "/x/"`, и ничего больше. Условный переход
+# внутри приложения (`if (!user) location.href = …`) сюда не попадает.
+_JS_REDIRECT = re.compile(
+    r"^\s*(?:(?:window|self|top|document)\.)?location"
+    r"(?:\.(?:replace|assign)\(\s*([\"'])([^\"'\s]+)\1\s*\)|(?:\.href)?\s*=\s*([\"'])([^\"'\s]+)\3)"
+    r"\s*;?\s*$")
+# RSC-поток Next.js с ошибкой-редиректом (`"digest":"NEXT_REDIRECT;…"`):
+# redirect() сработал при отрисовке, и шапка с подвалом вокруг пустого
+# <main> — не содержание страницы.
+_NEXT_DIGEST = re.compile(r'digest\\*"\s*:\s*\\*"NEXT_REDIRECT;')
 # Где «редирект» — не редирект: его показывают, выключили или держат про запас.
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 
@@ -721,19 +791,20 @@ def _redirect_target(page) -> str:
         return ""
     # Дешёвые признаки первыми: вычищать исходник в сотни килобайт стоит,
     # только если в нём вообще есть что искать.
-    by_script = ("NEXT_REDIRECT" in raw
-                 and len((getattr(page, "text", "") or "").split()) < 30)
+    few_words = len((getattr(page, "text", "") or "").split()) < 30
+    by_script = "NEXT_REDIRECT" in raw and (few_words or bool(_NEXT_DIGEST.search(raw)))
+    by_js = few_words and "location" in raw
     # Подстрока ищется на порядок быстрее выражения без учёта регистра, а на
     # большинстве страниц `http-equiv` нет вовсе.
     # `equiv` и `EQUIV` покрывают и `HTTP-equiv`: раньше смешанный регистр
     # пропускался, и редирект не узнавался.
     by_meta = (("equiv" in raw or "EQUIV" in raw or "Equiv" in raw)
                and bool(_REFRESH.search(raw)))
-    if not by_script and not by_meta:
+    if not by_script and not by_meta and not by_js:
         return ""
     live = drop_spans(raw, NOT_LIVE)
     if by_meta:
-        for tag in _META_TAG.findall(drop_spans(live, INERT)):
+        for tag in _META_TAG.findall(drop_spans(drop_markup_attributes(live), INERT)):
             if not _REFRESH.search(tag):
                 continue
             found = _REFRESH_CONTENT.search(tag)
@@ -746,8 +817,15 @@ def _redirect_target(page) -> str:
     if by_script:
         for script in _SCRIPT.findall(live):
             found = _NEXT_REDIRECT.search(script)
-            if found:
+            if found and (few_words or _NEXT_DIGEST.search(script)):
                 return urljoin(page.url, found.group(1).strip())
+    if by_js:
+        for script in _SCRIPT.findall(live):
+            found = _JS_REDIRECT.match(script)
+            if found:
+                target = urljoin(page.url, (found.group(2) or found.group(4)).strip())
+                if url_key(target) != url_key(page.url):
+                    return target
     return ""
 
 
@@ -781,6 +859,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     soft = defaultdict(set)
     soft_inbound = set()
     landing_of = {}
+    file_pages = {q.url for q in pages
+                  if q.path and not re.match(r"index\.", os.path.basename(q.path), re.I)}
     for p in pages:
         targets = set()
         for link in p.links:
@@ -788,6 +868,13 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             # `/a/?utm_source=nav` — ссылка на `/a/`: если страницы с такими
             # параметрами нет, это та же страница с меткой в адресе.
             target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
+            # `/faq.html/` на файл `faq.html`: ключ тот же, что у страницы, но
+            # хостинг по такому адресу файла не отдаёт. Каталог `c.html/` с
+            # `index.html` внутри — отдаёт.
+            slash_ext = re.search(r"(?:^|/)(?:(index)|[^/]*)(\.html?)/$", urlsplit(link).path, re.I)
+            if target and slash_ext and (target in file_pages or slash_ext.group(1)):
+                key = key.split("?", 1)[0].rstrip("/")
+                key, target = key + ("/index" if slash_ext.group(1) else "") + slash_ext.group(2), None
             if target and target != p.url:
                 targets.add(target)
             elif not target:
@@ -799,7 +886,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         # в ней нет. Алиасы Hugo так и устроены, и всё за ними считалось
         # недостижимым.
         raw_landing = redirect_target(p)
-        landing = by_key.get(url_key(raw_landing)) if raw_landing else None
+        landing = (by_key.get(url_key(raw_landing))
+                   or by_key.get(url_key(raw_landing).split("?", 1)[0])) if raw_landing else None
         if landing and landing != p.url:
             targets.add(landing)
             landing_of[p.url] = landing
@@ -829,6 +917,10 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         if getattr(p, "nofollow", False):
             nofollow.add(p.url)
             followed[p.url] = {landing} if landing and landing != p.url else set()
+        elif landing and landing != p.url:
+            # Заглушку поисковик не читает как страницу — он уходит по
+            # редиректу. Ссылки из её тела никуда не ведут.
+            followed[p.url] = {landing}
         else:
             followed[p.url] = targets
         for t in targets:
@@ -841,6 +933,15 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             twin = by_key.get(url_key(href)) if href else None
             if twin and twin != p.url:
                 by_hreflang[p.url].add(twin)
+
+    # Поисковик верит hreflang, только если версия называет страницу в ответ,
+    # и не читает его на странице под noindex. Иначе связи нет: страница, на
+    # которую указал один hreflang с главной, оставалась «не сиротой».
+    by_page = {p.url: p for p in pages}
+    by_hreflang = defaultdict(set, {
+        source: {t for t in twins if source in by_hreflang.get(t, ())}
+        for source, twins in by_hreflang.items()
+        if not getattr(by_page[source], "noindex", False)})
 
     home = by_key.get(url_key(home_url)) if home_url else None
     # Главная-заглушка: ссылок из неё нет, и без этого шага недостижимым
@@ -892,7 +993,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     behind_nofollow = []
     if (nofollow or soft) and home:
         loose = walk(lambda u: set() if u in blocked
-                     else set(outbound.get(u, ())) | soft.get(u, set())
+                     else set(followed.get(u, ()) if u in landing_of and u not in nofollow
+                              else outbound.get(u, ())) | soft.get(u, set())
                      | by_hreflang.get(u, set()))
         behind_nofollow = sorted(u for u in loose if u not in depth)
     # Страницы, до которых ссылками <a> не дойти, а через hreflang — можно.
@@ -936,6 +1038,27 @@ _DYNAMIC = re.compile(r"^\[{1,2}(\.\.\.)?[^\]]*\]{1,2}$")
 MAX_ROUTE_ENTRIES = 200_000
 
 
+def _route_leaf(name: str):
+    """Пустая строка для файла страницы каталога (`index.html`, `page.js`), иначе None.
+
+    `index.xml` (RSS Hugo), `default.css` или `page.png` каталог маршрутом не
+    делают: на хостинге без своей страницы он 404.
+    """
+    stem, ext = os.path.splitext(name)
+    ext = ext[1:].lower()
+    if stem in _ROUTE_LEAF and (not ext or ext not in ASSET_EXTS
+                                or ext in ("html", "htm", "xhtml", "js", "mjs", "cjs", "md")):
+        return ""
+    return None
+
+
+def _listdir(path: str) -> list:
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
+
+
 def build_routes(root: str) -> tuple:
     """
     Маршруты, которые сборка знает, даже если HTML у них нет.
@@ -951,17 +1074,32 @@ def build_routes(root: str) -> tuple:
         return literal, dynamic
     seen = 0
     for current, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP]
         rel = os.path.relpath(current, root)
         base = [] if rel == "." else rel.replace(os.sep, "/").split("/")
+        # Каталог-симлинк обход не раскрывает, а сервер отдаёт его как обычный;
+        # пропущенный служебный (`venv/`) сервер тоже отдаёт. Если в нём есть
+        # страница каталога, это маршрут, а не 404.
+        for d in dirs:
+            target = os.path.join(current, d)
+            if (d in ALWAYS_SKIP or os.path.islink(target)) and any(
+                    _route_leaf(f) is not None for f in _listdir(target)
+                    if os.path.isfile(os.path.join(target, f))):
+                literal.add("/" + "/".join(base + [d]))
+        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP]
         # Каталог — маршрут, только если в нём есть страница или файл маршрута
         # (`index.html`, `page.js`): `/downloads/` с одним PDF внутри на живом
         # хостинге — 404. Сам файл — тоже адрес: `/download/setup.exe`.
-        names = ([[]] if not base else []) + [base + [os.path.splitext(f)[0]] for f in files]
+        # Битый симлинк os.walk кладёт в файлы: ссылка на него на хостинге —
+        # 404, а не маршрут. `oslo.json` и `photo.jpg` — только файлы: адреса
+        # /rent/oslo у них нет.
+        files = [f for f in files if os.path.exists(os.path.join(current, f))]
+        names = ([[]] if not base else []) + [
+            base + ["" if _route_leaf(f) is not None else os.path.splitext(f)[0]] for f in files
+            if f.rsplit(".", 1)[-1].lower() not in _DATA_EXTS]
         literal.update("/" + "/".join(base + [f]) for f in files)
         seen += len(files) + 1
         for segs in names:
-            if segs and segs[-1] in _ROUTE_LEAF:
+            if segs and segs[-1] == "":
                 segs = segs[:-1]
             segs = [x for x in segs if not (x.startswith("(") and x.endswith(")"))
                     and not x.startswith("@")]
@@ -994,6 +1132,8 @@ ASSET_EXTS = frozenset("""
     csv tsv md yml yaml toml ics vcf epub doc docx xls xlsx ppt pptx odt mp3 mp4 m4a ogg
     wav webm mov avi wasm webmanifest
 """.split())
+# У этих файлов нет адреса без расширения (в отличие от `page.js`, `about.md`).
+_DATA_EXTS = ASSET_EXTS - {"html", "htm", "xhtml", "js", "mjs", "cjs", "md"}
 
 
 def _is_file_link(key: str, dirs: set) -> bool:
@@ -1065,12 +1205,15 @@ def broken_links(pages: list, graph: dict, base_path: str = "",
         folded.setdefault(p.key.lower(), p.url)
     dirs = set(graph.get("unresolved_dirs") or ())
     sections = keys | {_parent(k) for k in keys}
+    folded_sections = {k.lower() for k in sections}
     paths = [os.path.dirname(os.path.abspath(p.path)) for p in pages if p.path]
     try:
         root = os.path.commonpath(paths) if paths else ""
     except ValueError:                         # разные диски Windows
         root = ""
     literal, dynamic = build_routes(root) if graph.get("unresolved_from") else (set(), [])
+    stub_aims = {p.url: url_key(redirect_target(p)).split("?", 1)[0]
+                 for p in pages if redirect_target(p)}
     base = "/" + base_path.strip("/") if base_path.strip("/") else ""
 
     def is_route(path):
@@ -1104,7 +1247,18 @@ def broken_links(pages: list, graph: dict, base_path: str = "",
                 local = "/" + path.lstrip("/").partition("/")[2]
                 if local != base and not local.startswith(base + "/"):
                     continue
-            if _parent(path) in sections and not is_route(path):
+            # Цель заглушки-редиректа — её единственное содержание: раздел,
+            # куда переехали страницы, выпал из сборки — типовая ошибка
+            # алиасов Hugo. Поблажка «раздел отдаёт другое приложение» — для
+            # ссылок <a>, а не для редиректа, который генератор написал сам.
+            # `/Rent/nowhere/` при разделе `rent/`: раздел тот же, только
+            # регистр другой, — на живом хостинге это всё равно 404.
+            # `/faq.html/`: `url_key` сняла бы `.html`, если бы за ним не шёл
+            # слэш, — файл `faq.html` по такому адресу хостинг не отдаёт.
+            slashed = path in dirs and re.search(r"\.html?$", path, re.I)
+            if ((_parent(path) in sections or _parent(path).lower() in folded_sections
+                 or stub_aims.get(source) == path)
+                    and (slashed or not is_route(path))):
                 bad.append(path)
         if bad:
             found[source] = sorted(set(bad))
@@ -1126,25 +1280,26 @@ def wrong_form_issues(pages: list, case_twins: dict) -> list:
     issues = []
     for page in pages:
         written = []
-        for path, twin in sorted(set(case_twins.get(page.url, ()))):
+        pairs = sorted(set(case_twins.get(page.url, ())))
+        for path, twin in pairs:
             written.append(tr("{a0} вместо {a1}", a0=_local(path), a1=urlsplit(twin).path))
         if written:
             more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
-            issues.append(("warning", page.url, "wrong-link-form", tr(
+            issues.append(("warning", page.url, "wrong-link-form", Said(tr(
                 "ссылки расходятся со страницей регистром букв: {a0}{a1}. GitHub Pages, "
                 "S3 и nginx на Linux различают регистр и отдают на них 404",
-                a0=", ".join(written[:3]), a1=more)))
-        written = sorted({tr("{a0} вместо {a1}", a0=path, a1=urlsplit(by_key[key]).path)
-                          for key, path in page.__dict__.get("_wrong_forms", ())
-                          if key in by_key})
+                a0=", ".join(written[:3]), a1=more), (_local(p) for p, _ in pairs))))
+        forms = {(path, urlsplit(by_key[key]).path)
+                 for key, path in page.__dict__.get("_wrong_forms", ()) if key in by_key}
+        written = sorted({tr("{a0} вместо {a1}", a0=path, a1=aim) for path, aim in forms})
         if written:
             more = tr(" и ещё {a0}", a0=len(written) - 3) if len(written) > 3 else ""
-            issues.append(("warning", page.url, "wrong-link-form", tr(
+            issues.append(("warning", page.url, "wrong-link-form", Said(tr(
                 "ссылки в форме, которой нет в сборке: {a0}{a1}. Сервер сводит формы "
                 "адреса только по своим правилам: GitHub Pages и S3 отдают "
                 "`about/index.html` по /about/, но не по /about.html, а `faq.html` — "
                 "по /faq.html, но не по /faq/; на такие ссылки они отвечают 404",
-                a0=", ".join(written[:3]), a1=more)))
+                a0=", ".join(written[:3]), a1=more), (p for p, _ in forms))))
     return issues
 
 
@@ -1191,6 +1346,22 @@ def _other_host(pages: list) -> str:
     return host if n >= max(5, len(pages) * 0.3) else ""
 
 
+def _home_resolves(pages: list, unresolved: set, base_path: str) -> bool:
+    """
+    Главная лежит в корне каталога, и её ссылки почти все сходятся: корень
+    выбран верно, а короткие ссылки — ошибка одного раздела (`/de/` ссылается
+    на /rent/… без префикса), а не сдвиг всего сайта.
+    """
+    home = "/" + base_path.strip("/") if base_path.strip("/") else "/"
+    for p in pages:
+        if (urlsplit(p.key).path or "/") != home:
+            continue
+        host = urlsplit(p.key).netloc
+        own = [k for k in (url_key(u) for u in p.links) if urlsplit(k).netloc == host]
+        return bool(own) and sum(k in unresolved for k in own) * 2 < len(own)
+    return False
+
+
 def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
     """
     Самый частый неверный вердикт: каталог не соответствует корню сайта.
@@ -1223,7 +1394,7 @@ def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
         if tail:
             shifted.add(f"//{host}/{tail}")
     hits = len(unresolved & shifted)
-    if hits >= max(2, len(unresolved) * 0.5):
+    if hits >= max(2, len(unresolved) * 0.5) and not _home_resolves(pages, unresolved, base_path):
         prefix = "/" + base_path.strip("/") if base_path.strip("/") else ""
         if prefix:
             # Сайт живёт под префиксом, а ссылки его не несут: на живом сайте
@@ -1239,6 +1410,12 @@ def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
             first = (os.path.commonpath(paths) if paths else ".").replace(os.sep, "/")
         except ValueError:
             first = "."
+        # Общий каталог страниц — не корень, если все адреса начинаются с его
+        # имени: `dist/client` при адресах `/client/…` значит, что корень — `dist`.
+        leading = {p.key.lstrip("/").partition("/")[2].split("/")[0] for p in pages}
+        if len(leading) == 1 and "/" in first and first.rsplit("/", 1)[-1] == unquote(
+                next(iter(leading))):
+            first = first.rsplit("/", 1)[0]
         return (tr("похоже, каталог не соответствует корню сайта: ссылки на страницах короче их собственных адресов на один сегмент. Из-за этого все страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n    Проверь, какой каталог отображается в корень {a0} — сейчас это {a1}", a0=pages[0].url.split('/')[2], a1=first))
     return ""
 
@@ -1335,13 +1512,23 @@ def _slug(url: str) -> str:
     return urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1].lower()
 
 
+_TARGET_SHINGLES = [None, None, None]   # слова, k, шинглы последней цели
+
+
 def _text_overlap(a, b, k: int = None) -> float:
     """Доля общих словесных n-грамм двух страниц (Jaccard)."""
     k = k or CONFIG["shingle_size"]
-    sa, sb = _shingles(list(a.words or ()), k), _shingles(list(b.words or ()), k)
+    # Шаблон, ведущий canonical всех страниц на главную, сравнивает с одной и
+    # той же целью тысячи страниц: её шинглы считаются один раз, а не на
+    # каждую страницу — иначе проверка была квадратичной.
+    words = b.words
+    if _TARGET_SHINGLES[0] is not words or _TARGET_SHINGLES[1] != k:
+        _TARGET_SHINGLES[:] = [words, k, _shingles(list(words or ()), k)]
+    sa, sb = _shingles(list(a.words or ()), k), _TARGET_SHINGLES[2]
     if not sa or not sb:
         return 0.0
-    return len(sa & sb) / len(sa | sb)
+    common = len(sa & sb)
+    return common / (len(sa) + len(sb) - common)
 
 
 def _a_variant_of(page, target) -> bool:
@@ -1362,7 +1549,19 @@ def _a_variant_of(page, target) -> bool:
     prefix = home.rstrip("/") + "/"
     if path.startswith(prefix) and _VARIANT_TAIL.match(path[len(prefix):].strip("/")):
         return True
-    return _text_overlap(page, target) >= CONFIG["near_duplicate"]
+    # Шаблонная копия под другой запрос (`/rent/hamburg/` → `/rent/berlin/`)
+    # почти совпадает текстом, но у неё свои title и H1: это не вариант.
+    return (_text_overlap(page, target) >= CONFIG["near_duplicate"]
+            and not _another_subject(page, target))
+
+
+def _another_subject(page, target) -> bool:
+    """Разные и title, и H1 — страница о другом, а не вторая копия той же."""
+    def h1(p):
+        return next((t for lvl, t in p.headings if lvl == 1), "")
+    norm = lambda s: " ".join((s or "").lower().split())
+    return (bool(norm(page.title)) and norm(page.title) != norm(target.title)
+            and bool(norm(h1(page))) and norm(h1(page)) != norm(h1(target)))
 
 
 _VARIANT_TAIL = re.compile(
@@ -1389,8 +1588,27 @@ def misdirected(pages: list) -> dict:
     return out
 
 
+class _Bare:
+    """Кусок текста, который `text_volume` меряет как страницу."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.word_count = len(tokenize(text))
+
+
 _CLOSED_BY_DESIGN = {"print", "print.html", "toc", "toc.html", "search", "search.html",
                      "404", "404.html", "search-results"}
+
+
+_INVISIBLE = re.compile("[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
+
+
+def _wide_note(text: str, width: int) -> str:
+    """Пояснение, когда ширина не равна числу знаков: иероглиф — два места."""
+    count = len((text or "").strip())
+    if count and width != count:
+        return tr(" ({a0} знаков: иероглифы и полноширинные считаются за два)", a0=count)
+    return ""
 
 
 def technical_issues(pages: list, cfg: dict = None, language: str = "",
@@ -1410,6 +1628,10 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
 
     titles = defaultdict(list)
     descriptions = defaultdict(list)
+    # Шапка, меню и подвал страницы без <main>: одинаковые у многих страниц —
+    # обвязка сайта, и в объём статьи она не входит.
+    frames = Counter(p.framed for p in pages
+                     if not p.chrome and getattr(p, "framed", ""))
     for p in pages:
         # Отдельные noindex/canonical-находки не отменяют намеренную
         # консолидацию URL и не делают её дублем индексируемой страницы.
@@ -1419,12 +1641,21 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         # разных стран не конкурируют (Congo: 147 «дублей» из пяти языков).
         language = (p.lang or "").lower().split("-")[0]
         if not language:
-            first = urlsplit(p.url).path.strip("/").split("/")[0].lower()
-            language = first if _is_locale(first) else ""
+            # Без lang язык — по тексту: `/ca/`, `/de/`, `/pa/` бывают и
+            # штатами. Префикс пути — только когда текст не говорит ничего.
+            from . import langid
+            head = (p.title or "") + " " + (p.description or "")
+            language = (langid.identify(" ".join(list(p.paragraphs or [])[:30]))[0]
+                        or langid.identify(head, min_tokens=8)[0])
+            if not language:
+                first = urlsplit(p.url).path.strip("/").split("/")[0].lower()
+                language = first if _is_locale(first) else ""
+        # Невидимые знаки не делают заголовок другим: «Berlin&#8203;:» на
+        # экране то же, что «Berlin:».
         if p.title:
-            titles[(language, p.title.strip().lower())].append(p.url)
+            titles[(language, _INVISIBLE.sub("", p.title).strip().lower())].append(p.url)
         if p.description:
-            descriptions[(language, p.description.strip().lower())].append(p.url)
+            descriptions[(language, _INVISIBLE.sub("", p.description).strip().lower())].append(p.url)
 
     for p in pages:
         for note in p.notes:
@@ -1439,22 +1670,26 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         if p.nosnippet:
             issues.append(("critical", p.url, "nosnippet",
                            tr("запрещён сниппет: страница может быть в индексе, но в ответы ИИ-поиска и в расширенную выдачу не попадёт")))
-        if not p.title:
+        # Title из одних невидимых знаков (U+200B, BOM, &shy;) не виден в выдаче.
+        if not p.title or not display_width(p.title):
             issues.append(("critical", p.url, "no-title", tr("нет title")))
         else:
             n = display_width(p.title)
             if n < bounds["title_min"]:
-                issues.append(("warning", p.url, "title-short", tr("title {a0} символов", a0=n)))
+                issues.append(("warning", p.url, "title-short",
+                               tr("title {a0} символов", a0=n) + _wide_note(p.title, n)))
             elif n > bounds["title_max"]:
                 issues.append(("info", p.url, "title-long",
-                               tr("title {a0} символов, обрежется в выдаче", a0=n)))
-        if not p.description:
+                               tr("title {a0} символов, обрежется в выдаче", a0=n)
+                               + _wide_note(p.title, n)))
+        if not p.description or not display_width(p.description):
             issues.append(("warning", p.url, "no-description", tr("нет meta description")))
         else:
             n = display_width(p.description)
             if n < bounds["description_min"] or n > bounds["description_max"]:
                 issues.append(("info", p.url, "description-length",
-                               tr("description {a0} символов", a0=n)))
+                               tr("description {a0} символов", a0=n)
+                               + _wide_note(p.description, n)))
 
         h1 = [t for lvl, t in p.headings if lvl == 1]
         if not p.headings:
@@ -1471,11 +1706,16 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
             target = by_key.get(url_key(p.canonical))
             if p.url in wrong:
                 many = collected[wrong[p.url]]
+                clone = _text_overlap(p, target) >= cfg["near_duplicate"]
                 issues.append(("critical" if many > 1 else "warning", p.url, "canonical-elsewhere",
-                               tr("canonical указывает на {a0}, а это другая страница: другое имя "
+                               (tr("canonical указывает на {a0}, а это другая страница: текст "
+                                   "почти тот же, но другие имя, title и H1 — копия шаблона под "
+                                   "другой запрос. Страница просит убрать её из индекса",
+                                   a0=target.url) if clone else
+                                tr("canonical указывает на {a0}, а это другая страница: другое имя "
                                   "и почти нет общего текста. Так бывает, когда шаблон берёт "
                                   "адрес из чужой переменной; страница просит убрать её из "
-                                  "индекса", a0=target.url)
+                                  "индекса", a0=target.url))
                                + (tr(" (на эту же страницу ведут canonical ещё {a0} стр.)",
                                      a0=many - 1) if many > 1 else "")))
             elif target is not None and _consolidated(p, target):
@@ -1497,12 +1737,25 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
                               "считает эту страницу копией того адреса, в sitemap она не идёт",
                               a0=p.canonical, a1=p.__dict__["_canonical_origin"])))
         volume = text_volume(p, language)
+        if not p.chrome and getattr(p, "framed", "") and frames[p.framed] >= 3:
+            rest = volume - text_volume(_Bare(p.framed), language)
+            if rest > 0:
+                volume = rest
         if volume < cfg["thin_words"]:
             issues.append(("warning", p.url, "thin",
                            tr("объём текста ≈ {a0} — тонкая страница", a0=volume)))
 
     issues = [i for i in issues if not (i[1] in shells and i[2] in SHELL_DEPENDENT)]
 
+    for groups in (titles, descriptions):
+        # Страница без языка — не другой перевод, если язык у этого текста один.
+        named = defaultdict(set)
+        for language, text in groups:
+            named[text].add(language)
+        for text, languages in named.items():
+            if "" in languages and len(languages) == 2:
+                other = next(l for l in languages if l)
+                groups[(other, text)] += groups.pop(("", text))
     for title, urls in sorted(titles.items()):
         if len(urls) > 1:
             for u in sorted(urls):
@@ -1527,12 +1780,12 @@ CODE_WEIGHT = {
     "hreflang-static-cluster": 4, "hreflang-canonical-conflict": 5,
     "hreflang-no-self": 5, "hreflang-no-return": 6, "hreflang-in-body": 6,
     "hreflang-target-blocked": 7, "hreflang-missing": 12, "hreflang-bad-code": 13,
-    "hreflang-lang-mismatch": 15, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
+    "hreflang-lang-mismatch": 15, "hreflang-conflict": 14, "hreflang-relative": 13, "hreflang-unknown-target": 19, "lang-script-mismatch": 12, "lang-text-mismatch": 12, "fact-drift": 20,
     "robots-blocks-page": 5, "orphan": 6, "unreachable": 7, "hub-missing-links": 8,
     "jsonld-mismatch": 9, "microdata-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "redirect-home": 16, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -1899,7 +2152,9 @@ def _collapse_parked(issues: list, notes: list, pages: list, cfg: dict) -> list:
         message += " " + tr(
             "У {a0} из них canonical ведёт на страницу, которой среди файлов нет.",
             a0=orphaned)
-    kept.append(("critical", "hreflang", "translations-parked", message))
+    # Предмет — языки: перевод, запаркованный после базовой линии, — новая
+    # находка, а не та же самая с другим числом в тексте.
+    kept.append(("critical", "hreflang", "translations-parked", Said(message, by_lang)))
     notes.append(tr(
         "запаркованные переводы: {a0} страниц(ы) сведены в одну находку, "
         "снято {a1} повторов — у каждой страницы было до семи находок "
@@ -1963,6 +2218,11 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
     for prefix in sections:
         if not any(prefix.startswith(c) for c in chosen):
             chosen.append(prefix)
+    # Каждый раздел меньше половины, а вместе — половина сайта и больше: это
+    # закрытый сайт, а не решение о разделе. Чем больше веток закрыто, тем
+    # зеленее был отчёт. Сведением остаются только разделы с именем версии.
+    if sum(total[c] for c in chosen) * 2 >= len(pages):
+        chosen = [c for c in chosen if _VERSION_BRANCH.match(c.strip("/").rsplit("/", 1)[-1])]
     if not chosen:
         return issues
     for prefix in chosen:
@@ -1984,8 +2244,11 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
 CLOSED_GROUP_ENTITIES = 3
 
 # Имена веток, которые выдают версии документации: `/docs/1.2/`, `/v3/`, `/next/`.
+# Голое число из трёх цифр и больше (`/city/101/`) — номер в каталоге, а не
+# версия; год (`/2019/`) — архив.
 _VERSION_BRANCH = re.compile(
-    r"^(v?\d+(?:[._-]\d+)*(?:[._-]x)?|next|dev|nightly|canary|legacy|archive|old)$", re.I)
+    r"^(v\d+(?:[._-]\d+)*(?:[._-]x)?|\d+(?:[._-]\d+)+(?:[._-]x)?|\d{1,2}(?:[._-]x)?"
+    r"|(?:19|20)\d\d|next|dev|nightly|canary|legacy|archive|old)$", re.I)
 
 
 def _closed_groups(closed: set, pages: list) -> tuple:
@@ -2012,7 +2275,7 @@ def _closed_groups(closed: set, pages: list) -> tuple:
                 if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
         pages_closed = sum(shut[e] for e in full)
         if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
-                and len(full) * 2 < len(entities)):
+                and len(full) * 2 <= len(entities)):
             chosen[parent] = sorted(full)
     # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
     for parent in sorted(chosen, key=len):
@@ -2027,7 +2290,7 @@ def _catalogue_branches(closed: set, pages: list) -> set:
     """
     Закрытые ветки, которые `noindex-group` должен увидеть, даже если каждая
     сама по себе — большой закрытый раздел: рядом стоят такие же открытые
-    ветки (не меньше трёх страниц, и их больше, чем закрытых), и ни одна
+    ветки (не меньше трёх страниц, и их не меньше, чем закрытых), и ни одна
     закрытая не названа как версия документации. Пути веток — `/visa/alpha/`.
     """
     chosen, by_parent, size, _ = _closed_groups(closed, pages)
@@ -2036,7 +2299,7 @@ def _catalogue_branches(closed: set, pages: list) -> set:
         if any(_VERSION_BRANCH.match(e[-1]) for e in full):
             continue
         shaped = sum(1 for e in by_parent[parent] if e not in full and size[e] >= 3)
-        if shaped > len(full):
+        if shaped >= len(full):
             out |= {"/" + "/".join(e) + "/" for e in full}
     return out
 
@@ -2050,7 +2313,7 @@ def collapse_closed_groups(issues: list, pages: list) -> list:
     подряд в «чинить в этом порядке». Ветка `/visa/alpha/` закрыта, если
     закрыто не меньше 90% её страниц (их не меньше трёх). Когда в одном
     разделе таких веток три и больше, закрытых страниц не меньше двадцати, а
-    открытых веток рядом больше, чем закрытых, — находка одна, критичная:
+    открытых веток рядом не меньше, чем закрытых, — находка одна, критичная:
     решение это или ошибка, без sitemap не видно. Страницы ветки понижаются
     до сведений. sitemap, из которого ветки убраны, понижает и саму находку.
     """
@@ -2253,7 +2516,7 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     # пустоту — её единственная находка, и она остаётся.
     stubs = {p.url for p in pages if p.url in closed and redirect_target(p)}
     return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED
-            or (i[2] == "broken-link" and i[1] in stubs)]
+            or (i[2] in ("broken-link", "redirect-home") and i[1] in stubs)]
 
 
 def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
@@ -2301,6 +2564,10 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
         path = (url or "") if "://" not in (url or "") else (urlsplit(url).path or "/")
         if base and path.startswith(base + "/"):
             path = path[len(base):]
+        # Находка о файле сайта (`robots.txt`) адресована именем без «/»:
+        # правило `/robots.txt` или полный адрес с ней не сходились.
+        if path and path[0] != "/":
+            path = "/" + path
         return path
 
     def pattern_of(pattern):
@@ -2320,7 +2587,9 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
         hit = False
         for code in (issue[2], "*"):
             rule = rules.get(code)
-            if rule is True or (rule and any(
+            # Находка о сайте целиком (адрес пуст) — не главная: её снимает
+            # только `true`, а не шаблон `/`, который пустой путь тоже ловил.
+            if rule is True or (rule and path and any(
                     fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase(path.rstrip("/"), p.rstrip("/"))
                     for p in rule)):
                 hit = True
@@ -2372,6 +2641,68 @@ def validate_config(cfg: dict) -> list:
     need(merged["description_min"] < merged["description_max"], "description_max",
          tr("верхняя граница должна быть больше нижней"))
     return notes
+
+
+def redirect_chain(page, by_key: dict, hops: int = 20) -> tuple:
+    """
+    Куда в итоге ведёт заглушка: (адреса по пути, петля ли). Каждый шаг —
+    `redirect_target` следующей заглушки сборки; цель вне сборки или обычная
+    страница — конец цепочки.
+    """
+    chain, seen = [page.url], {page.key}
+    current = page
+    for _ in range(hops):
+        target = redirect_target(current)
+        key = url_key(target) if target else ""
+        nxt = (by_key.get(key) or by_key.get(key.split("?", 1)[0])) if key else None
+        if nxt is None:
+            break
+        if nxt.key in seen:
+            return chain + [nxt.url], True
+        chain.append(nxt.url)
+        seen.add(nxt.key)
+        if not redirect_target(nxt):
+            break
+        current = nxt
+    return chain, False
+
+
+def redirect_stub_issues(pages: list, home_url: str = None) -> list:
+    """
+    Заглушки, у которых плоха сама цель, хотя она и есть в сборке.
+
+    Петля заглушек (`/a/` → `/b/` → `/a/`) — ERR_TOO_MANY_REDIRECTS в
+    браузере и ошибка для поисковика, а находки о ней не было: каждая цель
+    «в сборке есть». Заглушка на главную — мягкий 404 (так же оценивает и
+    `diff` правило vercel.json на главную); заглушка с текстом страницы —
+    чаще всего ошибка шаблона, превратившая статьи в редиректы.
+    """
+    by_key = {p.key: p for p in pages}
+    home = url_key(home_url) if home_url else ""
+    issues = []
+    for page in sorted(pages, key=lambda p: p.url):
+        target = redirect_target(page)
+        if not target:
+            continue
+        chain, loop = redirect_chain(page, by_key)
+        if loop:
+            shown = " → ".join(urlsplit(u).path or "/" for u in chain)
+            issues.append(("warning", page.url, "broken-link", tr(
+                "заглушка-редирект ведёт по кругу: {a0}. Браузер покажет ошибку «слишком "
+                "много переадресаций», поисковик страницу не получит", a0=shown)))
+            continue
+        if home and page.key != home and url_key(target) == home:
+            words = len((getattr(page, "text", "") or "").split())
+            if words >= 50:
+                issues.append(("warning", page.url, "redirect-home", tr(
+                    "страница с текстом (около {a0} слов) сразу перебрасывает на главную — "
+                    "текста поисковик не увидит, а редирект на главную он считает мягким "
+                    "404. Чаще всего это ошибка шаблона", a0=words)))
+            else:
+                issues.append(("info", page.url, "redirect-home", tr(
+                    "заглушка-редирект ведёт на главную — поисковик считает такой "
+                    "редирект мягким 404: лучше вести на ближайшую по смыслу страницу")))
+    return issues
 
 
 def run_all(pages: list, home_url: str = None, cfg: dict = None,
@@ -2456,6 +2787,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                 "этого раздела в сборке нет. Если раздел собирает этот же генератор, он "
                 "выпал из сборки, и на живом сайте это 404; если его отдаёт другое "
                 "приложение, всё в порядке.", a0=base_path.rstrip("/") + "/" + section + "/", a1=n))
+    issues += redirect_stub_issues(pages, home_url)
     if graph.get("home_redirected_from"):
         notes.append(tr(
             "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "
@@ -2560,16 +2892,20 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                         if j >= cfg["near_duplicate"] and a.url not in bare
                         and b.url not in bare
                         and tuple(sorted((a.url, b.url))) not in regional])
+    group_note = ""
     if groups:
         biggest = max(len(g) for g in groups)
-        notes.append(
-            tr("почти-дубли образуют {a0} групп(ы), в самой большой {a1} страниц. Чинится по группам: одна остаётся, остальные переписываются под другой интент или отдают ей canonical.", a0=len(groups), a1=biggest))
+        group_note = tr("почти-дубли образуют {a0} групп(ы), в самой большой {a1} страниц. Чинится по группам: одна остаётся, остальные переписываются под другой интент или отдают ей canonical.", a0=len(groups), a1=biggest)
+        notes.append(group_note)
 
     # Две пустые оболочки совпадают на 100% — и это ничего не значит.
     # Пока они оставались в `duplicates`, счётчик «похожих пар» показывал
     # сотни находок там, где находка ровно одна: пустой HTML.
+    # Региональные версии — тоже: заметка говорит «не дубли», а счётчик и
+    # таблица «похожих пар» показывали их красным.
     pairs = [(a, b, j) for a, b, j in dupes["pairs"]
-             if a.url not in bare and b.url not in bare]
+             if a.url not in bare and b.url not in bare
+             and tuple(sorted((a.url, b.url))) not in regional]
 
     # Заглушка-редирект — не страница: человек и поисковик видят то, куда она
     # ведёт. На каталоге виз девять языковых `/connect` и корень давали 40
@@ -2577,7 +2913,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # которые живой сайт отдаёт кодом 307.
     stubs = {p.url for p in pages if redirect_target(p)}
     if stubs:
-        issues = [i for i in issues if i[1] not in stubs or i[2] == "broken-link"]
+        issues = [i for i in issues if i[1] not in stubs or i[2] in ("broken-link", "redirect-home")]
         notes.append(tr(
             "заглушек-редиректов: {a0}. Как страницы они не проверялись — "
             "поисковик видит то, куда они ведут.", a0=len(stubs)))
@@ -2602,6 +2938,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         "graph": graph,
         "unique_share": boiler["shares"],
         "duplicates": pairs,
+        "duplicate_group_note": group_note,
         "duplicate_method": dupes["method_id"],
         "duplicate_method_label": dupes["method"],
         # Пары крупных групп-клонов показаны выборкой: «похожих пар» тогда

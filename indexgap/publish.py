@@ -124,12 +124,19 @@ def is_expired(page, today: str = None) -> bool:
         day = _day(meta.get(key, ""))
         if day and day < today:
             return True
-    for part in (page.robots or "").split(","):
-        name, sep, value = part.partition(":")
-        if sep and name.strip().lower() == "unavailable_after":
-            day = _day(value)
-            if day and day < today:
-                return True
+    # Дата по RFC 822/850 сама содержит запятую (`Mon, 21 Sep 2020 …`), а
+    # директивы robots делятся запятыми: значение берётся по кускам, пока не
+    # прочитается.
+    robots = page.robots or ""
+    for found in re.finditer(r"(?:^|,)\s*unavailable_after\s*:", robots, re.I):
+        rest = robots[found.end():].split(",")
+        day = ""
+        for n in range(1, min(len(rest), 3) + 1):
+            day = _day(",".join(rest[:n]))
+            if day:
+                break
+        if day and day < today:
+            return True
     return False
 
 
@@ -166,9 +173,32 @@ _SHARD_NAME = re.compile(r"^sitemap-\d+\.xml$")
 _LASTMOD = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$")
 
 
+def ascii_url(url: str) -> str:
+    """
+    Адрес с хостом в punycode: протокол sitemap требует URL по RFC 3986, а
+    путь и так закодирован. `https://пример.example/` → `https://xn--e1afmkfd.example/`.
+    """
+    parts = urlparse(url)
+    host = parts.hostname or ""
+    if not host or host.isascii():
+        return url
+    try:
+        encoded = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return url
+    netloc = parts.netloc
+    at = netloc.rfind("@") + 1
+    rest = netloc[at:]
+    port = rest[len(rest.split(":")[0]):] if not rest.startswith("[") else ""
+    return parts._replace(netloc=netloc[:at] + encoded + port).geturl()
+
+
 def _shard_loc(base_url: str, public_prefix: str, name: str) -> str:
-    prefix = (public_prefix or "").strip("/")
-    parts = [base_url.rstrip("/")]
+    from urllib.parse import quote
+    # Префикс — путь на сайте: пробел и кириллица в <loc> кодируются, как в
+    # адресах страниц.
+    prefix = quote((public_prefix or "").strip("/"), safe="/%-._~!$&'()*+,;=:@")
+    parts = [ascii_url(base_url).rstrip("/")]
     if prefix:
         parts.append(prefix)
     parts.append(name)
@@ -246,9 +276,14 @@ def foreign_sitemap(out_dir: str, manifest: dict, base_dir: str = None) -> str:
 
 def build_sitemap(pages: list, out_dir: str, base_url: str,
                   manifest: dict = None, today: str = None,
-                  public_prefix: str = "", base_dir: str = None) -> dict:
+                  public_prefix: str = "", base_dir: str = None,
+                  force: bool = False) -> dict:
     """
     Пишет sitemap.xml (или sitemap.xml-индекс + шарды) в out_dir.
+
+    Шард `sitemap-N.xml`, который уже лежит в out_dir и не записан в манифесте
+    за этим каталогом, — чужой: без `force` сборка отказывается (SourceError),
+    ничего не записав.
 
     `public_prefix` — путь, по которому шарды будут доступны на сайте, если
     out_dir не совпадает с корнем публикации. Без него индекс ссылается
@@ -305,7 +340,7 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
 
     head = ['<?xml version="1.0" encoding="UTF-8"?>',
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    rows = [f"  <url><loc>{escape(url)}</loc><lastmod>{escape(lastmod)}</lastmod></url>"
+    rows = [f"  <url><loc>{escape(ascii_url(url))}</loc><lastmod>{escape(lastmod)}</lastmod></url>"
             for url, lastmod in entries]
 
     def write_urlset(path, chunk):
@@ -340,6 +375,16 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         size += weight
     shards.append(chunk)
 
+    own = set(_own_files(out_dir, manifest, base_dir))
+    foreign = [os.path.join(out_dir, f"sitemap-{i}.xml") for i in range(1, len(shards) + 1)
+               if len(shards) > 1 and f"sitemap-{i}.xml" not in own
+               and os.path.exists(os.path.join(out_dir, f"sitemap-{i}.xml"))]
+    if foreign and not force:
+        raise SourceError(tr(
+            "{a0} уже существует, и написал его не indexgap. Заменять без спроса не "
+            "стал.\n    Если заменить нужно — добавь --force; если нет — укажи другой "
+            "каталог через --out-dir.", a0=foreign[0]))
+
     if len(shards) == 1:
         write_urlset(os.path.join(out_dir, "sitemap.xml"), shards[0])
     else:
@@ -371,6 +416,8 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
             pass
     names = sorted(os.path.basename(p) for p in written)
     new_manifest["_shards"] = names
+    # Сколько адресов ушло в sitemap: следующий прогон сравнит, не обвалился ли он.
+    new_manifest["_included"] = len(entries)
     outputs = manifest.get("_outputs")
     outputs = {k: v for k, v in outputs.items() if isinstance(v, list)} \
         if isinstance(outputs, dict) else {}

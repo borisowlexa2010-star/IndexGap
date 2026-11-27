@@ -33,9 +33,9 @@ MESSAGES = {
         '</tbody></table></div><p class="note">Profiles use different thresholds on '
         'purpose: 250 words is normal for a guide and absurd for an event card, and '
         'fact-checking is meaningless where there is no dataset.</p>',
-    '</tbody></table></div><p class="note">Разбор адресный: конкретные URL по каждой причине лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>':
+    '</tbody></table></div><p class="note">Разбор адресный: конкретные URL по каждой причине (до 50 на причину) лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>':
         '</tbody></table></div><p class="note">The breakdown is addressable: the '
-        'actual URLs behind each cause are in the JSON. A page can land in several '
+        'actual URLs behind each cause (up to 50 per cause) are in the JSON. A page can land in several '
         'causes at once — that is normal.</p>',
     '</tbody></table></div><p class="note">Страница, которой нет нигде, — почти всегда техническая проблема. Страница, которая есть в одном индексе и нет в другом, — уже вопрос оценки качества или скорости конкретного поисковика, и техническими правками обычно не лечится.</p>':
         '</tbody></table></div><p class="note">A page missing everywhere is almost '
@@ -96,6 +96,11 @@ MESSAGES = {
         'cured differently — which is why it matters where exactly they happen. Note '
         'that the Search Console “Pages” export is an impressions report: a page that '
         'is indexed but had no impressions will not appear in it.</p>',
+    '<p class="note">Показано разделов: {a0} из {a1}. Остальные — в JSON.</p>':
+        '<p class="note">Showing {a0} of {a1} sections. The rest are in the JSON.</p>',
+    '<p class="note">Принято намеренно (ignore в indexgap.json): {a0} — в счёт не идут; список — в JSON, в поле accepted.</p>':
+        '<p class="note">Accepted on purpose (ignore in indexgap.json): {a0} — not '
+        'counted; the list is in the JSON, field accepted.</p>',
     '<p class="note">Показано 60 пар из {a0}. Остальные — в JSON.</p>':
         '<p class="note">Showing 60 pairs of {a0}. The rest are in the JSON.</p>',
     '<p class="note">Показано {a0} из {a1}. Полный список — в JSON рядом с отчётом.</p>':
@@ -158,6 +163,10 @@ MESSAGES = {
         "The link leads to a page of the build, but in a form the host does not serve: other letter case, /about.html for about/index.html, /faq/ for faq.html. The checks treat these forms as one page; the live server does not, and answers 404.",
     "Canonical указывает на саму страницу, но в форме, которой раскладка файлов не отдаёт: /about/ при about.html, /a.html или /a при a/index.html. Живой сервер отвечает на этот адрес 404 или редиректом, а он же уходит в sitemap и hreflang.":
         "The canonical points at the page itself, but in a form the file layout does not serve: /about/ for about.html, /a.html or /a for a/index.html. The live server answers that address with a 404 or a redirect, and the same address goes into the sitemap and hreflang.",
+    "Заглушка-редирект ведёт на главную. Поисковик считает редирект удалённой страницы на главную мягким 404; заглушка с текстом статьи — обычно ошибка шаблона.":
+        "A redirect stub leads to the home page. A search engine treats a removed "
+        "page redirected to the home page as a soft 404; a stub that still carries "
+        "an article's text is usually a template bug.",
     "Ссылка ведёт на страницу, которой в сборке нет: на живом сайте это 404. Чаще всего шаблон ссылается на строку данных, которую фильтр не пропустил в генерацию. Убери ссылку из шаблона или верни страницу.":
         "The link points at a page the build does not have: a 404 on the live "
         "site. Most often the template links to a data row that a filter kept out "
@@ -238,9 +247,9 @@ MESSAGES = {
         "a canonical here would hide the very pages they were built for. If the "
         "query is the same, keep one page and send the rest to it.",
     "Слишком много кликов от главной.": "Too many clicks from the home page.",
-    "Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots.":
+    "Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots или заголовок X-Robots-Tag.":
         "The page is closed to indexing. If that is a template mistake, remove the "
-        "robots meta tag.",
+        "robots meta tag or the X-Robots-Tag header.",
     "Текста меньше порога. Порог правится в indexgap.json — для карточки товара 250 слов абсурдны, для гайда нормальны.":
         "Less text than the threshold. The threshold lives in indexgap.json — 250 "
         "words is absurd for a product card and normal for a guide.",
@@ -310,8 +319,8 @@ MESSAGES = {
         "title, H1 or description changed on many pages of one template at once — a "
         "template change. Make sure it is intended: the engine will re-evaluate all "
         "these pages.",
-    "Критичная находка `check`, которой в старой сборке не было.":
-        "A critical `check` finding that the old build did not have.",
+    "Находка `check`, которой в старой сборке не было.":
+        "A `check` finding that the old build did not have.",
     "Страница была закрыта от индекса и открылась.":
         "The page was closed to indexing and is now open.",
     "Новые страницы по шаблонам адресов.": "New pages by URL template.",
@@ -377,4 +386,8 @@ MESSAGES = {
         'Several branches of a section are closed to indexing as a whole, by one template rule. The sitemap tells whether it is a decision or a mistake.',
     'Ссылки hreflang стоят в <body>: поисковики читают их только из <head>, и версии не связаны.':
         'hreflang links sit in <body>: search engines read them only from <head>, so the versions are not linked.',
+    '<h3>Боты ИИ-поиска получили ошибку на страницах из сборки ({a0})</h3>':
+        '<h3>AI search bots got an error on pages in the build ({a0})</h3>',
+    '<div class="scroll"><table><thead><tr><th>бот</th><th>страница</th><th>ответ</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>bot</th><th>page</th><th>response</th></tr></thead><tbody>',
 }

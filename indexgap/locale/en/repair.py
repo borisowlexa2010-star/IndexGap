@@ -22,8 +22,8 @@ MESSAGES = {
         "the mark is there, the page goes into neither the sitemap nor IndexNow.",
 
     # ── что делать: индексация ────────────────────────────────────────────────
-    "Убери мета-тег robots, если закрытие от индексации не было задумано. Если было — оставь и не трогай эту находку.":
-        "Remove the robots meta tag if closing this page off was not intended. If "
+    "Убери мета-тег robots или заголовок X-Robots-Tag, если закрытие от индексации не было задумано. Если было — оставь и не трогай эту находку.":
+        "Remove the robots meta tag or the X-Robots-Tag header if closing this page off was not intended. If "
         "it was, leave it and ignore this finding.",
     "Убери `nosnippet` или `max-snippet:0`: без права на сниппет страница не попадёт ни в расширенную выдачу, ни в ответы ИИ-поиска.":
         "Remove `nosnippet` or `max-snippet:0`: without the right to a snippet the "
@@ -35,6 +35,10 @@ MESSAGES = {
         "Write the link in the form the page has in the build: the same letter case, /about/ for about/index.html, /faq.html or /faq for faq.html. If the host redirects that form itself, add the rule to _redirects, netlify.toml or vercel.json and the finding goes away.",
     "Пиши canonical в той форме, в какой страница лежит в сборке: /about/ для about/index.html, /about.html или /about для about.html — обычно это настройка trailingSlash генератора. Если хостинг отдаёт эту форму сам — cleanUrls или trailingSlash в vercel.json, правило в _redirects или netlify.toml, — находка уйдёт.":
         "Write the canonical in the form the page has in the build: /about/ for about/index.html, /about.html or /about for about.html — usually this is the generator's trailingSlash setting. If the host serves that form itself — cleanUrls or trailingSlash in vercel.json, a rule in _redirects or netlify.toml — the finding goes away.",
+    "Веди заглушку не на главную, а на страницу, которая заменила старую по смыслу. Если редирект на главную поставил шаблон на страницы с текстом, найди в шаблоне meta refresh и убери его.":
+        "Point the stub at the page that replaced the old one in meaning, not at "
+        "the home page. If a template put the redirect to the home page on pages "
+        "with text, find the meta refresh in the template and remove it.",
     "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
         "The links point at pages the build does not have. Find where the "
         "template takes these addresses from, and either remove the link or "
@@ -290,6 +294,11 @@ MESSAGES = {
         "Remove the addresses that are not among the site's pages from the "
         "cluster, or correct them. Right now the cluster points at nothing, "
         "and a search engine is entitled to disregard it entirely.",
+    "Оставь у каждого кода один адрес и называй каждую версию одним и тем же кодом на всех страницах кластера.":
+        "Keep one address per code, and call each version by the same code on "
+        "every page of the cluster.",
+    "Пиши в href альтернатив полный адрес: схему, хост и путь.":
+        "Write the full address in each alternate's href: scheme, host and path.",
     "Приведи объявленный язык в соответствие с языком текста. Пока они расходятся, поисковик показывает страницу не тем читателям — и считает это правильным результатом.":
         "Bring the declared language in line with the language the text is "
         "written in. While they disagree, the engine shows the page to the "
@@ -327,4 +336,6 @@ MESSAGES = {
         'Decide for the whole branch. If the closing is intended, take these pages out of the sitemap and the internal links so crawlers do not spend their visits on them. If not, find the template condition that sets noindex on these branches and fix it once.',
     'Перенеси <link rel="alternate" hreflang> в <head> шаблона: компонент, который выводит переключатель языков в теле страницы, — не место для разметки альтернатив.':
         'Move <link rel="alternate" hreflang> into the template\'s <head>: the component that renders the language switcher in the page body is not the place for alternates markup.',
+    'Что делать: сначала реши, один ли это интент. Если страницы отвечают на разные запросы (город, модель, услуга) — дублирует их шаблон: дай каждой больше данных своей строки и разделы, которые от них зависят; canonical здесь спрятал бы настоящие страницы. Если интент один — оставь одну страницу основной, а с остальных поставь canonical на неё или убери лишнюю строку из датасета (её покажет `indexgap plan`).':
+        "What to do: first decide whether this is one intent. If the pages target different queries (city, model, service), the template duplicates them: give each more of its own row's data and sections that depend on it; a canonical here would hide real pages. If it is one intent, keep one page as the main one and point the others' canonical at it, or remove the extra row from the dataset (`indexgap plan` shows it).",
 }

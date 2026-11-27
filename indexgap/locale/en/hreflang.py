@@ -2,9 +2,9 @@
 """hreflang и всё, что про многоязычность, — English."""
 
 MESSAGES = {
-    "hreflang взят из sitemap для {a0} страниц(ы): в самих страницах его нет":
+    "hreflang взят из sitemap для {a0} страниц(ы): в самих страницах его нет или он неполный":
         "hreflang was taken from the sitemap for {a0} page(s): the pages "
-        "themselves carry none",
+        "themselves carry none or only part of it",
     "{a0} открыт(ых) страниц всё ещё называют их в своём hreflang — убрать нужно и оттуда.":
         "{a0} open page(s) still name them in their own hreflang — remove them "
         "there as well.",
@@ -111,6 +111,28 @@ MESSAGES = {
         "language belongs.",
     "Код в self-ссылке не совпадает с lang страницы.":
         "The code in the self-reference does not match the page's lang.",
+    "Версии кластера противоречат друг другу: один код у двух адресов или разные коды у одного.":
+        "The versions of a cluster contradict each other: one code for two "
+        "addresses, or different codes for one.",
+    "Адреса в hreflang записаны без схемы и хоста.":
+        "hreflang addresses are written without a scheme and host.",
+    "адреса в hreflang записаны не полностью ({a0}) — поисковики требуют полный адрес со схемой и хостом, например {a1}":
+        "hreflang addresses are not fully qualified ({a0}) — search engines "
+        "require the full address with scheme and host, for example {a1}",
+    "код «{a0}» объявлен для нескольких адресов ({a1}) — у одного кода может быть только одна версия, и противоречивую разметку поисковик отбрасывает":
+        "the code “{a0}” is declared for several addresses ({a1}) — one code "
+        "can have only one version, and search engines discard contradictory "
+        "markup",
+    "альтернатива {a0} объявлена здесь как «{a1}», а сама она называет себя «{a2}» — версии кластера расходятся в том, на каком она языке":
+        "the alternate {a0} is declared here as “{a1}”, while it calls itself "
+        "“{a2}” — the versions of the cluster disagree about its language",
+    "{a0}: текст страницы не украинский, а рядом в кластере — английская версия. Для Великобритании нужен код `en-GB`":
+        "{a0}: the page text is not Ukrainian, and the cluster has an English "
+        "version next to it. The United Kingdom needs the code `en-GB`",
+    "по тому же пути есть страница на другом языке ({a0}), а hreflang этой страницы называет только её саму. Если это перевод — перечисли в нём все языковые версии":
+        "a page at the same path exists in another language ({a0}), and this "
+        "page's hreflang names only the page itself. If it is a translation, "
+        "list every language version in it",
     "Сайт мультиязычный, а у страницы нет ни одной альтернативы.":
         "The site is multilingual and this page declares no alternate at all.",
 
@@ -133,4 +155,8 @@ MESSAGES = {
         "{a0} links back to {a1} — a different address (the scheme or host differs from the rest of the site's links). Search engines need the exact address of the version, not a redirect to it",
     'ссылки hreflang ведут на {a0}, а сами страницы в canonical называют себя адресами {a1} ({a2} из {a3}). Каждая альтернатива — редирект, а не версия, и поисковик отбрасывает кластер. Чинится один раз, в шаблоне hreflang':
         'hreflang links point at {a0}, while the pages name themselves {a1} in their canonical ({a2} of {a3}). Every alternate is a redirect, not a version, and search engines drop the cluster. Fix it once, in the hreflang template',
+    'self-ссылка в кластере записана как {a0} — это другой адрес (схема или хост не те, что у остальных ссылок сайта), то есть редирект, а не сама страница. Поисковик требует точный адрес версии':
+        "the cluster's self-link is written as {a0} — a different address (the scheme or host differs from the rest of the site's links), so it is a redirect, not the page itself. Search engines need the exact address of the version",
+    '{a0} ссылается обратно на {a1}, а сама страница называет себя {a2} — это другой адрес (слэш на конце или index.html), то есть редирект. Поисковик требует точный адрес версии':
+        '{a0} links back to {a1}, while the page names itself {a2} — a different address (the trailing slash or index.html), so it is a redirect. Search engines need the exact address of the version',
 }

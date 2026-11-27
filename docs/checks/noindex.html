@@ -19,7 +19,7 @@
  "@context":"https://schema.org","@type":"TechArticle",
  "headline":"noindex \u2014 indexgap check","description":"noindex: what indexgap reports, why it matters and how to fix it. Reported as critical.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/noindex.html","inLanguage":"en",
- "datePublished":"2026-08-29","dateModified":"2026-11-25",
+ "datePublished":"2026-08-29","dateModified":"2026-11-27",
  "author":{"@type":"Person","name":"Alexey Borisov"},
  "publisher":{"@type":"Organization","name":"indexgap"},
  "isPartOf":{"@type":"WebSite","name":"indexgap","url":"https://borisowlexa2010-star.github.io/IndexGap"}
@@ -101,7 +101,7 @@ font-size:.85rem;color:var(--ink3)}
 <p>The finding reads:</p>
 <pre><code>critical  noindex  —</code></pre>
 
-<h2>How to fix it</h2><div class="fix"><p>Remove the robots meta tag if closing this page off was not intended. If it was, leave it and ignore this finding.</p></div>
+<h2>How to fix it</h2><div class="fix"><p>Remove the robots meta tag or the X-Robots-Tag header if closing this page off was not intended. If it was, leave it and ignore this finding.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p>
@@ -116,13 +116,13 @@ every finding on this page into a work order in <code>indexgap-briefs/</code>,
 with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in indexing and reachability</h2>
-<ul class="plain"><li><a href="noindex-group.html">noindex-group</a><span>noindex group</span></li><li><a href="nosnippet.html">nosnippet</a><span>nosnippet</span></li><li><a href="canonical-elsewhere.html">canonical-elsewhere</a><span>canonical elsewhere</span></li><li><a href="orphan.html">orphan</a><span>orphan</span></li><li><a href="unreachable.html">unreachable</a><span>unreachable</span></li><li><a href="broken-link.html">broken-link</a><span>broken link</span></li><li><a href="wrong-link-form.html">wrong-link-form</a><span>wrong link form</span></li><li><a href="canonical-form.html">canonical-form</a><span>canonical form</span></li><li><a href="hub-missing-links.html">hub-missing-links</a><span>hub missing links</span></li><li><a href="deep.html">deep</a><span>deep</span></li><li><a href="js-shell.html">js-shell</a><span>js shell</span></li><li><a href="heavy-html.html">heavy-html</a><span>heavy html</span></li></ul>
+<ul class="plain"><li><a href="noindex-group.html">noindex-group</a><span>noindex group</span></li><li><a href="nosnippet.html">nosnippet</a><span>nosnippet</span></li><li><a href="canonical-elsewhere.html">canonical-elsewhere</a><span>canonical elsewhere</span></li><li><a href="orphan.html">orphan</a><span>orphan</span></li><li><a href="unreachable.html">unreachable</a><span>unreachable</span></li><li><a href="broken-link.html">broken-link</a><span>broken link</span></li><li><a href="redirect-home.html">redirect-home</a><span>redirect home</span></li><li><a href="wrong-link-form.html">wrong-link-form</a><span>wrong link form</span></li><li><a href="canonical-form.html">canonical-form</a><span>canonical form</span></li><li><a href="hub-missing-links.html">hub-missing-links</a><span>hub missing links</span></li><li><a href="deep.html">deep</a><span>deep</span></li><li><a href="js-shell.html">js-shell</a><span>js shell</span></li><li><a href="heavy-html.html">heavy-html</a><span>heavy html</span></li></ul>
 <p><a href="index.html">All checks</a> · <a href="index.html#indexing">Indexing and reachability</a></p>
 
 <footer>
-  <p>By Alexey Borisov. Updated <time datetime="2026-11-25">2026-11-25</time>,
-  for indexgap 1.28.0.</p>
-  <p>indexgap 1.28.0 — quality control for programmatic SEO pipelines.
+  <p>By Alexey Borisov. Updated <time datetime="2026-11-27">2026-11-27</time>,
+  for indexgap 1.29.0.</p>
+  <p>indexgap 1.29.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

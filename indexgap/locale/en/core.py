@@ -5,6 +5,12 @@ MESSAGES = {
     "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; не проверялись: {a1}":
         "{a0} HTML file(s) are template fragments with no <html> or <title>, not "
         "pages; not checked: {a1}",
+    "каталоги со служебными именами пропущены, страницы в них не проверялись: {a0}":
+        "directories with service names were skipped and their pages not checked: {a0}",
+    " и ещё {a0}": " and {a0} more",
+    "{a0} различаются только регистром букв: на macOS, Windows и хостинге без учёта регистра один файл затрёт другой":
+        "{a0} differ only in letter case: on macOS, Windows and case-insensitive hosts "
+        "one file overwrites the other",
     "каталог {a0}/ пропущен как сборочный. Если проверять нужно собранный сайт — передай его каталог явно.":
         "the {a0}/ directory was skipped as build output. If the built site is "
         "what you want checked, pass that directory explicitly.",
@@ -34,6 +40,11 @@ MESSAGES = {
     "{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись":
         "{a0}: the directory could not be read ({a1}) — its pages were not checked",
     "canonical не разбирается как адрес: {a0}": "the canonical cannot be parsed as an address: {a0}",
+    "на странице {a0} разных canonical: {a1} — поисковик не учтёт ни один. Оставь один в <head>":
+        "the page has {a0} different canonicals: {a1} — the search engine will use none of "
+        "them. Keep one in <head>",
+    "canonical в <body> ({a0}) поисковик не читает — перенеси его в <head>":
+        "the search engine does not read a canonical in <body> ({a0}) — move it into <head>",
     "{a0}: шаблон {a1} не разобран — какие страницы закрывает его X-Robots-Tag: noindex, не проверялось":
         "{a0}: pattern {a1} could not be read — which pages its X-Robots-Tag: noindex "
         "closes was not checked",
@@ -41,6 +52,13 @@ MESSAGES = {
         "{a0} closes {a1} page(s) to indexing with an X-Robots-Tag: noindex header — rule {a2}",
     "файл прочитан как {a0}, а не UTF-8":
         "read as {a0}, not UTF-8",
+    "в <meta charset> объявлен UTF-8, а файл в {a0}: браузер и поисковик покажут вместо букв знаки «�». Пересохрани файл в UTF-8":
+        "<meta charset> declares UTF-8, but the file is {a0}: browsers and search engines "
+        "will show “�” instead of the letters. Re-save the file as UTF-8",
+    "в <meta charset> объявлен {a0}, а файл в UTF-8: если сервер не присылает charset в Content-Type, браузер покажет кракозябры. Исправь объявление на utf-8":
+        "<meta charset> declares {a0}, but the file is UTF-8: unless the server sends a "
+        "charset in Content-Type, browsers will show garbled text. Change the declaration "
+        "to utf-8",
     "фронтматтер не распознан":
         "frontmatter not recognised",
     "фронтматтер открыт, но не закрыт: строка `---` в конце блока":
@@ -51,6 +69,12 @@ MESSAGES = {
         "{a0}: expected an object at the top level.",
     "Не удалось прочитать {a0}: {a1}": "Could not read {a0}: {a1}",
     "нужно число не меньше 0": "a number of at least 0 is needed",
+    "нужно конечное число не больше 100000000": "a finite number no greater than 100000000 is needed",
+    "записан в {a0}": "saved in {a0}",
+    "{a0} {a1}: такого {a2} нет ни в {a3}, ни в рабочем каталоге.":
+        "{a0} {a1}: no such {a2} in {a3} or in the working directory.",
+    "каталога": "directory",
+    "файла": "file",
     "поле «{a0}» в indexgap.json мне не знакомо и не действует":
         "field “{a0}” in indexgap.json is not one I know and has no effect",
 
@@ -166,4 +190,18 @@ MESSAGES = {
         "{a0} of {a1} pages carry an event date",
     'canonical {a0} из {a1} страниц называют сайт адресом {a2}, а --site — {a3}. Страницы сверены с {a2}; адреса в sitemap и в отчёте строятся от --site — если сайт живёт по {a2}, укажи --site {a2}':
         'the canonical of {a0} of {a1} pages names the site {a2}, but --site is {a3}. Pages were compared against {a2}; addresses in the sitemap and in the report are built from --site, so if the site lives at {a2}, pass --site {a2}',
+    '{a0} страниц(ы) в каталоге с именем кода ответа (…/404/) никто не ссылается — сочтены страницами ошибки, не проверялись и в sitemap не попадут: {a1}. Если это статьи — поставь на них ссылку':
+        '{a0} page(s) in a directory named after a status code (…/404/) are not linked from anywhere — taken for error pages, not checked, and left out of the sitemap: {a1}. If they are articles, link to them',
+    'поле «{a0}» проекта мне не знакомо и не действует':
+        'project field “{a0}” is not one I know and has no effect',
+    '{a0}: не удалось записать или прочитать ({a1}).':
+        '{a0}: could not write or read it ({a1}).',
+    'Колонки «{a0}» в {a1} нет.\n    Есть: {a2}\n    Укажи нужную: поле `keyword` проекта':
+        "There is no “{a0}” column in {a1}.\n    There is: {a2}\n    Name the right one: the project's `keyword` field",
+    'колонка с ключом не названа `keyword` — взята «{a0}». Если это не она, укажи поле `keyword` проекта':
+        "the keyword column is not called `keyword` — took “{a0}”. If that is not it, set the project's `keyword` field",
+    'Колонки с ключевым словом в {a0} не нашлось.\n    Есть: {a1}\n    Укажи нужную: поле `keyword` проекта':
+        "No keyword column was found in {a0}.\n    There is: {a1}\n    Name the right one: the project's `keyword` field",
+    'нужно число дней не больше 36500':
+        'a number of days no larger than 36500 is needed',
 }

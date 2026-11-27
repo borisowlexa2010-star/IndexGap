@@ -2,6 +2,8 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "{a0}: таблицы внутри архива вместе больше {a1} МБ — читать не стал":
+        "{a0}: the tables inside the archive add up to more than {a1} MB — not read",
     "Disallow: / для всех агентов, кроме {a0} — остальные поисковики и ИИ-поиск сайт не видят":
         "Disallow: / for every agent except {a0} — other search engines and AI "
         "search cannot see the site",
@@ -54,6 +56,9 @@ MESSAGES = {
         "{a0}: the child address is not http(s) and is not read",
     "{a0}: дочерний файл не найден рядом с индексом":
         "{a0}: the child file was not found next to the index",
+    "{a0}: дочерний файл не найден рядом с индексом, а в сеть индекс с диска не ведёт — передайте его отдельным --sitemap":
+        "{a0}: the child file was not found next to the index, and an index "
+        "read from disk does not lead to the network — pass it as a separate --sitemap",
     "{a0}: индекс не дал ни одного адреса":
         "{a0}: the index produced no addresses",
     "{a0}: индекс ссылается сам на себя":
@@ -76,6 +81,10 @@ MESSAGES = {
         "\n    An export with a column of addresses is needed (in Search Console "
         "that is “Pages”, not “Queries”).",
     "  из них в {a0}{a1}": "  of those in {a0}{a1}",
+    "noindex, canonical на другую страницу или Disallow в robots.txt":
+        "noindex, a canonical pointing elsewhere, or Disallow in robots.txt",
+    "две выгрузки цитирований помечены как «{a0}» — цитирования сложены; если периоды пересекаются, числа завышены":
+        "two citation exports are labelled \"{a0}\" — their citations are added up; if the periods overlap, the numbers are inflated",
     "noindex или canonical на другую страницу":
         "noindex, or a canonical pointing elsewhere",
     "{a0} не читается: {a1}": "{a0} cannot be read: {a1}",
@@ -310,6 +319,8 @@ MESSAGES = {
         'all {a0} image(s) have an empty alt="" — that marks decoration; if any of them is a photo about the page\'s subject, it needs an alt',
     'страница на lang=«{a0}», а alt изображений написан другим письмом ({a1}): похоже, шаблон alt не переведён':
         'the page is lang="{a0}", but its image alts are in another script ({a1}): the alt template looks untranslated',
+    'страница на lang=«{a0}», а alt изображений написан на другом языке ({a1}): похоже, шаблон alt не переведён':
+        'the page is lang="{a0}", but its image alts are in another language ({a1}): the alt template looks untranslated',
     'у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка или имя файла, а не описание':
         '{a0} of {a1} image alts say nothing: {a2} — a placeholder or a file name, not a description',
     '{a0}: не JSON прогона doctor ({a1})':
@@ -336,8 +347,36 @@ MESSAGES = {
         'the translation says {a0}, the original ({a1}) says {a2} — the number drifted in translation or was left from an older version',
     'Disallow: / для Googlebot — Google не обходит сайт целиком':
         'Disallow: / for Googlebot: Google does not crawl any page of the site',
+    'Disallow: / для {a0} — сайт закрыт от этих поисковиков':
+        'Disallow: / for {a0}: the site is closed to these search engines',
     '{a0} не пускают на {a1} из {a2} открытых страниц (правило «Disallow: {a3}»): {a4}':
         '{a0} is kept off {a1} of {a2} open pages (rule “Disallow: {a3}”): {a4}',
     'в {a0} запрос(ах) ботов к страницам не нашёлся код ответа — открыл ли бот эти страницы, по логу не понять, и в шаг «открыто» они не засчитаны. Проверь, в каком поле лог пишет статус':
         '{a0} bot request(s) to pages have no response status — the log does not show whether the bot got those pages, so they are not counted as opened. Check which field the log writes the status to',
+    '{a0}: корневой элемент не в пространстве имён {a1} ({a2}) — Search Console отвергает такой файл как «неверное пространство имён»':
+        '{a0}: the root element is not in the {a1} namespace ({a2}) — Search Console rejects such a file as “incorrect namespace”',
+    '{a0}: {a1} адресов, {a2} МБ — больше предела протокола ({a3} адресов и {a4} МБ на файл). Поисковик может отвергнуть файл целиком: разбей его на части под sitemap-индексом':
+        '{a0}: {a1} addresses, {a2} MB — over the protocol limit ({a3} addresses and {a4} MB per file). A search engine may reject the whole file: split it into parts under a sitemap index',
+    '{a0}: {a1} <loc> — не полные адреса ({a2}). Протокол требует адрес со схемой и хостом, поисковик такие строки пропускает — и здесь они ни с одной страницей не совпадут':
+        '{a0}: {a1} <loc> values are not full addresses ({a2}). The protocol requires a scheme and a host, search engines skip such entries — and here they match none of the pages',
+    '{a0}: {a1} <lastmod> — не дата W3C ({a2}): поисковик такие даты не принимает':
+        '{a0}: {a1} <lastmod> values are not W3C dates ({a2}): search engines do not accept them',
+    '{a0}: {a1} <lastmod> — в будущем ({a2}): поисковик таким датам не верит':
+        '{a0}: {a1} <lastmod> values are in the future ({a2}): search engines do not trust them',
+    '{a0}: у всех {a1} адресов один и тот же <lastmod> {a2} — это время сборки, а не правки, и поисковик перестаёт на него смотреть':
+        '{a0}: all {a1} addresses share one <lastmod> {a2} — that is the build time, not an edit, and search engines stop looking at it',
+    'не объявлено':
+        'not declared',
+    'Лог {a0} повреждён или обрезан ({a1}) — прочитать из него ничего не удалось.':
+        'Log {a0} is corrupt or truncated ({a1}) — nothing could be read from it.',
+    '{a0}: {a1} из {a2} запросов получили 401/403, и robots.txt сайта тоже закрывает ему весь сайт — для этого ИИ-поиска страницы закрыты дважды':
+        "{a0}: {a1} of {a2} requests got 401/403, and the site's robots.txt also closes the whole site to it — the pages are closed to this AI search twice",
+    '{a0}: robots.txt сайта закрывает ему весь сайт, а по логу он открыл {a1} стр. Настоящий бот robots.txt соблюдает — похоже, User-Agent подделан (проверит --verify-bots) или на сервере другой robots.txt':
+        "{a0}: the site's robots.txt closes the whole site to it, yet the log shows it opened {a1} page(s). A genuine bot obeys robots.txt — the User-Agent looks spoofed (--verify-bots checks this), or the server has a different robots.txt",
+    '{a0}: robots.txt ответил ему {a1} ({a2} из {a3} запросов). Ответ 5xx на robots.txt краулеры читают как «сайт обходить нельзя»':
+        '{a0}: robots.txt answered it with {a1} ({a2} of {a3} requests). Crawlers read a 5xx robots.txt as “do not crawl the site”',
+    'лог {a0} обрезан или повреждён — прочитано только то, что было до места поломки':
+        'log {a0} is truncated or corrupt — only the lines before the damage were read',
+    '{a0}: данные прогона doctor повреждены или правлены руками — сравнивать с ними нельзя':
+        '{a0}: the doctor run data is damaged or was edited by hand — it cannot be compared against',
 }

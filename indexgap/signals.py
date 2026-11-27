@@ -12,6 +12,7 @@ SEO-приёмов можно было закрыть без сети и без 
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import re
 from collections import Counter, defaultdict
@@ -19,6 +20,8 @@ from urllib.parse import urlsplit
 
 from .core import ALWAYS_SKIP, _CODE_TAG, tokenize
 from .i18n import N_, tr
+from .settings import DENSE_SCRIPT
+from .subject import Said
 
 # Googlebot читает первые 2 МБ поддерживаемого файла и отдаёт в индекс то, что
 # успел прочитать (developers.google.com/search/docs/crawling-indexing/googlebot,
@@ -64,8 +67,23 @@ def _page_years(page) -> set:
         found = re.match(r"\s*(\d{4})", str(meta.get(key) or ""))
         if found:
             years.add(int(found.group(1)))
+    from .aeo import _ld_items, _ld_types
     for block in getattr(page, "jsonld", None) or ():
-        years.update(int(y) for y in _LD_DATE.findall(block))
+        try:
+            nodes = _ld_items(json.loads(block), ("mainentity",))
+        except (ValueError, RecursionError):
+            years.update(int(y) for y in _LD_DATE.findall(block))
+            continue
+        # Дата самой страницы, а не вложенного отзыва или комментария: отзыв
+        # 2024 года не делает «2024» в заголовке датой страницы.
+        for node in nodes:
+            if _ld_types(node) & {"review", "comment"}:
+                continue
+            for key, value in node.items():
+                if str(key).lower() in ("datepublished", "datecreated"):
+                    found = re.match(r"\s*(\d{4})", str(value or ""))
+                    if found:
+                        years.add(int(found.group(1)))
     return years
 
 
@@ -179,7 +197,7 @@ def _share(a: set, b: set) -> bool:
 def _title_h1_apart(title: str, h1: str) -> bool:
     if not title or not h1:
         return False
-    if any(len(w) == 1 and not w.isascii() for w in tokenize(h1 + " " + title)):
+    if DENSE_SCRIPT.search(h1 + " " + title):
         return False                       # иероглифика: слов по пробелам нет
     head = _words(h1)
     parts = [_words(p) for p in _SEPARATORS.split(title)] or [_words(title)]
@@ -359,11 +377,20 @@ def cjk_swap(text: str, expected: set) -> tuple:
 CODE_SHARE = 0.2
 _CODE_SPAN = re.compile(r"<(pre|code)\b[^<>]*>(.*?)</\1\s*>", re.I | re.S)
 _TAG = re.compile(r"<[^<>]*>")
+# Где код читателю не виден и к тексту страницы не относится: комментарий,
+# шаблон в <script>, скрытый блок, меню и подвал. `<pre>` в шаблоне виджета
+# глушил обе проверки языка на непереведённой странице.
+_UNSEEN = re.compile(r"<!--.*?-->|<(script|style|template|noscript|nav|footer|aside)(?=[\s>]).*?</\1\s*>"
+                     r"|<(\w+)\b[^<>]*\s(?:hidden|aria-hidden\s*=\s*[\"']?true)(?=[\s>/=\"'])[^<>]*>"
+                     r".*?</\2\s*>",
+                     re.I | re.S)
+_ELEMENT_LANG = re.compile(r"<(?:body|main|article|section|div)\b[^<>]*?\slang\s*=\s*[\"']?([\w-]+)",
+                           re.I)
 
 
 def _much_code(raw: str, prose: str) -> bool:
     """Код в `<pre>`/`<code>` — не меньше пятой части букв прозы."""
-    raw = (raw or "")[:400_000]
+    raw = _UNSEEN.sub(" ", (raw or "")[:400_000])
     if not _CODE_TAG.search(raw):
         return False
     code = sum(len("".join(_LETTERS.findall(_TAG.sub(" ", m.group(2)))))
@@ -388,6 +415,9 @@ def lang_script(pages: list) -> list:
         if not expected:
             continue
         prose = "\n".join(page.paragraphs or ())
+        # Язык, объявленный у блока (`<main lang="de">`, `<div lang="en">`), —
+        # верная разметка части страницы: текст на нём не «непереведён».
+        parts = {m.group(1) for m in _ELEMENT_LANG.finditer((page.raw or "")[:400_000])}
         script, share, letters = text_script(prose, expected)
         swapped, swapped_share = cjk_swap(prose, expected)
         if swapped:
@@ -398,6 +428,8 @@ def lang_script(pages: list) -> list:
             # этого не видит, служебные слова — видят.
             from . import langid
             other = langid.mismatch(page.lang, prose)
+            if other in {langid.primary(p) for p in parts}:
+                other = ""
             if other and not (other == "en" and _much_code(page.raw, prose)):
                 issues.append(("warning", page.url, "lang-text-mismatch", tr(
                     "страница объявляет lang=«{a0}», а текст написан на другом языке "
@@ -409,6 +441,8 @@ def lang_script(pages: list) -> list:
             continue
         # Без прозы абзацами становятся код и таблицы, а код — латиница.
         if script == "latin" and _much_code(page.raw, prose):
+            continue
+        if any(script in declared_scripts(p) for p in parts):
             continue
         issues.append(("warning", page.url, "lang-script-mismatch", tr(
             "страница объявляет lang=«{a0}», а {a1:.0%} букв её текста — {a2}. "
@@ -479,6 +513,10 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
     # соседями стоит на каждой, и раньше с шести детей он прятал хаб, который
     # не ссылается ни на кого.
     own_tocs = defaultdict(list)
+    # Чужие страницы с такими ссылками — тоже: оглавление и карта сайта. Но
+    # когда их много, а общего ядра ссылок у них нет, это вращающийся блок
+    # «рядом» на страницах соседнего раздела, а не оглавление.
+    other_tocs = defaultdict(list)
     for page in pages:
         out = set(outbound.get(page.url, ()))
         if len(out) < 5:
@@ -489,10 +527,23 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                 if page.url in kid_urls[hub_key]:
                     own_tocs[hub_key].append(page.url)
                 else:
-                    listing[hub_key].add(page.url)
+                    other_tocs[hub_key].append(page.url)
+
+    def common_core(hub_key, tocs):
+        # Два вида одного списка (`/all-cities/` и `/map/`) ссылаются на одних
+        # и тех же детей; блок «рядом» у каждой страницы свой.
+        kids = kid_urls[hub_key]
+        core = set(kids)
+        for url in tocs:
+            core &= set(outbound.get(url, ()))
+        return len(core) >= max(5, 0.8 * len(kids))
+
+    for hub_key, tocs in other_tocs.items():
+        if len(tocs) <= 2 or common_core(hub_key, tocs):
+            listing[hub_key].update(tocs)
     for hub_key, tocs in own_tocs.items():
-        if len(tocs) == 1:
-            listing[hub_key].add(tocs[0])
+        if len(tocs) == 1 or common_core(hub_key, tocs):
+            listing[hub_key].update(tocs)
     # Кандидаты в списки: страница → «лист» (засчитывается, если ведёт хоть к
     # одному ребёнку) или «глубже» (если дети — большинство её ссылок в разделе).
     candidates = defaultdict(dict)
@@ -542,15 +593,27 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                 to_kids = len(links & kids)
                 if not to_kids:
                     continue
+                if cands[url] != "deeper" and url in kids:
+                    # Ребёнок со слагом-числом или буквой (`/products/100/`,
+                    # `/vitamins/c/`), который ссылается только на таких же
+                    # соседей, и немногих, — это блок «похожие», а не лист.
+                    same = sum(1 for u in links & kids if cands.get(u) == cands[url])
+                    if same == to_kids and to_kids < 5:
+                        continue
                 if cands[url] == "deeper":
                     own = key_of[url]
                     own = own[:own.rfind("/") + 1]
+                    # Хлебная крошка на своего предка-ребёнка
+                    # (`/plumbing/city0/` у `/plumbing/city0/emergency/`) —
+                    # не ссылка списка.
+                    crumb = {u for u in links & kids if own.startswith(key_of[u] + "/")}
+                    to_kids -= len(crumb)
                     # Соседи по уровню (другие буквы, другие листы) — навигация
                     # самого списка, а не чужие ссылки.
-                    inside = sum(1 for u in links if u in key_of
+                    inside = sum(1 for u in links if u in key_of and u not in crumb
                                  and key_of[u].startswith(hub_key + "/")
                                  and not key_of[u].startswith(own))
-                    if to_kids * 2 <= inside:
+                    if not to_kids or to_kids * 2 <= inside:
                         continue
                 reached.add(url)
                 listing[hub_key].add(url)
@@ -566,19 +629,38 @@ def hub_links(pages: list, graph: dict, skip: set = frozenset()) -> list:
                          and k.url not in pagers)
         if missing:
             shown = ", ".join(urlsplit(u).path for u in missing[:3])
-            issues.append(("warning", hub.url, "hub-missing-links", tr(
+            issues.append(("warning", hub.url, "hub-missing-links", Said(tr(
                 "раздел не ссылается на {a0} из {a1} своих страниц: {a2}{a3} — до них "
                 "доходят только через sitemap или случайные ссылки",
                 a0=len(missing), a1=len(kids), a2=shown,
-                a3=tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else "")))
+                a3=tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else ""),
+                [urlsplit(u).path for u in missing])))
     return issues
 
 
 # ── картинки ─────────────────────────────────────────────────────────────────
 
+def _site_folder(page) -> str:
+    """
+    Корень сборки по странице: её каталог минус путь URL. Все страницы в
+    `/guides/`, а картинки в `/images/` — общий каталог страниц картинок не видел.
+    """
+    from urllib.parse import unquote
+    folder = os.path.dirname(page.path)
+    parts = [x for x in unquote(urlsplit(page.url).path).split("/") if x]
+    if parts and parts[-1] in (os.path.basename(page.path),
+                               os.path.splitext(os.path.basename(page.path))[0]):
+        parts.pop()
+    for part in reversed(parts):
+        if os.path.basename(folder) != part:
+            break
+        folder = os.path.dirname(folder)
+    return folder
+
+
 def heavy_images(pages: list) -> list:
     """Картинки тяжелее 1 МБ в сборке — одна находка на сайт, с самыми тяжёлыми."""
-    paths = [os.path.dirname(p.path) for p in pages if p.path and _is_html(p)]
+    paths = [_site_folder(p) for p in pages if p.path and _is_html(p)]
     if not paths:
         return []
     try:
@@ -605,6 +687,8 @@ def heavy_images(pages: list) -> list:
         return []
     heavy.sort(key=lambda x: (-x[0], x[1]))
     shown = ", ".join(f"{name} ({size / 1024 / 1024:.1f} MB)" for size, name in heavy[:5])
-    return [("info", "", "heavy-images", tr(
+    # Предмет — все файлы: новая тяжёлая картинка видна в --baseline.
+    from .subject import Said
+    return [("info", "", "heavy-images", Said(tr(
         "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; "
-        "сожми их или отдай WebP/AVIF", a0=len(heavy), a1=shown))]
+        "сожми их или отдай WebP/AVIF", a0=len(heavy), a1=shown), [name for _, name in heavy]))]

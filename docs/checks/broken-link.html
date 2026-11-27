@@ -19,7 +19,7 @@
  "@context":"https://schema.org","@type":"TechArticle",
  "headline":"broken link \u2014 indexgap check","description":"broken link: what indexgap reports, why it matters and how to fix it. Reported as warning.",
  "url":"https://borisowlexa2010-star.github.io/IndexGap/checks/broken-link.html","inLanguage":"en",
- "datePublished":"2026-08-29","dateModified":"2026-11-25",
+ "datePublished":"2026-08-29","dateModified":"2026-11-27",
  "author":{"@type":"Person","name":"Alexey Borisov"},
  "publisher":{"@type":"Organization","name":"indexgap"},
  "isPartOf":{"@type":"WebSite","name":"indexgap","url":"https://borisowlexa2010-star.github.io/IndexGap"}
@@ -99,7 +99,7 @@ font-size:.85rem;color:var(--ink3)}
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>warning  broken-link  —</code></pre>
+<pre><code>warning  broken-link  the redirect stub leads round in a loop: …. A browser shows a 'too many redirects' error, and a search engine gets no page</code></pre>
 
 <h2>How to fix it</h2><div class="fix"><p>The links point at pages the build does not have. Find where the template takes these addresses from, and either remove the link or generate the page. If the server redirects these addresses, check that the redirect really exists.</p></div>
 
@@ -116,13 +116,13 @@ every finding on this page into a work order in <code>indexgap-briefs/</code>,
 with the thresholds the result has to satisfy and the command to check it.</p>
 
 <h2>Related checks in indexing and reachability</h2>
-<ul class="plain"><li><a href="noindex.html">noindex</a><span>noindex</span></li><li><a href="noindex-group.html">noindex-group</a><span>noindex group</span></li><li><a href="nosnippet.html">nosnippet</a><span>nosnippet</span></li><li><a href="canonical-elsewhere.html">canonical-elsewhere</a><span>canonical elsewhere</span></li><li><a href="orphan.html">orphan</a><span>orphan</span></li><li><a href="unreachable.html">unreachable</a><span>unreachable</span></li><li><a href="wrong-link-form.html">wrong-link-form</a><span>wrong link form</span></li><li><a href="canonical-form.html">canonical-form</a><span>canonical form</span></li><li><a href="hub-missing-links.html">hub-missing-links</a><span>hub missing links</span></li><li><a href="deep.html">deep</a><span>deep</span></li><li><a href="js-shell.html">js-shell</a><span>js shell</span></li><li><a href="heavy-html.html">heavy-html</a><span>heavy html</span></li></ul>
+<ul class="plain"><li><a href="noindex.html">noindex</a><span>noindex</span></li><li><a href="noindex-group.html">noindex-group</a><span>noindex group</span></li><li><a href="nosnippet.html">nosnippet</a><span>nosnippet</span></li><li><a href="canonical-elsewhere.html">canonical-elsewhere</a><span>canonical elsewhere</span></li><li><a href="orphan.html">orphan</a><span>orphan</span></li><li><a href="unreachable.html">unreachable</a><span>unreachable</span></li><li><a href="redirect-home.html">redirect-home</a><span>redirect home</span></li><li><a href="wrong-link-form.html">wrong-link-form</a><span>wrong link form</span></li><li><a href="canonical-form.html">canonical-form</a><span>canonical form</span></li><li><a href="hub-missing-links.html">hub-missing-links</a><span>hub missing links</span></li><li><a href="deep.html">deep</a><span>deep</span></li><li><a href="js-shell.html">js-shell</a><span>js shell</span></li><li><a href="heavy-html.html">heavy-html</a><span>heavy html</span></li></ul>
 <p><a href="index.html">All checks</a> · <a href="index.html#indexing">Indexing and reachability</a></p>
 
 <footer>
-  <p>By Alexey Borisov. Updated <time datetime="2026-11-25">2026-11-25</time>,
-  for indexgap 1.28.0.</p>
-  <p>indexgap 1.28.0 — quality control for programmatic SEO pipelines.
+  <p>By Alexey Borisov. Updated <time datetime="2026-11-27">2026-11-27</time>,
+  for indexgap 1.29.0.</p>
+  <p>indexgap 1.29.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

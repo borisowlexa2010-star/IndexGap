@@ -32,6 +32,7 @@ import re
 from collections import Counter
 
 from .checks import is_shell
+from .settings import display_width, text_volume
 from .i18n import N_, tr
 
 CONFIG = {
@@ -87,7 +88,14 @@ _Q_START = (
     "como|o que|onde|quando|por que|quem|qual|quanto|"
     "cosa|dove|perché|chi|quale|quanto|"
     "apa|apakah|bagaimana|mengapa|kenapa|kapan|bila|bilakah|di mana|siapa|berapa|adakah|"
-    "nasıl|nerede|neden|hangi|"
+    "nasıl|nerede|neden|hangi|ne kadar|nedir|kaç|"
+    "скільки|як|що|де|коли|чому|навіщо|хто|який|яка|яке|які|чи|"
+    "czy|ile|jak|co|gdzie|kiedy|dlaczego|kto|jaki|jaka|jakie|"
+    "kolik|kde|kdy|proč|kdo|jaký|jaká|jaké|"
+    "hoe|wat|waar|wanneer|waarom|welke|hoeveel|"
+    "hur|vad|när|varför|vem|vilken|vilka|"
+    "πόσο|πόση|πόσα|πώς|τι|πού|πότε|γιατί|ποιος|ποια|ποιο|"
+    "combien|bao nhiêu|tại sao|làm sao|thế nào|ở đâu|khi nào|"
     "ما|ماذا|كيف|متى|أين|لماذا|كم|هل|"
     "کیا|چه|چگونه|چطور|کجا|چرا|آیا"
 )
@@ -96,7 +104,8 @@ _Q_INSIDE = (
     "क्या|कैसे|कब|कहाँ|कहां|क्यों|कौन|कितना|कितने|कितनी|"
     "কি|কী|কীভাবে|কিভাবে|কখন|কোথায়|কেন|কে|কত|"
     "کیسے|کب|کہاں|کیوں|کون|کتنا|کتنے|"
-    "چه|چگونه|کجا|چرا|چند"
+    "چه|چگونه|کجا|چرا|چند|"
+    "bao nhiêu|như thế nào|tại sao|ở đâu|khi nào|là gì"
 )
 _Q_CJK = "什么|甚麼|哪里|哪裡|哪儿|哪个|怎么|怎样|如何|为什么|為什麼|多少|几|是否|吗|嗎|呢|何|どう|なぜ|いつ|どこ|だれ|誰|ですか|무엇|어떻게|언제|어디|왜|누구|얼마|나요"
 # Тайский вопрос пишется без знака: вопросительное слово или частица внутри
@@ -104,12 +113,16 @@ _Q_CJK = "什么|甚麼|哪里|哪裡|哪儿|哪个|怎么|怎样|如何|为什�
 _Q_THAI = ("อะไร|เท่าไหร่|เท่าไร|ไหม|มั้ย|อย่างไร|ยังไง|แค่ไหน|ที่ไหน|เมื่อไหร่|เมื่อไร|"
            "ทำไม|ใคร|หรือไม่|หรือเปล่า")
 QUESTION = re.compile(
-    "^(?:" + _Q_START + ")(?![\\w" + _INDIC + "])"
+    # «How-to», «Что-то» — не вопрос: за словом не дефис.
+    "^(?:" + _Q_START + ")(?![\\w" + _INDIC + "-])"
     "|(?<![\\w" + _INDIC + "])(?:" + _Q_INSIDE + ")(?![\\w" + _INDIC + "])"
     "|(?:" + _Q_CJK + "|" + _Q_THAI + ")"
     # Греческий вопросительный знак — `;` (U+037E при нормализации становится
     # им же); армянский `՞` стоит над словом, эфиопский — `፧`.
     "|[\u0370-\u03ff\u1f00-\u1fff]\\s?[;\u037e]\\s*$|\u055e|\u1367"
+    # Турецкая частица в конце («iade edilir mi»), французская инверсия
+    # («Le dépôt est-il remboursable»).
+    "|(?<!\\w)(?:mı|mi|mu|mü)\\s*$|(?<=\\w)-(?:t-)?(?:il|elle|ils|elles|on)(?![\\w-])"
     "|[?？؟]\\s*$", re.I | re.U)
 
 # Кто ходит за содержимым для ИИ-ответов и что теряется при блокировке.
@@ -138,6 +151,13 @@ AI_AGENTS = {
 AI_SEARCH_AGENTS = {"oai-searchbot", "perplexitybot", "claude-searchbot", "bingbot"}
 
 
+# Опечатки, которые парсер Google принимает за настоящие директивы.
+_FIELD_TYPOS = {"dissallow": "disallow", "dissalow": "disallow", "disalow": "disallow",
+                "diasllow": "disallow", "disallaw": "disallow",
+                "useragent": "user-agent", "user agent": "user-agent",
+                "site-map": "sitemap"}
+
+
 def read_robots(path: str) -> dict:
     """
     Разбирает robots.txt проекта: какие агенты что запрещают.
@@ -148,6 +168,11 @@ def read_robots(path: str) -> dict:
 
     if not path:
         return {"found": False, "rules": {}, "sitemaps": []}
+    if os.path.isdir(path) and os.path.isfile(path + ".body"):
+        # Маршрут Next.js `robots.txt/` с ответом рядом — тот же поиск, что
+        # без --robots (`portfolio.build_file`): явный путь не должен терять
+        # все находки по robots.txt.
+        path = path + ".body"
     if os.path.isdir(path):
         return {"found": False, "error": tr("{a0} — это каталог, а нужен файл", a0=path),
                 "rules": {}, "sitemaps": []}
@@ -165,10 +190,19 @@ def read_robots(path: str) -> dict:
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
-            previous_was_agent = False
+            # RFC 9309 и парсер Google пропускают пустые строки и строки из
+            # одного комментария: `User-agent: Googlebot`, пустая строка,
+            # `User-agent: *` — одна группа, а не Googlebot без правил.
             continue
-        field, _, value = line.partition(":")
+        if ":" in line:
+            field, _, value = line.partition(":")
+        else:
+            # `Disallow /` без двоеточия Google читает как `Disallow: /`,
+            # если в строке ровно два слова.
+            words = line.split()
+            field, value = (words[0], words[1]) if len(words) == 2 else (line, "")
         field, value = field.strip().lower(), value.strip()
+        field = _FIELD_TYPOS.get(field, field)
         if field == "user-agent":
             if not previous_was_agent:
                 current = []
@@ -179,12 +213,17 @@ def read_robots(path: str) -> dict:
                 rules.setdefault(agent, {"disallow": [], "allow": []})
         elif field in ("disallow", "allow"):
             previous_was_agent = False
-            for agent in current or ["*"]:
+            # Правило до первого User-agent не входит ни в одну группу —
+            # RFC 9309 и Google его не применяют.
+            for agent in current:
                 rules.setdefault(agent, {"disallow": [], "allow": []})
                 rules[agent][field].append(value)
         elif field == "sitemap":
             previous_was_agent = False
-            sitemaps.append(value)
+            # Пустой или относительный Sitemap ничего не объявляет: Google
+            # принимает только полный адрес.
+            if "://" in value:
+                sitemaps.append(value)
         else:
             # Crawl-delay, Host, Clean-param и любая другая директива тоже
             # закрывают перечисление агентов. Без этого `Crawl-delay` между
@@ -204,7 +243,27 @@ _BLOCK_ALL = {"/", "/*", "/*$"}
 def _blocks_everything(entry: dict) -> bool:
     disallow = {d.strip() for d in (entry.get("disallow") or [])}
     allow = {a.strip() for a in (entry.get("allow") or [])}
-    return bool(disallow & _BLOCK_ALL) and not (allow & _BLOCK_ALL)
+    # `Allow: *` равен по длине `Disallow: /` и побеждает: открыто всё.
+    return bool(disallow & _BLOCK_ALL) and not (allow & (_BLOCK_ALL | {"*", "*$"}))
+
+
+def _site_closed(robots: dict, agent: str = "googlebot", pages=None) -> bool:
+    """
+    Агенту закрыт весь сайт: `Disallow: /`, и ни одна открытая страница сборки,
+    кроме главной, не пропущена каким-нибудь Allow. Robots.txt списком
+    разрешённых разделов (`Disallow: /` и `Allow: /rent/`) — не полный запрет:
+    по правилу самого длинного совпадения такие страницы открыты.
+    """
+    from urllib.parse import urlsplit
+    from .publish import indexable
+    if not _blocks_everything(_robots_group(robots, agent)):
+        return False
+    for page in pages or ():
+        parts = urlsplit(page.url)
+        path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        if path != "/" and indexable(page) and not blocking_rule(robots, path, agent):
+            return False
+    return True
 
 
 def _search_bot_closed(entry: dict) -> bool:
@@ -246,8 +305,8 @@ def _robots_pattern(rule: str):
     rule = _robots_norm(rule)
     anchored = rule.endswith("$")
     body = rule[:-1] if anchored else rule
-    regex = "".join(".*" if ch == "*" else re.escape(ch) for ch in body)
-    return re.compile(regex + ("$" if anchored else ""))
+    from .core import _Glob
+    return _Glob(body, anchored)
 
 
 def _robots_group(robots: dict, agent: str = "googlebot") -> dict:
@@ -276,7 +335,9 @@ def blocking_rule(robots: dict, path: str, agent: str = "googlebot") -> str:
             if not rule:
                 continue
             if _robots_pattern(rule).match(path):
-                length = len(rule)
+                # Длина считается в той же записи, в которой сравнивается:
+                # `/каталог/` и `/%D0%BA…/` — одно правило одной длины.
+                length = len(_robots_norm(rule))
                 if length > best or (length == best and allowed):
                     best, verdict = length, ("" if allowed else rule)
     return "" if verdict is True else verdict
@@ -288,7 +349,7 @@ def blocked_urls(pages: list, robots: dict) -> set:
     читает. Полный запрет сайта — отдельная находка, а не тысяча закрытых.
     """
     from urllib.parse import urlsplit
-    if not robots.get("found") or _blocks_everything(_robots_group(robots)):
+    if not robots.get("found") or _site_closed(robots, "googlebot", pages):
         return set()
     found = set()
     for page in pages:
@@ -314,7 +375,7 @@ def check_blocked_pages(pages: list, robots: dict) -> list:
     if not robots.get("found"):
         return []
     issues = _search_agents_partly_blocked(pages, robots)
-    if _blocks_everything(_robots_group(robots)):
+    if _site_closed(robots, "googlebot", pages):
         return issues
     for page in sorted(pages, key=lambda p: p.url):
         if not indexable(page):
@@ -345,9 +406,16 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
     from .publish import indexable
     rules = robots.get("rules") or {}
     open_pages = [p for p in pages if indexable(p)]
+    # Googlebot закрыт целиком — постраничных находок нет, и вычитать его
+    # страницы нечего: иначе частичный запрет ChatGPT всплывал бы только
+    # после того, как починят Googlebot.
+    google_closed = _site_closed(robots, "googlebot", pages)
     issues = []
     for agent in sorted(AI_SEARCH_AGENTS):
-        entry = rules.get(agent)
+        # Бот без своей группы следует `*`. Когда у Googlebot группа своя,
+        # запрет под звёздочкой закрывает раздел только для этих ботов, и
+        # больше о нём не скажет никто.
+        entry = rules.get(agent) or (rules.get("*") if rules.get("googlebot") else None)
         if not entry or _search_bot_closed(entry):
             continue
         blocked = Counter()
@@ -355,7 +423,7 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
             parts = urlsplit(page.url)
             path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
             rule = blocking_rule(robots, path, agent)
-            if rule and not blocking_rule(robots, path):
+            if rule and (google_closed or not blocking_rule(robots, path)):
                 blocked[rule] += 1
         n = sum(blocked.values())
         if not n:
@@ -369,7 +437,7 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
     return issues
 
 
-def check_robots(robots: dict) -> list:
+def check_robots(robots: dict, pages=None) -> list:
     """Находки по robots.txt: кого закрыли и что из-за этого теряется."""
     issues = []
     if not robots.get("found"):
@@ -382,26 +450,38 @@ def check_robots(robots: dict) -> list:
         return issues
 
     rules = robots.get("rules") or {}
-    star = rules.get("*") or {}
-    if _blocks_everything(star):
+    star_closed = "*" in rules and _site_closed(robots, "*", pages)
+    if star_closed:
         # Своя группа сильнее общей: `Googlebot` с `Allow: /` сайт видит, что
         # бы ни стояло под звёздочкой.
         allowed = sorted(a for a in _SEARCH_ENGINES
                          if a in rules and not _blocks_everything(rules[a]))
         if allowed:
-            issues.append(("warning", "robots.txt", "robots-blocks-all",
+            # Открыт только Яндекс, а Googlebot следует `*` — Google сайт не
+            # видит, и это критично, как и своя группа Googlebot с `Disallow: /`.
+            level = "warning" if "googlebot" in allowed else "critical"
+            issues.append((level, "robots.txt", "robots-blocks-all",
                            tr("Disallow: / для всех агентов, кроме {a0} — остальные поисковики "
                               "и ИИ-поиск сайт не видят", a0=", ".join(allowed))))
         else:
             issues.append(("critical", "robots.txt", "robots-blocks-all",
                            tr("Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком")))
-    elif "googlebot" in rules and _blocks_everything(rules["googlebot"]):
+    elif "googlebot" in rules and _site_closed(robots, "googlebot", pages):
         # Своя группа Googlebot с `Disallow: /` закрывает сайт от Google, даже
         # если под звёздочкой всё открыто. Раньше об этом молчали все три
         # проверки: постраничные оставляли полный запрет этой, а эта смотрела
         # только на `*`.
         issues.append(("critical", "robots.txt", "robots-blocks-all",
                        tr("Disallow: / для Googlebot — Google не обходит сайт целиком")))
+    # Своя группа Яндекса, Applebot и других поисковиков с `Disallow: /`:
+    # Googlebot и Bingbot сказаны выше и ниже, остальные молчали.
+    others = sorted(a for a in _SEARCH_ENGINES
+                    if a not in ("googlebot", "bingbot") and rules.get(a)
+                    and not star_closed and _site_closed(robots, a, pages))
+    if others:
+        issues.append(("warning", "robots.txt", "robots-blocks-all",
+                       tr("Disallow: / для {a0} — сайт закрыт от этих поисковиков",
+                          a0=", ".join(others))))
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
         search = agent in AI_SEARCH_AGENTS
@@ -434,13 +514,22 @@ _DATE_ONLY = re.compile(
     r"^[\s\d.,/:\-–—·|]*(?:[A-Za-zА-Яа-яЁё]+[\s\d.,/:\-–—·|]*){0,4}$")
 
 
+_BY_MONTH = re.compile(r"\s*by\s+(?:january|february|march|april|may|june|july|august|"
+                       r"september|october|november|december)\b", re.I)
+
+
 def _is_dateline(text: str) -> bool:
     """Строка даты или подписи над статьёй: короткая и про время, а не про суть."""
     text = text.strip()
     if len(text) > 100:
         return False
     if _DATELINE.match(text):
-        return True
+        # «By September 2026, every landlord must register…» — фраза, а не
+        # подпись: «by» перед месяцем — срок, а не автор, а в подписи почти
+        # нет слов со строчной буквы.
+        if _BY_MONTH.match(text):
+            return False
+        return sum(1 for w in re.findall(r"[^\W\d_]+", text) if w[0].islower()) < 8
     return bool(re.search(r"\d{4}", text)) and bool(_DATE_ONLY.match(text)) and len(text) < 40
 
 
@@ -463,16 +552,22 @@ def check_answer(page, cfg: dict = None) -> list:
     first = paragraphs[0]
     issues = []
     # Типографский апостроф — тот же апостроф: «Let’s dive» не узнавалось.
-    lowered = first.lower().lstrip("«\"'— -").replace("’", "'").replace("‘", "'")
+    # Кавычки любого вида («“„‹) и эмодзи перед разгоном его не отменяют.
+    lowered = re.sub(r"^[\W_]+", "", first.lower()).replace("’", "'").replace("‘", "'")
+    # Иероглиф несёт столько же, сколько два-три латинских знака: пороги
+    # меряются шириной, а в сообщении стоят в знаках этого абзаца.
+    scale = min(1.0, len(first) / max(1, display_width(first)))
+    answer_min = round(cfg["answer_min"] * scale)
+    answer_max = round(cfg["answer_max"] * scale)
     if _is_preamble(lowered):
         issues.append(("warning", page.url, "answer-preamble",
                        tr("первый абзац начинается с разгона «{a0}…» — ИИ-поиск цитирует ответ, а не вступление", a0=first[:40])))
-    elif len(first) < cfg["answer_min"]:
+    elif len(first) < answer_min:
         issues.append(("info", page.url, "answer-short",
-                       tr("первый абзац короче {a0} символов — на самостоятельный ответ не тянет", a0=cfg['answer_min'])))
-    elif len(first) > cfg["answer_max"]:
+                       tr("первый абзац короче {a0} символов — на самостоятельный ответ не тянет", a0=answer_min)))
+    elif len(first) > answer_max:
         issues.append(("info", page.url, "answer-long",
-                       tr("первый абзац {a0} символов — для цитирования лучше уложить ответ в {a1}", a0=len(first), a1=cfg['answer_max'])))
+                       tr("первый абзац {a0} символов — для цитирования лучше уложить ответ в {a1}", a0=len(first), a1=answer_max)))
     return issues
 
 
@@ -484,11 +579,35 @@ _DECLARATIVE = re.compile(
     re.I | re.U)
 
 
+# Вспомогательный глагол в начале — вопрос, только если за ним подлежащее:
+# «Do your research first», «Do not sign», «Can opener», «Will Smith» — нет.
+_AUX = re.compile(r"^(do|can|will|is|are|does|should)\b(?:\s+(\S+))?", re.I)
+_SUBJECTS = {"i", "you", "we", "they", "he", "she", "it", "there", "the", "a", "an",
+             "my", "our", "this", "these", "that", "those", "your", "their"}
+
+
 def _is_question(heading: str) -> bool:
     text = heading.strip()
+    # «“Can I sublet?”», «1. How much is rent», «Q: …», «📌 …», «— Сколько…»:
+    # кавычки, номер, метка и значок вокруг вопроса его не отменяют.
+    text = re.sub(r"[\s\"'“”„«»‚‘’‹›)\]）」』】]+$", "", text)
+    text = re.sub(r"^(?:\d+[.)]|[^\w¿¡])+", "", text)
+    text = re.sub(r"^(?:q|в|вопрос|question|frage)\s*[:.]\s*", "", text, flags=re.I)
     if not QUESTION.search(text):
         return False
-    return bool(re.search(r"[?？؟]\s*$", text)) or not _DECLARATIVE.match(text)
+    if re.search(r"[?？؟]\s*$", text):
+        return True
+    aux = _AUX.match(text)
+    if aux:
+        word = (aux.group(2) or "").lower()
+        if not word or word in ("not", "n't"):
+            return False
+        verb = aux.group(1).lower()
+        if verb in ("do", "can", "will") and word not in _SUBJECTS - (
+                {"this", "these", "that", "those", "your", "their"} if verb == "do" else set()) \
+                and not (aux.group(2)[0].isupper() and len(text.split()) >= 3):
+            return False
+    return not _DECLARATIVE.match(text)
 
 
 def check_extractable(page, cfg: dict = None) -> list:
@@ -514,7 +633,12 @@ def check_extractable(page, cfg: dict = None) -> list:
         issues.append(("info", page.url, "long-paragraph",
                        tr("{a0} абзац(ев) длиннее {a1} символов — такой блок трудно процитировать целиком", a0=len(long_paragraphs), a1=cfg['long_paragraph'])))
     blocks = page.blocks or {}
-    if page.word_count > 400 and not blocks.get("li") and not blocks.get("table"):
+    # Объём — по письменности: тайский, кхмерский и лаосский текст без
+    # пробелов — это не «17 слов». Один пункт списка (кнопка «Поделиться») —
+    # не список.
+    if (page.word_count > 400 or (getattr(page, "text", None) and text_volume(page) > 400)) \
+            and blocks.get("li", 0) < 2 and not blocks.get("table") \
+            and not blocks.get("dl"):
         issues.append(("info", page.url, "no-structure",
                        tr("в тексте нет ни списков, ни таблиц — структурные элементы повышают шанс попасть в ответ")))
     if blocks.get("img") and blocks.get("img_no_alt"):
@@ -544,7 +668,20 @@ ALT_FILLERS = {
     "รูปภาพ", "รูป", "ภาพ", "hình ảnh", "ảnh", "gambar", "foto produk",
     "图片", "图像", "照片", "圖片", "画像", "写真", "イメージ", "이미지", "사진",
     "εικόνα", "φωτογραφία",
+    "placeholder image", "image placeholder", "default image", "product image",
+    "featured image", "hero image", "banner image", "thumbnail image", "untitled design",
+    # Невыведенная переменная шаблона.
+    "undefined", "null", "none", "[object object]",
 }
+# Заготовка шаблона, стоковое или загрузочное имя файла, скриншот с датой.
+_ALT_TEMPLATE = re.compile(
+    r"\{\{.*?\}\}|\{%.*?%\}|\$\{\w+\}|^\{\s*[\w.]+\s*\}$|^%\w+%$|"
+    r"^(?:shutterstock|adobestock|gettyimages|istock(?:photo)?|depositphotos|dreamstime|"
+    r"pexels[\s_\-]*photo|unsplash)[\s_\-]*\d{3,}|"
+    r"^(?:screenshot|screen shot|снимок экрана)[\s_\-]+\d{4}-\d{2}-\d{2}|"
+    r"^untitled(?: design)? \(\d+\)$|"
+    r"^\S+(?: \(\d+\))?\.(?:jpe?g|png|gif|webp|avif|svg|bmp|tiff?|heic)\?\S*$|"
+    r"^\S+ \(\d+\)\.(?:jpe?g|png|gif|webp|avif|svg|bmp|tiff?|heic)$", re.I)
 # Имя файла вместо описания: `IMG_2034`, `DSC00123`, `PXL_20240101_1234`,
 # `photo-1.webp`, хеш загрузчика. Не «iPhone 15 Pro 256GB»: число в alt —
 # не признак файла.
@@ -557,14 +694,22 @@ _ALT_FILE = re.compile(
 def _alt_is_filler(alt: str) -> bool:
     text = re.sub(r"[\s\u3000]+", " ", alt.strip().strip(".:-—_").lower())
     if not text:
-        return False
-    if text in ALT_FILLERS:
+        return bool(alt.strip())           # «-», «...»: знак вместо описания
+    if text in ALT_FILLERS or _ALT_TEMPLATE.search(text):
         return True
     # «image 3», «фото 12», «画像1» — заглушка с номером.
     bare = re.sub(r"[\s#№\-_]*\d+$", "", text)
     if bare != text and bare in ALT_FILLERS:
         return True
     return bool(_ALT_FILE.match(text))
+
+
+def _alt_is_name(alt: str) -> bool:
+    """Больше половины слов с заглавной или с цифрой — имя, а не описание."""
+    words = [w for w in alt.split() if any(ch.isalpha() for ch in w)]
+    named = sum(1 for w in words if w[0].isupper() or any(ch.isdigit() for ch in w)
+                or (len(w) > 1 and w[1].isupper()))
+    return bool(words) and named * 2 > len(words)
 
 
 def check_alt_text(page) -> list:
@@ -586,15 +731,21 @@ def check_alt_text(page) -> list:
             "у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка "
             "или имя файла, а не описание", a0=len(fillers), a1=len(alts), a2=shown)))
     expected = declared_scripts(page.lang)
-    meaningful = [a for a in alts if a not in fillers]
+    # Имя модели или места («Samsung Galaxy S24 Ultra», «Haus der Kulturen der
+    # Welt») не переводят: язык сверяется по alt-описаниям, а не по именам.
+    meaningful = [a for a in alts if a not in fillers and not _alt_is_name(a)]
     if expected and meaningful:
         script, share, letters = text_script(" ".join(meaningful), expected)
         from . import langid
+        other = langid.identify(" ".join(meaningful), min_tokens=12)[0]
         same_script_other = (script in expected and letters >= 20
-                             and langid.identify(" ".join(meaningful), min_tokens=12)[0]
-                             not in ("", langid.primary(page.lang))
+                             and other not in ("", langid.primary(page.lang))
                              and langid.primary(page.lang) in langid.WORDS)
-        if same_script_other or (letters >= 20 and share >= 0.8 and script not in expected):
+        if same_script_other:
+            issues.append(("info", page.url, "img-alt-language", tr(
+                "страница на lang=«{a0}», а alt изображений написан на другом языке "
+                "({a1}): похоже, шаблон alt не переведён", a0=page.lang.strip(), a1=other)))
+        elif letters >= 20 and share >= 0.8 and script not in expected:
             issues.append(("info", page.url, "img-alt-language", tr(
                 "страница на lang=«{a0}», а alt изображений написан другим письмом "
                 "({a1}): похоже, шаблон alt не переведён", a0=page.lang.strip(),
@@ -686,15 +837,25 @@ def check_jsonld(page) -> list:
             issues.append(("warning", page.url, "jsonld-mismatch", tr(
                 "в JSON-LD {a0}, а на странице таких чисел нет — разметка должна повторять "
                 "видимое, иначе это риск ручных санкций", a0=", ".join(mismatch[:3]))))
-        for item in _ld_items(data):
+        items = _ld_items(data)
+        if not isinstance(data, (dict, list)):
+            # `null`, `"hello"`, `42` — блок без единой сущности.
+            issues.append(("info", page.url, "jsonld-no-type",
+                           tr("в блоке JSON-LD нет @type")))
+        nodes = {}
+        for item in items:
             # Контейнер `@graph` сам по себе типа не имеет — это обёртка,
             # а не сущность. Раньше каждая страница с разметкой Yoast
             # получала за неё ложную находку. Но `@context` без `@type`
             # рядом с данными — как раз забытый тип, а не обёртка.
-            if "@type" not in item and "@graph" not in item \
+            # `"@type": ""` — переменная шаблона, отрисованная пустой.
+            if not _filled(item.get("@type")) and "@graph" not in item \
                     and not set(item) <= {"@context", "@id"}:
                 issues.append(("info", page.url, "jsonld-no-type",
                                tr("в блоке JSON-LD нет @type")))
+            node_id = item.get("@id")
+            if isinstance(node_id, str) and node_id and item.get("name"):
+                nodes.setdefault(node_id, item)
         for item in _faq_pages(data):
             # Вопрос ищется во всём видимом тексте и после приведения обеих
             # сторон к одному виду: вёрстка ставит «’» вместо «'», тире
@@ -703,21 +864,32 @@ def check_jsonld(page) -> list:
             # Сверяется весь вопрос, а не первые 40 символов: в программном
             # FAQ отличается как раз хвост — город или товар.
             haystack = _plain(_shown_text(page))
+            # `<a>Springfield</a>'s` и `<span>depo</span><span>sit</span>`
+            # извлекатель разделяет пробелом, а браузер — нет.
+            squeezed = haystack.replace(" ", "")
             missing = []
             entities = item.get("mainEntity") or []
-            if isinstance(entities, dict):
+            if not isinstance(entities, list):
                 entities = [entities]
             for entity in entities:
                 if not isinstance(entity, dict):
                     continue
+                if "name" not in entity:
+                    # Yoast: `mainEntity: [{"@id": "…#faq-question-1"}]`, сам
+                    # вопрос — отдельный узел `@graph`.
+                    entity = nodes.get(entity.get("@id")) if isinstance(
+                        entity.get("@id"), str) else None
+                    if entity is None:
+                        continue
                 question = str(entity.get("name") or "").strip()
                 key = _question_key(question)
-                if key and key not in haystack:
+                if key and key not in haystack and key.replace(" ", "") not in squeezed:
                     missing.append(question)
             if missing:
                 issues.append(("warning", page.url, "jsonld-faq-invisible",
                                tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
-    return issues
+    # Тема и плагин выводят один и тот же блок дважды — находка одна.
+    return list(dict.fromkeys(issues))
 
 
 # Числа разметки, которые читатель обязан видеть: цена предложения, рейтинг и
@@ -731,7 +903,9 @@ _LD_NUMBERS = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice
 
 def _ld_numbers(node, depth=0, inside_rating=False):
     """(поле, число) из разметки, вглубь, но только предложения и общий рейтинг."""
-    if depth > 8:
+    # Список товаров категории кладёт цену на глубину 9:
+    # @graph > CollectionPage > ItemList > ListItem > Product > offers > priceSpecification.
+    if depth > 16:
         return
     if isinstance(node, list):
         for value in node:
@@ -739,12 +913,14 @@ def _ld_numbers(node, depth=0, inside_rating=False):
         return
     if not isinstance(node, dict):
         return
-    types = {str(t).lower() for t in (node.get("@type") if isinstance(node.get("@type"), list)
-                                      else [node.get("@type")]) if t}
+    types = _ld_types(node)
     for key, value in node.items():
         low = str(key).lower()
         if low in ("review", "reviews"):
             continue                       # оценки отдельных отзывов на странице не обязаны быть
+        if low in _LD_NUMBERS and isinstance(value, dict) and "@value" in value \
+                and not isinstance(value["@value"], (dict, list)):
+            value = value["@value"]        # `{"@value": "1600"}` — то же число
         if low in _LD_NUMBERS and not isinstance(value, (dict, list)):
             rating_field = low in ("ratingvalue", "reviewcount", "ratingcount")
             if rating_field and not (inside_rating or "aggregaterating" in types):
@@ -773,7 +949,15 @@ def _visible_numbers(text: str) -> tuple:
             values.add(round(float(_norm_number(raw)), 4))
         except (ValueError, OverflowError):
             pass
-    for raw in _LOOSE_GROUPS.findall(text):
+    for m in _LOOSE_GROUPS.finditer(text):
+        raw = m.group(0)
+        # «4.2» — дробная часть «2» не число; «19,99 €» — десятичная запятая,
+        # а не разряды: склеенные «1999» засчитывали цену в центах.
+        if re.search(r"\d[.,]$", text[max(0, m.start() - 2):m.start()]):
+            continue
+        tail = re.search(r"[,'’\u00a0\u202f ]+(\d+)$", raw)
+        if tail and len(tail.group(1)) <= 2 and "," in tail.group(0):
+            continue
         digits.add(re.sub(r"\D", "", raw).lstrip("0") or "0")
     for m in _THOUSANDS.finditer(text):
         try:
@@ -809,6 +993,10 @@ def _ld_value(value):
     if isinstance(value, float) and not math.isfinite(value):
         return None
     text = str(value).strip()
+    if re.fullmatch(r"[+-]?\d+\.\d+", text):
+        # Число schema.org: точка — всегда десятичная. «1.600» — это 1.6,
+        # как его и прочтёт Google, а не 1600 немецкой записи.
+        return round(float(text), 4)
     try:
         number = float(_norm_number(text.replace(" ", "")))
     except OverflowError:
@@ -838,13 +1026,27 @@ def _shown_text(page) -> str:
     return (page.text or "") + " " + (getattr(page, "chrome", "") or "")
 
 
+# Шкала оценки — не оценка: «5» из «4.2 out of 5» не подтверждает ratingValue 5.
+_RATING_SCALE = re.compile(r"(?:\bout\s+of|\bиз|\bvon|\bsur|/)\s*(?:5|10|100)(?![\d.,])", re.I)
+
+
 def _ld_numbers_missing(data, page) -> list:
     text = _shown_text(page)
     values, digits, thousands = _visible_numbers(text)
+    scaled = None
     out = []
     for field, value in _ld_numbers(data):
         number = _ld_value(value)
-        if number is None or number <= 0 or _shown(number, values, digits, thousands, text):
+        if number is None or number <= 0:
+            continue
+        if field == "ratingValue":
+            if scaled is None:
+                bare = _RATING_SCALE.sub(" ", text)
+                scaled = (_visible_numbers(bare), bare)
+            (r_values, r_digits, r_thousands), bare = scaled
+            if _shown(number, r_values, r_digits, r_thousands, bare):
+                continue
+        elif _shown(number, values, digits, thousands, text):
             continue
         shown = f"{field} {value}"
         if shown not in out:
@@ -859,14 +1061,15 @@ def check_microdata(page) -> list:
     рядом с видимыми «$1,600» Google читает так же, как JSON-LD, и так же
     считает расхождением со страницей.
 
-    Сверяются только значения из атрибутов (`content`, `value`): цена, стоящая
-    текстом элемента, видна по определению. Число, которое уже есть в JSON-LD
+    Сверяются значения из атрибутов (`content`, `value`) и текст скрытых
+    элементов: цена текстом видимого элемента видна по определению. Сверка — с
+    видимым текстом, как у JSON-LD: скрытая копия цены её не прячет. Число, которое уже есть в JSON-LD
     страницы, сверяет `jsonld-mismatch` — второй находки о нём не будет.
     """
     prices = getattr(page, "microdata", None) or ()
     if not prices:
         return []
-    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    text = _shown_text(page)
     values, digits, thousands = _visible_numbers(text)
     in_ld = set()
     for raw in page.jsonld or ():
@@ -906,7 +1109,7 @@ def _plain(text: str) -> str:
     return " ".join(text.translate(_TYPOGRAPHY).split()).lower()
 
 
-def _ld_items(data) -> list:
+def _ld_items(data, follow=()) -> list:
     """
     Разворачивает разметку в плоский список объектов.
 
@@ -914,6 +1117,9 @@ def _ld_items(data) -> list:
     она не разворачивалась, и один и тот же блок давал сразу три ложные
     находки: «нет @type», «нет даты», «нет автора» — плюс не находился
     FAQ, которого нет на странице.
+
+    `follow` — ключи вложенных сущностей, в которые спускаться тоже:
+    `("mainentity",)` достаёт статью или событие из `WebPage.mainEntity`.
     """
     out = []
     stack = [data]
@@ -926,36 +1132,43 @@ def _ld_items(data) -> list:
             graph = node.get("@graph")
             if isinstance(graph, (list, dict)):
                 stack.append(graph)
+            for key, value in node.items() if follow else ():
+                if str(key).lower() in follow and isinstance(value, (list, dict)):
+                    stack.append(value)
     return out
 
 
 def _ld_types(item: dict) -> set:
     value = item.get("@type")
     values = value if isinstance(value, list) else [value]
-    return {str(v).lower() for v in values if v}
+    return {_type_name(v) for v in values if v}
 
 
-DATE_KEYS = ("datepublished", "datemodified", "date", "updated", "published")
+def _type_name(value) -> str:
+    """`https://schema.org/FAQPage` и `schema:FAQPage` — тот же тип, что `FAQPage`."""
+    name = str(value).strip().lower()
+    if "schema.org/" in name:
+        return name.rsplit("/", 1)[-1]
+    return name[7:] if name.startswith("schema:") else name
+
+
+DATE_KEYS = ("datepublished", "datemodified", "date", "updated", "published",
+             "datecreated", "uploaddate")
+# Кто стоит за страницей: у события это организатор.
+AUTHOR_KEYS = ("author", "publisher", "creator", "organizer", "provider",
+               "sourceorganization")
+# Заглушки вместо имени: `"author": "N/A"` — не автор.
+_PLACEHOLDERS = {"n/a", "na", "null", "none", "undefined", "nan", "-", "—", "#"}
 
 
 # В значении даты есть год: `<time datetime="09:00">` в часах работы — не дата.
 _HAS_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
-_COMMENT = re.compile(r"<!--.*?-->", re.S)
-# Микроданные и RDFa на обычных элементах: `<span itemprop="author">`,
-# `<span property="datePublished" content="…">`. Читаются Google так же, как
-# JSON-LD, а извлекатель берёт itemprop только с <meta>.
-_INLINE_AUTHOR = re.compile(
-    r"<[a-z][^<>]*\b(?:itemprop|property)\s*=\s*[\"']?(?:[^\"'<>]*\s)?(?:schema:)?"
-    r"(?:author|creator|publisher)(?![\w:-])", re.I)
-_INLINE_DATE = re.compile(
-    r"<[a-z][^<>]*\b(?:itemprop|property)\s*=\s*[\"']?(?:[^\"'<>]*\s)?(?:schema:)?"
-    r"(?:datePublished|dateModified|dateCreated)(?![\w:-])", re.I)
 
 
 def _filled(value) -> bool:
     """Поле заполнено: `"author": ""` и `"datePublished": null` — не автор и не дата."""
     if isinstance(value, str):
-        return bool(value.strip())
+        return value.strip().lower() not in _PLACEHOLDERS and bool(value.strip())
     if isinstance(value, (list, tuple)):
         return any(_filled(v) for v in value)
     if isinstance(value, dict):
@@ -965,7 +1178,8 @@ def _filled(value) -> bool:
         if _filled(value.get("@id")):
             return True
         return any(_filled(v) for k, v in value.items() if not str(k).startswith("@"))
-    return value is not None and value is not False
+    # `"author": true` и `"datePublished": 0` — не имя и не дата.
+    return False
 
 
 def check_provenance(page) -> list:
@@ -973,28 +1187,27 @@ def check_provenance(page) -> list:
     issues = []
     meta = {str(k).lower(): v for k, v in (page.meta or {}).items()}
     has_date = any(_HAS_YEAR.search(str(meta.get(k) or "")) for k in DATE_KEYS)
-    has_author = _filled(meta.get("author"))
+    has_author = any(_filled(meta.get(k)) for k in ("author", "creator", "publisher"))
     for raw in page.jsonld or ():
         try:
             data = _load_ld(raw)
         except (ValueError, RecursionError):
             continue
-        for item in _ld_items(data):
+        for item in _ld_items(data, ("mainentity", "haspart")):
             values = {str(k).lower(): v for k, v in item.items()}
-            has_date = has_date or any(_filled(values.get(k)) for k in DATE_KEYS)
+            # Дата — строка с годом: `"0000-00-00"` и `true` датой не бывают.
+            has_date = has_date or any(isinstance(values.get(k), str)
+                                       and _HAS_YEAR.search(values[k]) for k in DATE_KEYS)
             # Издатель — тоже «кто за этим стоит»; находка так и называется:
             # «автор или организация».
-            has_author = has_author or any(_filled(values.get(k))
-                                           for k in ("author", "publisher", "creator"))
-    if not has_date or not has_author:
-        # Закомментированная разметка не разметка.
-        raw = _COMMENT.sub(" ", page.raw or "")
-        if not has_date:
-            has_date = any(_HAS_YEAR.search(m) for m in re.findall(
-                r"<time\b[^<>]{0,500}?datetime\s*=\s*[\"']?([^\"'<>]*)", raw, re.I))
-            has_date = has_date or bool(_INLINE_DATE.search(raw))
-        if not has_author:
-            has_author = bool(_INLINE_AUTHOR.search(raw))
+            has_author = has_author or any(_filled(values.get(k)) for k in AUTHOR_KEYS)
+    if not has_date:
+        # Закомментированная, инертная и показанная кодом разметка — не
+        # разметка. Микроданные и RDFa на элементах разбор уже положил в meta.
+        from .core import INERT, NOT_LIVE, drop_spans
+        raw = drop_spans(page.raw or "", NOT_LIVE + INERT)
+        has_date = any(_HAS_YEAR.search(m) for m in re.findall(
+            r"<time\b[^<>]{0,500}?datetime\s*=\s*[\"']?([^\"'<>]*)", raw, re.I))
     if not has_date:
         issues.append(("info", page.url, "no-date",
                        tr("нет машиночитаемой даты публикации или обновления")))
@@ -1008,7 +1221,7 @@ def run(pages: list, robots_path: str = "", cfg: dict = None) -> dict:
     """Все проверки машинной читаемости разом."""
     cfg = {**CONFIG, **(cfg or {})}
     robots = read_robots(robots_path)
-    issues = check_robots(robots) + check_blocked_pages(pages, robots)
+    issues = check_robots(robots, pages) + check_blocked_pages(pages, robots)
     for page in sorted(pages, key=lambda p: p.url):
         # Пустую оболочку `checks` уже назвал по имени. Оценивать её прямой
         # ответ и извлекаемость бессмысленно: оценивать нечего.

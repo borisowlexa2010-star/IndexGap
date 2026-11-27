@@ -18,9 +18,9 @@ import json
 import os
 import re
 from collections import Counter, defaultdict, namedtuple
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
-from .checks import _url_pattern, redirect_target
+from .checks import _url_pattern, redirect_chain, redirect_target
 from .core import read_text, url_key
 from .i18n import tr
 from .publish import indexable, is_draft
@@ -340,14 +340,23 @@ def _vercel_routes(items, origin: str, host: str) -> list:
         headers = item.get("headers") if isinstance(item.get("headers"), dict) else {}
         location = next((v for k, v in headers.items()
                          if str(k).lower() == "location" and isinstance(v, str)), "")
-        if sure is False or not status.startswith("3") or not location:
+        dest = item.get("dest") if isinstance(item.get("dest"), str) else ""
+        # `dest` без кода — перезапись, код 4xx — ошибка по адресу. Маршрут
+        # с `continue` или `methods` лишь добавляет заголовки или ловит не GET.
+        if sure is False or item.get("continue") or item.get("methods"):
+            continue
+        if not (status.startswith("3") and location) and not (dest and status in ("", "200")) \
+                and status[:1] not in ("4", "5"):
             continue
         src = re.sub(r"\(\?<(?![=!])", "(?P<", item["src"].lstrip("^").rstrip("$"))
         try:
             pattern = re.compile("^" + src + "$")
         except re.error:
             continue
-        rules.append(_make(pattern, location, origin, "redirect", status, False, sure is True))
+        if status.startswith("3") and location:
+            rules.append(_make(pattern, location, origin, "redirect", status, False, sure is True))
+        else:
+            rules += _by_status(pattern, dest, origin, status or "200", False, sure is True)
     return rules
 
 
@@ -425,9 +434,11 @@ def _match(rules: list, url: str, present: bool = False):
     for rule in rules:
         if present and not (rule.force and rule.sure):
             continue
-        found = rule.pattern.match(path.rstrip("/") or "/") or rule.pattern.match(path)
-        if found:
-            return found, rule
+        # Правило могут записать кириллицей, а адрес страницы — в процент-кодировке.
+        for form in ((path, unquote(path)) if "%" in path else (path,)):
+            found = rule.pattern.match(form.rstrip("/") or "/") or rule.pattern.match(form)
+            if found:
+                return found, rule
     return None, None
 
 
@@ -484,7 +495,67 @@ def destination(rules: list, url: str) -> str:
     found, rule = _match(rules, url)
     if not found or rule.kind not in ("redirect", "rewrite"):
         return ""
-    return _fill(found, rule.target, url)
+    return _fill(found, rule.target, url, same_site=True)
+
+
+def _unfillable(rules: list, url: str) -> bool:
+    """
+    Цель правила — на этом же сайте, но подставить в неё нечего: `:slug`,
+    которого нет в источнике, или `*` в цели. Все адреса уходят на одну
+    несуществующую страницу.
+    """
+    found, rule = _match(rules, url)
+    if not found or rule.kind not in ("redirect", "rewrite"):
+        return False
+    target = rule.target.split("?")[0].split("#")[0]
+    if "://" in target:
+        parts = urlsplit(target)
+        if _host_match(parts.netloc, urlsplit(url).netloc) is False:
+            return False
+        target = parts.path or "/"
+    return target.startswith("/") and not _fill(found, rule.target, url, same_site=True)
+
+
+def _dead_end(rules: list, new: dict, full: str, start: str) -> tuple:
+    """
+    Куда в итоге приводит цель редиректа в новой сборке: идёт по заглушкам
+    и правилам. ("", адрес) — к открытой странице или проверить нельзя;
+    ("missing", адрес) — в адрес, которого нет; ("closed", адрес) — к странице
+    с noindex или черновику; ("loop", адрес) — редиректы идут по кругу.
+    """
+    seen = {start}
+    for _ in range(10):
+        key = url_key(full)
+        if key in seen:
+            return "loop", full
+        seen.add(key)
+        page = new.get(key)
+        if page is None:
+            found, rule = _match(rules, full)
+            if not rule or rule.kind not in ("redirect", "rewrite"):
+                return "missing", full
+            nxt = _fill(found, rule.target, full, same_site=True)
+            if not nxt:
+                return "", full
+            full = nxt
+            continue
+        found, rule = _match(rules, page.url, present=True)
+        if rule and rule.kind in ("redirect", "rewrite"):
+            nxt = _fill(found, rule.target, page.url, same_site=True)
+            if nxt and url_key(nxt) != key:
+                full = nxt
+                continue
+        stub = redirect_target(page)
+        if stub:
+            nxt = urljoin(page.url, stub)
+            if _host_match(urlsplit(nxt).netloc, urlsplit(page.url).netloc) is False:
+                return "", full
+            full = nxt
+            continue
+        if not indexable(page) and _why_closed(page)[0] in ("noindex", "draft"):
+            return "closed", page.url
+        return "", page.url
+    return "", full
 
 
 # ── сравнение ─────────────────────────────────────────────────────────────────
@@ -509,6 +580,8 @@ def _why_closed(page) -> tuple:
     """Почему новая страница выпала из индекса: (код причины, подробность)."""
     if redirect_target(page):
         return "redirect", redirect_target(page)
+    if page.noindex and page.__dict__.get("_noindex_header"):
+        return "noindex-header", page.__dict__["_noindex_header"]
     if page.noindex:
         return "noindex", page.robots
     if is_draft(page):
@@ -519,7 +592,7 @@ def _why_closed(page) -> tuple:
     return "other", ""
 
 
-def _shadowed(rules: list, page, new_keys: set):
+def _shadowed(rules: list, page, new_keys: dict):
     """
     Страница есть в новой сборке, но правило, которое срабатывает раньше
     файла (`redirects` в vercel.json, `301!` у Netlify), отвечает по её
@@ -545,6 +618,11 @@ def _shadowed(rules: list, page, new_keys: set):
         level, item["redirect_missing"] = "warning", full
     else:
         level = "info"
+        why, end = _dead_end(rules, new_keys, full, page.key)
+        if why == "missing":
+            level, item["redirect_missing"] = "warning", end
+        elif why:
+            level, item["redirect_dead"], item["redirect_end"] = "warning", why, end
     return dict(item, reason="redirect-rule", level=level, detail=full or rule.target)
 
 
@@ -582,8 +660,18 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
         # Цель с `:splat` проверяется так же, как простая: `/rent/* /flat/:splat`
         # при разделе /flats/ ведёт каждую страницу в 404.
         full = destination(rules, page.url) if target else ""
-        if was_open and full and url_key(full) not in new_keys:
-            level, missing_target = "warning", full
+        dead, end = "", ""
+        if was_open and full and url_key(full) == url_key(urljoin(page.url, "/")):
+            # Раздел на главную — мягкий 404, как и у правила раньше файла.
+            level, dead = "critical", "home"
+        elif was_open and full:
+            why, end = _dead_end(rules, new, full, key)
+            if why == "missing":
+                level, missing_target = "warning", end
+            elif why:
+                level, dead = "warning", why
+        elif was_open and target and _unfillable(rules, page.url):
+            level, missing_target = "warning", target
         # Правило 404/410 или перезапись 200 на главную — тоже ответ, но не
         # редирект: на живом сайте по адресу ошибка или мягкий 404.
         if full and url_key(full) in new_keys:
@@ -592,6 +680,8 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
         removed.append({"url": page.url, "level": level, "indexable_before": was_open,
                         "redirect": target or None, "redirect_to": full or None,
                         "redirect_missing": missing_target or None,
+                        "redirect_dead": dead or None,
+                        "redirect_end": end if dead in ("closed", "loop") else None,
                         "answer": answer.status if answer else None,
                         "answer_rule": answer.origin if answer else None})
 
@@ -603,17 +693,33 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
         if was and not now:
             reason, detail = _why_closed(b)
             level, missing = ("info" if reason == "redirect" else "critical"), ""
+            loop = home = False
+            dead, end = "", ""
             if reason == "redirect":
                 # Заглушка, которая ведёт в пустоту, — то же, что редирект
                 # удалённой страницы в пустоту.
                 full = urljoin(b.url, detail)
-                if _host_match(urlsplit(full).netloc, urlsplit(b.url).netloc) is not False \
-                        and url_key(full) not in new_keys:
-                    level, missing = "warning", full
+                same = _host_match(urlsplit(full).netloc, urlsplit(b.url).netloc) is not False
+                if same:
+                    why, end = _dead_end(rules, new, full, key)
+                    if why == "missing":
+                        level, missing = "warning", end
+                    elif why:
+                        level, dead = "warning", why
+                # Как у правила vercel.json (`_shadowed`): раздел на главную —
+                # мягкий 404, а петля заглушек — ошибка вместо страницы.
+                loop = same and (dead == "loop" or bool(redirect_chain(b, new)[1]))
+                home = same and url_key(full) == url_key(urljoin(b.url, "/"))
+                if loop or home:
+                    level = "critical"
             closed.append({"url": b.url, "reason": reason, "detail": detail,
-                           "level": level, "redirect_missing": missing or None})
+                           "level": level, "redirect_missing": missing or None,
+                           "redirect_dead": dead or None,
+                           "redirect_end": end if dead else None,
+                           **({"redirect_loop": True} if loop else {}),
+                           **({"redirect_home": True} if home else {})})
         elif was and now and rules:
-            shadow = _shadowed(rules, b, new_keys)
+            shadow = _shadowed(rules, b, new)
             if shadow:
                 closed.append(shadow)
         if now and not was:
@@ -622,6 +728,25 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
             nosnippet.append(b.url)
         before, after = a.word_count, b.word_count
         if now and before >= SHRINK_MIN_WORDS and after < before * (1 - SHRINK_SHARE):
+            shrunk.append({"url": b.url, "old_words": before, "new_words": after,
+                           "drop": round(1 - after / before, 3)})
+
+    # Раздел, уехавший редиректом на новые адреса, сравнивается парами
+    # «старый адрес → новый»: срезанный текст и запрет сниппета видны и там.
+    # Пара — только когда на новую страницу ведёт одна старая.
+    targets = Counter(url_key(r["redirect_to"]) for r in removed if r["redirect_to"])
+    for r in removed:
+        to = url_key(r["redirect_to"] or "")
+        if r["level"] != "info" or not r["indexable_before"] or targets[to] != 1 \
+                or to in old or to not in new:
+            continue
+        a, b = old.get(url_key(r["url"])), new[to]
+        if a is None or not indexable(b):
+            continue
+        if b.nosnippet and not a.nosnippet:
+            nosnippet.append(b.url)
+        before, after = a.word_count, b.word_count
+        if before >= SHRINK_MIN_WORDS and after < before * (1 - SHRINK_SHARE):
             shrunk.append({"url": b.url, "old_words": before, "new_words": after,
                            "drop": round(1 - after / before, 3)})
 
@@ -666,10 +791,26 @@ FIELD_LABEL = {"title": "title", "h1": "H1", "description": "description",
                "canonical": "canonical", "url": "URL"}
 
 
+def _dead_text(item: dict) -> str:
+    """Хвост сообщения о редиректе, который ведёт не к открытой странице."""
+    why = item.get("redirect_dead")
+    if why == "home":
+        return " — " + tr("редирект на главную поиск считает мягким 404: страница выпадет "
+                          "из индекса")
+    if why == "closed":
+        return " — " + tr("а цепочка редиректов приводит к странице, закрытой от индекса: {a0}",
+                          a0=item.get("redirect_end"))
+    if why == "loop":
+        return " — " + tr("а дальше редиректы идут по кругу")
+    return ""
+
+
 def _reason_text(item: dict) -> str:
     reason, detail = item["reason"], item["detail"]
     if reason == "noindex":
         return tr("появился noindex: meta robots «{a0}»", a0=detail)
+    if reason == "noindex-header":
+        return tr("появился noindex: заголовок X-Robots-Tag ({a0})", a0=detail)
     if reason == "canonical":
         return tr("canonical теперь ведёт на {a0}", a0=detail)
     if reason == "draft":
@@ -678,14 +819,20 @@ def _reason_text(item: dict) -> str:
         if item.get("redirect_missing"):
             return tr("страница стала заглушкой-редиректом на {a0} — а этой страницы в новой "
                       "сборке нет", a0=item["redirect_missing"])
-        return tr("страница стала заглушкой-редиректом на {a0}", a0=detail)
+        if item.get("redirect_loop"):
+            return tr("страница стала заглушкой-редиректом на {a0}, а оттуда редирект ведёт "
+                      "по кругу — на живом сайте это ошибка вместо страницы", a0=detail)
+        if item.get("redirect_home"):
+            return tr("страница стала заглушкой-редиректом на главную — поисковик считает "
+                      "это мягким 404")
+        return tr("страница стала заглушкой-редиректом на {a0}", a0=detail) + _dead_text(item)
     if reason == "redirect-rule":
         if item.get("redirect_missing"):
             return tr("страница есть в новой сборке, но правило из {a0} срабатывает раньше "
                       "файла и уводит её на {a1} — а этой страницы в новой сборке нет",
-                      a0=item["origin"], a1=detail)
+                      a0=item["origin"], a1=item["redirect_missing"])
         return tr("страница есть в новой сборке, но правило из {a0} срабатывает раньше файла "
-                  "и уводит её на {a1}", a0=item["origin"], a1=detail)
+                  "и уводит её на {a1}", a0=item["origin"], a1=detail) + _dead_text(item)
     if reason == "rule-error":
         return tr("страница есть в новой сборке, но правило из {a0} срабатывает раньше файла "
                   "и отвечает кодом {a1}", a0=item["origin"], a1=item["status"])
@@ -710,7 +857,7 @@ def items(result: dict) -> list:
         elif r["redirect"]:
             out.append((r["level"], r["url"], "page-redirected",
                         tr("страницы нет, редирект на {a0}",
-                           a0=r.get("redirect_to") or r["redirect"])))
+                           a0=r.get("redirect_to") or r["redirect"]) + _dead_text(r)))
         elif r.get("answer") and r["indexable_before"]:
             if r["answer"].startswith("200"):
                 out.append((r["level"], r["url"], "page-removed", tr(
@@ -761,10 +908,14 @@ def moved_findings(old_issues: list, result: dict, new_pages: list) -> list:
     цель ссылки) переносится так же, в той же форме — ключом, полным адресом или путём.
     """
     new_by_key = {p.key: p.url for p in new_pages}
+    # Переезд — только на страницу, которой в старой сборке не было. Страница,
+    # слитая редиректом в уже существующую, своих находок цели не передаёт:
+    # иначе новая поломка цели совпадала со старой находкой удалённой.
+    fresh = {url_key(u) for u in (result.get("added") or {}).get("urls") or ()}
     moved = {}
     for r in result.get("removed") or ():
         to = r.get("redirect_to")
-        if to and url_key(to) in new_by_key:
+        if to and url_key(to) in new_by_key and url_key(to) in fresh:
             moved[url_key(r["url"])] = new_by_key[url_key(to)]
     if not moved:
         return old_issues

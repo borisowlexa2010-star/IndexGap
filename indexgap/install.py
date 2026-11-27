@@ -26,6 +26,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 
 from .core import SourceError, DEFAULT_EXTS, OWN_DIRS, SKIP_DIRS, read_text
@@ -33,6 +34,9 @@ from .i18n import tr
 
 SKILL_DIR = os.path.join(".claude", "skills")
 CONFIG_NAME = "indexgap.json"
+# `check` читает и `.indexgap.json`: init, не видя его, писал рядом новый
+# indexgap.json, и тот молча затенял настройки, сделанные руками.
+CONFIG_NAMES = (CONFIG_NAME, ".indexgap.json")
 GITIGNORE_MARK = "# indexgap"
 AGENTS_START = "<!-- indexgap:start -->"
 AGENTS_END = "<!-- indexgap:end -->"
@@ -43,7 +47,10 @@ LIKELY_CONTENT = ("content", "src/content", "app/content", "pages", "src/pages",
 # Куда генераторы кладут готовый сайт. Смотрится вторым: исходники, если они
 # есть, важнее собственной сборки. Без этого списка проект на Next.js, где
 # исходников в виде страниц нет вовсе, получал несуществующий `./content`.
-LIKELY_BUILD = (".next/server/app", "out", "dist", "public", "_site", "build")
+# `dist/client` и `build/client` — статическая часть сборки Astro и React Router
+# с сервером: стоят раньше `dist` и `build`, иначе адреса сдвигались на `/client/`.
+LIKELY_BUILD = (".next/server/app", "out", "dist/client", "build/client", "dist", "public",
+                "_site", "build", ".output/public", "docs/.vitepress/dist", ".vitepress/dist")
 
 # Где обычно записан адрес сайта.
 SITE_FILES = ("package.json", "astro.config.mjs", "astro.config.ts", "astro.config.js",
@@ -100,9 +107,15 @@ def detect_content_dir(root: str) -> str:
     # всех — ссылки и заголовки там появляются только при сборке. Сборка
     # считается готовой, если в ней есть главная и страниц не меньше половины
     # исходников; иначе это остаток старой сборки.
+    # Заметки разработчика в docs/ — не исходники этой сборки: 25 ADR
+    # перевешивали готовый out/ с главной, и терялся и каталог, и адрес.
     if build and _has_home(os.path.join(root, *build[0].split("/"))) and (
-            not sources or build[1] >= sources[1] / 2):
+            not sources or build[1] >= sources[1] / 2 or sources[0] == "docs"):
         return os.path.join(".", *build[0].split("/"))
+    # Корень с собранной главной — сам сайт: rent/ или blog/ внутри него —
+    # раздел, а не каталог страниц. Иначе каждый адрес терял сегмент.
+    if _built_home(root) and (not sources or _html_in(root) >= sources[1] / 2):
+        return "."
     if sources or build:
         best = sources or build
         return os.path.join(".", *best[0].split("/"))
@@ -122,6 +135,34 @@ def detect_content_dir(root: str) -> str:
     return "." if _pages_in(root) else ""
 
 
+def _built_home(path: str) -> bool:
+    """Главная в каталоге — готовая страница, а не шаблон с фронтматтером."""
+    for name in ("index.html", "index.htm"):
+        page = os.path.join(path, name)
+        if not os.path.isfile(page):
+            continue
+        try:
+            text, _ = read_text(page)
+        except SourceError:
+            continue
+        head = text[:4000].lstrip("\ufeff \t\r\n").lower()
+        if not head.startswith("---") and ("<html" in head or "<!doctype" in head):
+            return True
+    return False
+
+
+def _html_in(directory: str) -> int:
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(directory):
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d not in SKIP_DIRS
+                       and d not in OWN_DIRS]
+        total += sum(1 for f in filenames if f.lower().endswith((".html", ".htm")))
+        if total > 5000:
+            break
+    return total
+
+
 def _has_home(path: str) -> bool:
     return any(os.path.isfile(os.path.join(path, name))
                for name in ("index.html", "index.htm"))
@@ -131,6 +172,18 @@ def _has_home(path: str) -> bool:
 _NOT_A_SITE = ("schema.org", "w3.org", "npmjs", "github.com", "gitlab.com", "bitbucket.org",
                "localhost", "example.com", "json-schema", "vercel.sh", "unpkg.com",
                "jsdelivr", "googleapis.com", "gstatic.com", "githubusercontent.com")
+
+
+def _not_a_site(url: str) -> bool:
+    """Хост из списка _NOT_A_SITE — по имени хоста, а не подстрокой адреса."""
+    from urllib.parse import urlsplit
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return True
+    labels = host.split(".")
+    return any(host == bad or host.endswith("." + bad) if "." in bad else bad in labels
+               for bad in _NOT_A_SITE)
 
 
 def _declared_site(path: str) -> str:
@@ -149,7 +202,7 @@ def _declared_site(path: str) -> str:
             found = re.search(pattern, text[:20000], re.I)
             if found and found.group(1).startswith(("http://", "https://")):
                 origin = _origin(found.group(1))
-                if origin and not any(bad in origin for bad in _NOT_A_SITE):
+                if origin and not _not_a_site(origin):
                     return _with_home_path(origin, found.group(1), text)
     return ""
 
@@ -199,7 +252,9 @@ def detect_site(root: str, content_dir: str = "") -> str:
             except SourceError:
                 continue
             found = re.search(r"<loc>\s*(https?://[^<\s]+)", text, re.I)
-            if found:
+            # `localhost:3000` или относительный адрес — не ответ: дальше
+            # ещё CNAME и конфиги сборщика.
+            if found and _origin(found.group(1)):
                 return _origin(found.group(1))
 
     for rel in ("public/robots.txt", "robots.txt", "static/robots.txt"):
@@ -210,7 +265,7 @@ def detect_site(root: str, content_dir: str = "") -> str:
             except SourceError:
                 continue
             found = re.search(r"^\s*sitemap\s*:\s*(\S+)", text, re.I | re.M)
-            if found:
+            if found and _origin(found.group(1)):
                 return _origin(found.group(1))
 
     for name in SITE_FILES:
@@ -228,9 +283,18 @@ def detect_site(root: str, content_dir: str = "") -> str:
             if _HOST.match(host):
                 return f"https://{host.lower()}/"
             continue
+        if name == "package.json":
+            # Адрес автора в `author` стоял в файле раньше `homepage`.
+            try:
+                home = json.loads(text).get("homepage")
+            except (ValueError, AttributeError):
+                home = None
+            if isinstance(home, str) and SITE_RE.match(home) and not _not_a_site(home) \
+                    and _origin(home):
+                return _origin(home)
         for match in SITE_RE.finditer(text):
             url = match.group(0)
-            if any(bad in url for bad in _NOT_A_SITE):
+            if _not_a_site(url):
                 continue
             # `"$schema": "https://…"` — адрес схемы конфига, а не сайта.
             line_start = text.rfind("\n", 0, match.start()) + 1
@@ -283,6 +347,11 @@ def _keyword_header(header: str) -> int:
     объявлялся список счетов рядом с настоящим keywords.csv.
     """
     columns = [c.strip().strip('"\'').strip() for c in re.split(r"[,;\t|]", header.lstrip("\ufeff"))]
+    # Выгрузка запросов из Search Console (query, clicks, impressions, ctr,
+    # position) — статистика поиска, а не семантика страниц.
+    if ("query" in columns and "keyword" not in columns
+            and len({"clicks", "impressions", "ctr", "position"} & set(columns)) >= 2):
+        return 0
     if any(c in KEYWORD_COLUMNS for c in columns):
         return 2
     for column in columns:
@@ -446,14 +515,42 @@ def stale_skills(project_root: str) -> list:
     return stale
 
 
-def write_config(root: str, detected: dict, force: bool = False) -> tuple:
+def _config_path(root: str) -> str:
+    for name in CONFIG_NAMES:
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            return path
+    return os.path.join(root, CONFIG_NAME)
+
+
+def write_config(root: str, detected: dict, force: bool = False,
+                 explicit: dict = None) -> tuple:
     """
     Пишет `indexgap.json`. Существующий не трогает без `--force`:
-    там могут быть пороги, подобранные под проект руками.
+    там могут быть пороги, подобранные под проект руками. Значения, названные
+    флагом явно (`--site`, `--profile`…), вписываются в него поверх: иначе
+    init печатал новый адрес, а в конфиге оставался прежний пустой.
     """
-    path = os.path.join(root, CONFIG_NAME)
+    path = _config_path(root)
     if os.path.isfile(path) and not force:
-        return path, False
+        changes = {k: v for k, v in (explicit or {}).items() if v}
+        if not changes:
+            return path, False
+        try:
+            with open(path, encoding="utf-8-sig") as fh:
+                loaded = json.load(fh)
+        except (OSError, ValueError):
+            return path, False
+        if not isinstance(loaded, dict):
+            return path, False
+        changed = [k for k, v in changes.items() if loaded.get(k) != v]
+        if not changed:
+            return path, False
+        loaded.update(changes)
+        with open(_inside(root, path), "w", encoding="utf-8") as fh:
+            json.dump(loaded, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        return path, changed
     _inside(root, path)
 
     config = {
@@ -498,13 +595,44 @@ def update_gitignore(root: str) -> bool:
         except SourceError:
             existing = ""
     if GITIGNORE_MARK in existing:
-        return False
+        return _refresh_gitignore_block(root, path, existing)
     missing = [line for line in GITIGNORE_LINES if line not in existing]
     if not missing:
         return False
     block = "\n" + GITIGNORE_MARK + "\n" + "\n".join(missing) + "\n"
     with open(_inside(root, path), "a", encoding="utf-8") as fh:
         fh.write(block)
+    return True
+
+
+# Строки, которые прежние версии писали в блок, а теперь писать нельзя.
+_GITIGNORE_DROPPED = (".indexgap-manifest.json",)
+
+
+def _refresh_gitignore_block(root: str, path: str, existing: str) -> bool:
+    """
+    Блок `# indexgap` от старой версии: манифест публикации в нём спрятан от
+    git (и CI считал сайт новым при каждом деплое), а новых отчётов нет.
+    Правится только сам блок — до первой пустой строки после метки.
+    """
+    lines = existing.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == GITIGNORE_MARK) \
+        if any(line.strip() == GITIGNORE_MARK for line in lines) else -1
+    if start < 0:
+        return False
+    end = start + 1
+    while end < len(lines) and lines[end].strip():
+        end += 1
+    block = [line for line in lines[start + 1:end] if line.strip() not in _GITIGNORE_DROPPED]
+    rest = lines[:start + 1] + lines[end:]
+    missing = [line for line in GITIGNORE_LINES
+               if line not in block and line not in rest]
+    new_block = block + missing
+    if new_block == lines[start + 1:end]:
+        return False
+    updated = lines[:start + 1] + new_block + lines[end:]
+    with open(_inside(root, path), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(updated) + "\n")
     return True
 
 
@@ -518,7 +646,7 @@ def update_agents_md(root: str, detected: dict, create: bool = False) -> str:
     if not os.path.isfile(path) and not create:
         return ""
     block = (
-        tr("{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`), ИИ-поиск и цитирование (`indexgap-cite`).\n{a6}", a0=AGENTS_START, a1=detected['profile'], a2=detected['content'], a3=detected['content'], a4=detected['site'] or tr('<адрес сайта>'), a5=' --dataset ' + detected['dataset'] if detected.get('dataset') else '', a6=AGENTS_END)
+        tr("{a0}\n## SEO-конвейер\n\nВ проекте установлен indexgap. Профиль контента — `{a1}`, страницы в `{a2}`.\n\nПеред публикацией сгенерированных страниц:\n\n```bash\nindexgap check {a3} --site {a4}{a5}\n```\n\nПолные инструкции — в `.claude/skills/indexgap-*/SKILL.md`: разбор семантики (`indexgap-plan`), проверка перед публикацией (`indexgap-review`), sitemap и IndexNow (`indexgap-publish`), несколько сайтов сразу (`indexgap-portfolio`), ИИ-поиск и цитирование (`indexgap-cite`).\n{a6}", a0=AGENTS_START, a1=detected['profile'], a2=detected['content'], a3=shlex.quote(detected['content'].replace(os.sep, '/')), a4=shlex.quote(detected['site']) if detected['site'] else tr('<адрес сайта>'), a5=' --dataset ' + shlex.quote(detected['dataset'].replace(os.sep, '/')) if detected.get('dataset') else '', a6=AGENTS_END)
     )
     existing = ""
     if os.path.isfile(path):
@@ -548,6 +676,28 @@ def new_indexnow_key() -> str:
     return secrets.token_hex(16)
 
 
+def _given_path(root: str, value: str, flag: str, want_dir: bool) -> str:
+    """
+    Путь из флага: от каталога проекта, а если там его нет — от рабочего
+    каталога. В конфиг пишется путь от проекта; опечатка — ошибка со словами.
+    """
+    if not value:
+        return value
+    test = os.path.isdir if want_dir else os.path.isfile
+    for base in (root, os.getcwd()):
+        candidate = os.path.normpath(os.path.join(base, value))
+        if test(candidate):
+            rel = os.path.relpath(candidate, root)
+            if rel == ".":
+                return "."
+            if rel.split(os.sep)[0] == os.pardir:
+                return candidate
+            return os.path.join(".", rel)
+    raise SourceError(tr("{a0} {a1}: такого {a2} нет ни в {a3}, ни в рабочем каталоге.",
+                         a0=flag, a1=value,
+                         a2=tr("каталога") if want_dir else tr("файла"), a3=root))
+
+
 def run(root: str, site: str = "", content: str = "", profile: str = "",
         dataset: str = "", force: bool = False, agents: bool = False) -> dict:
     """Собирает всё вместе. Возвращает отчёт о том, что сделано и что понято."""
@@ -558,8 +708,21 @@ def run(root: str, site: str = "", content: str = "", profile: str = "",
     # Что уже записано в indexgap.json, заново не угадывается: там может
     # стоять выбор, сделанный руками, а повторный `init` после `brief --write`
     # называл страницами каталог собственных нарядов.
+    # Флаги проверяются до записи: неизвестный профиль, адрес без схемы и
+    # несуществующий путь уходили в конфиг, и каждый следующий check падал.
+    if profile:
+        from .profiles import get as _profile
+        _profile(profile)
+        profile = profile.strip().lower()
+    if site:
+        from .core import check_site_url
+        check_site_url(site)
+    content = _given_path(root, content, "--content", True)
+    dataset = _given_path(root, dataset, "--dataset", False)
+    explicit = {"site": site, "pages": content, "dataset": dataset, "profile": profile}
+
     known = {}
-    config_file = os.path.join(root, CONFIG_NAME)
+    config_file = _config_path(root)
     if os.path.isfile(config_file) and not force:
         try:
             with open(config_file, encoding="utf-8-sig") as fh:
@@ -570,10 +733,14 @@ def run(root: str, site: str = "", content: str = "", profile: str = "",
     content = content or str(known.get("pages") or "")
     site = site or str(known.get("site") or "")
     dataset = dataset or str(known.get("dataset") or "")
+    saved_profile = "" if profile else str(known.get("profile") or "")
 
     detected_content = content or detect_content_dir(root)
     detected_dataset = dataset or detect_dataset(root)
     detected_profile, why = ((profile, tr("задан флагом")) if profile
+                             else (saved_profile, tr("записан в {a0}",
+                                                     a0=os.path.basename(config_file)))
+                             if saved_profile
                              else detect_profile(root, detected_content, detected_dataset))
     detected = {
         "content": detected_content,
@@ -586,7 +753,7 @@ def run(root: str, site: str = "", content: str = "", profile: str = "",
     }
 
     skills = install_skills(root)
-    config_path, config_written = write_config(root, detected, force)
+    config_path, config_written = write_config(root, detected, force, explicit)
     gitignore = update_gitignore(root)
     agents_path = update_agents_md(root, detected, create=agents)
 

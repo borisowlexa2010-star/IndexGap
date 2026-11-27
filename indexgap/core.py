@@ -67,7 +67,9 @@ HEAD_TAGS = {"html", "head", "base", "basefont", "bgsound", "link", "meta",
 # Ссылок и подписей здесь нет намеренно: два соседних <a> — это два разных
 # пункта, и склеивать их в «словослово» нельзя.
 INLINE_TAGS = {"b", "i", "em", "strong", "code", "small", "sub", "sup",
-               "mark", "u", "s", "abbr", "var", "kbd", "font", "big", "tt"}
+               "mark", "u", "s", "abbr", "var", "kbd", "font", "big", "tt",
+               # <wbr> — только место для переноса: «$1,<wbr>600» — одно число.
+               "wbr"}
 
 # Теги без закрывающей пары: они не открывают основной блок и не меняют глубину.
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -118,6 +120,9 @@ SOURCE_MARKERS = ("package.json", "pyproject.toml", "Gemfile", "go.mod",
                   "Cargo.toml", "composer.json", "hugo.toml", "hugo.yaml",
                   "config.toml", "_config.yml", "astro.config.mjs", "Makefile",
                   ".git")
+# Репозиторий — ещё не генератор: сайт на чистом HTML с GitHub Pages лежит в
+# корне репозитория, и `/team/` при `team.html` там — 404.
+_REPO_ONLY_MARKERS = (".git", "Makefile")
 
 DEFAULT_EXTS = (".html", ".htm", ".md", ".markdown")
 
@@ -152,6 +157,35 @@ def gunzip(data: bytes) -> bytes:
     return out
 
 
+def _xml_doctype(data: bytes) -> bool:
+    """
+    Есть ли DOCTYPE в прологе — по разбору, а не по первым 64 КБ: длинный
+    комментарий до `<!DOCTYPE` проводил DTD мимо проверки. Разбор кончается
+    на первом элементе: позже объявление типа стоять не может.
+    """
+    from xml.parsers import expat
+    found = []
+
+    class Stop(Exception):
+        pass
+
+    def doctype(*_):
+        found.append(True)
+        raise Stop
+
+    def element(*_):
+        raise Stop
+
+    parser = expat.ParserCreate()
+    parser.StartDoctypeDeclHandler = doctype
+    parser.StartElementHandler = element
+    try:
+        parser.Parse(data, True)
+    except (Stop, expat.ExpatError, ValueError):
+        pass
+    return bool(found)
+
+
 def parse_xml(data):
     """
     XML без объявления типа документа.
@@ -164,7 +198,7 @@ def parse_xml(data):
     if isinstance(data, str):
         data = data.encode("utf-8")
     probe = data[:65536].replace(b"\x00", b"").upper()
-    if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+    if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe or _xml_doctype(data):
         raise SourceError(tr("в XML объявлен DOCTYPE — такой файл не читается: "
                              "ни sitemap, ни выгрузке он не нужен"))
     try:
@@ -334,6 +368,9 @@ class Page:
     # элемента: текст элемента и так виден. Только внутри `itemscope`,
     # `typeof` или `vocab`: вне элемента-сущности поисковик их не читает.
     microdata: list = field(default_factory=list)
+    # Служебные блоки основного текста: крошки, подпись автора, оглавление.
+    # Абзацами они не становятся, но в text остаются.
+    service: list = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -418,6 +455,9 @@ Page.paragraphs = property(_get_paragraphs, _set_paragraphs)
 _EXT_RE = re.compile(r"\.(html?|md|markdown)$", re.I)
 _BARE_INDEX = re.compile(r"(^|/)index$", re.I)
 _INDEX_RE = re.compile(r"(^|/)index\.(html?|md|markdown)$", re.I)
+# Hugo: `_index.md` — страница раздела (`content/posts/_index.md` — /posts/),
+# в корне — главная. Адреса `/_index/` на сайте нет.
+_HUGO_INDEX = re.compile(r"(^|/)_index\.(md|markdown)$", re.I)
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -456,6 +496,9 @@ def url_key(url: str) -> str:
     # cleanUrls ссылается так на каждой странице, и вышло 307 «битых» ссылок.
     if len(path) > 1:
         path = path.rstrip("/")
+        # Каталог с именем файла — `c.html/index.html`: сервер отдаёт его и по
+        # /c.html, а ключ страницы расходился с ключом ссылки.
+        path = _EXT_RE.sub("", path)
     path = _BARE_INDEX.sub(r"\1", path)
     if len(path) > 1:
         path = path.rstrip("/")
@@ -505,12 +548,15 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
     # macOS пишет имена файлов в NFD, ссылки на сайте — в NFC. Адрес один.
     rel = unicodedata.normalize("NFC", rel)
     rel = _INDEX_RE.sub(r"\1", rel)
+    rel = _HUGO_INDEX.sub(r"\1", rel)
     rel = _EXT_RE.sub("", rel)
     if rel in (".", ""):
         rel = ""
     # Пробелы и кириллица в имени файла обязаны уехать в URL закодированными,
     # иначе sitemap невалиден, а ссылка на страницу с ней не сойдётся.
-    rel = "/".join(quote(seg, safe="~-._") for seg in rel.split("/"))
+    # Байт не в UTF-8 в имени каталога (`caf\xe9`) приходит из os.walk
+    # суррогатом: строгий quote ронял весь прогон. Он уезжает в URL как %E9.
+    rel = "/".join(quote(seg, safe="~-._", errors="surrogateescape") for seg in rel.split("/"))
     url = urljoin(base_url.rstrip("/") + "/", rel)
     return normalize_url(url, directory=True)
 
@@ -518,7 +564,7 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
 def _file_url(path: str, root: str, base_url: str) -> str:
     """Адрес самого файла, с именем и расширением: от него считаются ссылки."""
     rel = unicodedata.normalize("NFC", os.path.relpath(path, root).replace(os.sep, "/"))
-    rel = "/".join(quote(seg, safe="~-._") for seg in rel.split("/"))
+    rel = "/".join(quote(seg, safe="~-._", errors="surrogateescape") for seg in rel.split("/"))
     return urljoin(base_url.rstrip("/") + "/", rel)
 
 
@@ -549,7 +595,9 @@ def check_site_url(site: str) -> str:
                a0=site, a1=urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))))
     # Пробел и кириллица в пути базы шли в <loc> как есть, а пути страниц
     # уже кодируются. Готовые %-последовательности не трогаются.
-    path = quote(parts.path, safe="/%~-._!$&'()*+,;=:@")
+    # `--site https://x/docs/index.html` — адрес главной файлом: имя файла
+    # становилось каталогом, и страницы получали `/docs/index.html/a/`.
+    path = quote(_INDEX_RE.sub(r"\1", parts.path), safe="/%~-._!$&'()*+,;=:@")
     site = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
     return site.rstrip("/") + "/"
 
@@ -632,6 +680,28 @@ def _mostly_utf8(data: bytes) -> bool:
     return good > 0 and (bad <= 8 or bad / len(data) < 0.001)
 
 
+def _utf8_majority(data: bytes) -> bool:
+    """
+    Объявлен UTF-8, и верных многобайтовых знаков больше, чем битых байтов:
+    подвал в cp1251 на UTF-8-странице. Браузер слушается объявления и
+    заменяет только битые байты; чтение всей страницы как cp1251 давало
+    мусор вместо каждой буквы. Страница целиком в cp1251 верных
+    последовательностей UTF-8 почти не содержит и сюда не попадает.
+    """
+    bad = len(data.decode("utf-8", errors="replace")) - len(data.decode("utf-8", errors="ignore"))
+    return len(_HIGH.findall(data)) - bad > 2 * bad
+
+
+def _few_replaced(data: bytes, encoding: str):
+    """Текст с заменой битых мест — если их считанные единицы, иначе None."""
+    try:
+        text = data.decode(encoding, errors="replace")
+    except LookupError:
+        return None
+    bad = text.count("\ufffd") - data.decode(encoding, errors="ignore").count("\ufffd")
+    return text if bad <= 8 or bad / max(len(text), 1) < 0.001 else None
+
+
 def _bomless_utf16(data: bytes) -> str:
     """UTF-16 без BOM: в начале файла каждый второй байт — ноль."""
     head = data[:512]
@@ -691,6 +761,14 @@ def read_text(path: str) -> tuple:
             try:
                 return data.decode(encoding), encoding
             except UnicodeDecodeError:
+                if encoding != "utf-8-sig":
+                    # Лишний последний байт (оборванная загрузка, LF от
+                    # редактора) — браузер покажет UTF-16 с одним знаком
+                    # замены. Раньше файл читался как cp1251 с нулями внутри
+                    # и выпадал из проверок как «кусок шаблона».
+                    text = _few_replaced(data, encoding)
+                    if text is not None:
+                        return text, encoding
                 break
 
     utf16 = _bomless_utf16(data)
@@ -698,7 +776,9 @@ def read_text(path: str) -> tuple:
         try:
             return data.decode(utf16), utf16
         except UnicodeDecodeError:
-            pass
+            text = _few_replaced(data, utf16)
+            if text is not None:
+                return text, utf16
 
     # Строгий UTF-8 с не-ASCII — это UTF-8, что бы ни было объявлено: текст в
     # cp1251 строгой проверки UTF-8 практически не проходит, а устаревший
@@ -712,7 +792,7 @@ def read_text(path: str) -> tuple:
     if declared and is_utf8(declared) or not declared and _mostly_utf8(data):
         # Один случайный байт — `\xa9` в подвале — не повод читать всю страницу
         # как cp1251: браузер покажет UTF-8 с одним знаком замены.
-        if _mostly_utf8(data):
+        if _mostly_utf8(data) or declared and _utf8_majority(data):
             return data.decode("utf-8", errors="replace"), "utf-8"
     if declared and not is_utf8(declared):
         for errors in ("strict", "replace"):
@@ -744,6 +824,11 @@ def open_text(path: str):
 # стоят текстом элемента (`<span itemprop="ratingValue">4.8</span>`), а не
 # атрибутом; цена атрибутом — норма WooCommerce и тем Shopify.
 _MICRODATA_PRICES = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice"}
+# Автор и даты в микроданных и RDFa на обычных элементах: `<span
+# itemprop="author">`, `<time itemprop="startDate" datetime="…">`. Значение
+# ложится в meta под тем же ключом, что дал бы `<meta itemprop>`.
+_MICRODATA_META = {"author", "creator", "publisher", "datepublished", "datemodified",
+                   "datecreated", "startdate", "enddate"}
 
 
 class _Extractor(HTMLParser):
@@ -752,6 +837,8 @@ class _Extractor(HTMLParser):
         self.title = ""
         self.description = ""
         self.canonical = ""
+        self.canonicals = []       # все непустые canonical в <head>
+        self.canonicals_in_body = []   # canonical в <body> поисковик не читает
         self.robots = ""
         self.lang = ""
         self.base = ""
@@ -785,6 +872,13 @@ class _Extractor(HTMLParser):
         self.alts = []
         self.microdata = []        # (поле, значение) цен микроданных и RDFa
         self._scope_stack = []     # глубины открытых itemscope / typeof / vocab
+        # RDFa: открытые `vocab` и `prefix` — (глубина, словарь schema.org ли;
+        # префикс → schema.org ли).
+        self._vocab_stack = []
+        self._prefix_stack = []
+        # Свойства, значение которых — текст элемента: [глубина, ключ, куски, id скрытых].
+        self._props = []
+        self._hidden_prices = []   # (поле, текст, id скрытых) — цена текстом скрытого элемента
         self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0, "img_empty_alt": 0,
                        "script": 0, "p": 0}
         self.meta = {}             # author, datePublished и прочее из <meta>
@@ -834,12 +928,22 @@ class _Extractor(HTMLParser):
         # но сверка разметки с видимым ведётся без него. Стек — (глубина, id).
         self._hidden_stack = []
         self._hidden_ids = ()
+        # visibility:hidden наследуется, но потомок с visibility:visible снова
+        # виден. Глубины таких потомков и глубины скрытых только visibility.
+        self._reveal_stack = []
+        self._vis_only = set()
         self._any_hidden = False
         # Весь текст по порядку: (кусок, приклеивать ли, id скрытых предков).
         self._shown_chunks = []
         # id, которыми управляют кнопки и ссылки: вкладки и раскрывашки,
         # скрытые до щелчка. Google считает их содержимое видимым.
         self._controls = set()
+        # Открытые <template>: True — декларативный теневой корень
+        # (`shadowrootmode`), его браузер рисует без скриптов, False — инертный.
+        self._templates = []
+        # Элемент с сырым текстом, закрытый слешем: `<iframe … />`. Браузер
+        # слеш не замечает, и содержимое тянется до `</iframe>`.
+        self._raw_open = ""
 
     # -- служебное ------------------------------------------------------------
 
@@ -892,10 +996,20 @@ class _Extractor(HTMLParser):
             self._code_stack.pop()
         if self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
             while self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
-                self._hidden_stack.pop()
-            self._hidden_ids = tuple(i for _, i in self._hidden_stack)
+                self._vis_only.discard(self._hidden_stack.pop()[0])
+            self._update_hidden()
+        if self._reveal_stack and self._reveal_stack[-1] > self._depth:
+            while self._reveal_stack and self._reveal_stack[-1] > self._depth:
+                self._reveal_stack.pop()
+            self._update_hidden()
         while self._scope_stack and self._scope_stack[-1] > self._depth:
             self._scope_stack.pop()
+        while self._vocab_stack and self._vocab_stack[-1][0] > self._depth:
+            self._vocab_stack.pop()
+        while self._prefix_stack and self._prefix_stack[-1][0] > self._depth:
+            self._prefix_stack.pop()
+        while self._props and self._props[-1][0] > self._depth:
+            self._end_prop(self._props.pop())
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -908,41 +1022,125 @@ class _Extractor(HTMLParser):
                 while self._data_stack and self._data_stack[-1] > self._depth:
                     self._data_stack.pop()
 
+    def _update_hidden(self):
+        top = self._reveal_stack[-1] if self._reveal_stack else 0
+        self._hidden_ids = tuple(i for d, i in self._hidden_stack if d > top)
+
+    def _schema_names(self, a: dict) -> list:
+        """
+        Имена свойств schema.org из `itemprop` и `property`, в нижнем регистре.
+        RDFa-имя без префикса принадлежит словарю ближайшего `vocab`: под
+        `vocab="http://purl.org/goodrelations/v1#"` `price` — не schema.org.
+        Префикс разрешается через `prefix="s: https://schema.org/"`.
+        """
+        out = []
+        for attr in ("itemprop", "property"):
+            for name in a.get(attr, "").split():
+                key = name.lower()
+                if "/" in key:
+                    # Полное имя свойства — только словаря schema.org.
+                    if "schema.org/" not in key:
+                        continue
+                    key = key.rsplit("/", 1)[-1]
+                elif ":" in key:
+                    # `schema:price` — да, `og:price:amount` и `product:price` — нет.
+                    prefix, _, key = key.partition(":")
+                    if prefix != "schema":
+                        declared = next((m[prefix] for _, m in reversed(self._prefix_stack)
+                                         if prefix in m), False)
+                        if attr != "property" or not declared:
+                            continue
+                elif attr == "property" and self._vocab_stack and not self._vocab_stack[-1][1]:
+                    continue
+                out.append(key)
+        return out
+
     def _microdata_price(self, tag: str, a: dict):
         """
         Цена предложения в микроданных или RDFa, если её значение задано
         атрибутом: `<meta itemprop="price" content="999">`,
         `<span property="schema:price" content="16.99">`. Значение атрибута
-        видно только поисковику — его и есть смысл сверять с текстом.
+        видно только поисковику — его и есть смысл сверять с текстом. Цена
+        текстом элемента сверяется, только если сам элемент скрыт: её тоже
+        видит один поисковик.
         """
         if "itemscope" in a:
             return                 # `itemprop` на сущности — ссылка на объект, не число
+        names = self._schema_names(a)
         if "content" in a:
             value = a["content"]
         elif tag in ("data", "meter") and "value" in a:
             value = a["value"]
         else:
+            if self._hidden_ids and tag not in VOID_TAGS:
+                for key in names:
+                    field_name = _MICRODATA_PRICES.get(key)
+                    if field_name:
+                        self._props.append([self._depth, field_name, [], self._hidden_ids])
+                        return
             return
         value = (value or "").strip()
         if not value:
             return
-        names = (a.get("itemprop", "") + " " + a.get("property", "")).split()
-        for name in names:
-            key = name.lower()
-            if "/" in key:
-                # Полное имя свойства — только словаря schema.org.
-                if "schema.org/" not in key:
-                    continue
-                key = key.rsplit("/", 1)[-1]
-            elif ":" in key:
-                # `schema:price` — да, `og:price:amount` и `product:price` — нет.
-                prefix, _, key = key.partition(":")
-                if prefix != "schema":
-                    continue
+        for key in names:
             field_name = _MICRODATA_PRICES.get(key)
             if field_name:
                 self.microdata.append((field_name, value))
                 return
+
+    def _microdata_meta(self, tag: str, a: dict):
+        """Автор и даты микроданных и RDFa на обычных элементах — в meta."""
+        # Свойство сущности, заданное атрибутом: `<div itemprop="publisher"
+        # itemscope><meta itemprop="name" content="…">` — у издателя есть имя.
+        content = (a.get("content") or "").strip()
+        for prop in self._props:
+            if content and isinstance(prop[1], tuple) and len(prop[2]) < 20:
+                prop[2].append(content)
+        if tag == "meta":
+            return                 # `<meta itemprop>` читает разбор мета-тегов
+        keys = [k for k in self._schema_names(a) if k in _MICRODATA_META]
+        if not keys:
+            return
+        if "content" in a:
+            value = a["content"]
+        elif tag == "time" and "datetime" in a:
+            value = a["datetime"]
+        elif tag in ("link", "a") and a.get("href") and "itemscope" not in a:
+            value = a["href"]
+        elif tag not in VOID_TAGS:
+            # Значение — текст элемента; у сущности (`itemscope`) — текст её
+            # свойств, `<span itemprop="name">`.
+            self._props.append([self._depth, tuple(keys), [], ()])
+            return
+        else:
+            return
+        value = (value or "").strip()
+        if value:
+            for key in keys:
+                self.meta.setdefault(key, value)
+
+    def _end_prop(self, prop):
+        depth, key, chunks, ids = prop
+        text = _clean(" ".join(chunks))[:200]
+        if not text:
+            return
+        if isinstance(key, tuple):
+            for name in key:
+                self.meta.setdefault(name, text)
+        else:
+            self._hidden_prices.append((key, text, ids))
+
+    def close(self):
+        super().close()
+        while self._props:
+            self._end_prop(self._props.pop())
+
+    @property
+    def hidden_prices(self) -> list:
+        """Цены текстом скрытых элементов, кроме вкладок и раскрывашек."""
+        controls = self._controls
+        return [(key, text) for key, text, ids in self._hidden_prices
+                if not all(i and i in controls for i in ids)]
 
     def _imply_end(self, tag: str):
         """
@@ -970,12 +1168,23 @@ class _Extractor(HTMLParser):
         a = {}
         for k, v in attrs:
             a.setdefault(k.lower(), v or "")
-        if tag == "script" and "ld+json" in a.get("type", "").lower():
+        if tag == "template":
+            shadow = (not self._skip_depth
+                      and a.get("shadowrootmode", "").strip().lower() in ("open", "closed"))
+            self._templates.append(shadow)
+            if not shadow:
+                self._skip_depth += 1
+                return
+        # JSON-LD внутри <template>, <noscript> или <svg> поисковик не читает.
+        if (tag == "script" and "ld+json" in a.get("type", "").lower()
+                and not self._skip_depth):
             self._in_ld = True
             self._ld_buf = ""
             self._skip_depth += 1
             return
-        if tag in SKIP_TAGS:
+        if tag in SKIP_TAGS and tag != "template":
+            if tag == "svg" and not self._skip_depth:
+                self._in_body = True       # <svg> в <head> закрывает его, как <img>
             self._skip_depth += 1
             if tag == "script":
                 self.blocks["script"] += 1
@@ -1016,7 +1225,14 @@ class _Extractor(HTMLParser):
             self._depth = len(self._open)
             if hides:
                 self._hidden_stack.append((self._depth, a.get("id", "").strip()))
-                self._hidden_ids = tuple(i for _, i in self._hidden_stack)
+                if "hidden" not in a and not _STYLE_NONE.search(a.get("style", "")):
+                    self._vis_only.add(self._depth)
+                self._update_hidden()
+            elif self._hidden_ids and _STYLE_VISIBLE.search(a.get("style", "")) and all(
+                    d in self._vis_only for d, _ in self._hidden_stack
+                    if d > (self._reveal_stack[-1] if self._reveal_stack else 0)):
+                self._reveal_stack.append(self._depth)
+                self._update_hidden()
         if tag not in VOID_TAGS and (tag in MAIN_TAGS
                                      or a.get("role", "").lower() == "main"):
             self._main_stack.append((tag, self._depth))
@@ -1029,8 +1245,16 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and (tag in _CHROME_TAGS
                                      or a.get("role", "").lower() in _CHROME_ROLES):
             self._chrome_stack.append(self._depth)
+        if tag not in VOID_TAGS and "vocab" in a:
+            self._vocab_stack.append((self._depth, "schema.org" in a["vocab"].lower()))
+        if tag not in VOID_TAGS and a.get("prefix"):
+            parts = a["prefix"].split()
+            self._prefix_stack.append((self._depth, {
+                p[:-1].lower(): "schema.org" in u.lower()
+                for p, u in zip(parts[::2], parts[1::2]) if p.endswith(":")}))
         if self._scope_stack and ("itemprop" in a or "property" in a):
             self._microdata_price(tag, a)
+            self._microdata_meta(tag, a)
         if tag not in VOID_TAGS and ("itemscope" in a or "typeof" in a or "vocab" in a):
             self._scope_stack.append(self._depth)
         if tag not in VOID_TAGS and (tag in _FRAME_TAGS
@@ -1075,16 +1299,30 @@ class _Extractor(HTMLParser):
             # Пункт меню до <main> — не список статьи.
             if tag == "li" and not self._chrome_stack and not self._aside_stack:
                 self.blocks["li"] += 1
-            elif tag == "table":
+            elif tag == "table" and a.get("role", "").lower() not in ("presentation", "none"):
+                # Таблица вёрстки — не таблица данных.
                 self.blocks["table"] += 1
+            elif tag == "dt" and not self._chrome_stack and not self._aside_stack:
+                # Список терминов — тоже список.
+                self.blocks["dl"] = self.blocks.get("dl", 0) + 1
             elif tag == "p":
                 self.blocks["p"] += 1
-            elif tag == "img":
+        # Картинки — и после закрытого блока: одна врезка <article> (отзыв,
+        # промо) прятала от проверки alt всё, что шло за ней. Шапка, подвал,
+        # меню и боковые колонки — по-прежнему нет.
+        if tag == "img" and (self._in_main or not self._saw_main
+                             or not (self._frame_stack or self._aside_stack)):
                 self.blocks["img"] += 1
                 # Пустой alt="" — по WCAG пометка декоративной картинки, а не
                 # её отсутствие. Раньше они считались одним и тем же.
-                if "alt" not in a:
+                # role="presentation"/"none" и aria-hidden axe тоже считает
+                # декоративными.
+                if "alt" not in a and not (
+                        a.get("role", "").strip().lower() in ("presentation", "none")
+                        or a.get("aria-hidden", "").strip().lower() == "true"):
                     self.blocks["img_no_alt"] += 1
+                elif "alt" not in a:
+                    self.blocks["img_empty_alt"] += 1
                 elif not a["alt"].strip():
                     self.blocks["img_empty_alt"] += 1
                 else:
@@ -1105,9 +1343,16 @@ class _Extractor(HTMLParser):
             name = (a.get("name") or a.get("property") or a.get("itemprop") or "").lower()
             content = (a.get("content") or "").strip()
             if name == "description":
-                self.description = content
+                # itemprop="description" в теле — описание товара или отзыва
+                # из микроразметки, а не страницы. Второй пустой тег (тема и
+                # SEO-плагин выводят по одному) заполненный не стирает.
+                if (a.get("name") or a.get("property")) and content:
+                    self.description = content
             elif name in ("robots", "googlebot"):
-                self.robots = (self.robots + "," + content).strip(",")
+                # Поисковик читает только name=: `property="robots"` и
+                # `itemprop="robots"` — не директива.
+                if (a.get("name") or "").lower() == name:
+                    self.robots = (self.robots + "," + content).strip(",")
             elif name and content:
                 # author, article:published_time, article:modified_time и прочее:
                 # раньше они были невидимы, и на каждой HTML-странице выдавались
@@ -1116,7 +1361,13 @@ class _Extractor(HTMLParser):
         elif tag == "link":
             rel = a.get("rel", "").lower()
             if "canonical" in rel:
-                self.canonical = a.get("href", "").strip()
+                href = a.get("href", "").strip()
+                if self._in_body:
+                    # canonical в <body> поисковик не читает, как и hreflang.
+                    self.canonicals_in_body.append(href)
+                elif href:
+                    self.canonicals.append(href)
+                    self.canonical = self.canonical or href
             # Альтернативы hreflang собираются здесь же, за тот же проход.
             # Раньше их читал отдельный разбор того же документа, и не один
             # раз: на каталоге в четыре тысячи страниц это было сорок секунд
@@ -1145,8 +1396,23 @@ class _Extractor(HTMLParser):
         # вышел раньше, чем дошёл до стека. Закрывать за него нечего — раньше
         # он закрывал <main>, и текст после иконки пропадал со страницы.
         skipping = bool(self._skip_depth)
+        if not skipping and tag in _RAW_TEXT_TAGS:
+            # `<script src=… />` вне SVG: слеш в HTML ничего не закрывает, и
+            # всё до `</script>` — текст скрипта, даже если это вся страница.
+            self.handle_starttag(tag, attrs)
+            if tag in ("iframe", "textarea", "xmp"):
+                self._raw_open = tag
+                self._skip_depth += 1
+            self.set_cdata_mode(tag)
+            return
         self.handle_starttag(tag, attrs)
-        if tag in SKIP_TAGS:
+        if tag == "template":
+            if self._templates and self._templates.pop():
+                if self._open:
+                    self._close_to(len(self._open) - 1)
+                return
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             if tag == "svg":
                 self._foreign = max(0, self._foreign - 1)
@@ -1160,7 +1426,20 @@ class _Extractor(HTMLParser):
                 self.jsonld.append(self._ld_buf.strip())
             self._skip_depth = max(0, self._skip_depth - 1)
             return
-        if tag in SKIP_TAGS:
+        if self._raw_open and tag == self._raw_open:
+            self._raw_open = ""
+            self._skip_depth = max(0, self._skip_depth - 1)
+            if self._open_count[tag]:
+                for index in range(len(self._open) - 1, -1, -1):
+                    if self._open[index] == tag:
+                        self._close_to(index)
+                        break
+            return
+        if tag == "template":
+            if not self._templates or not self._templates.pop():
+                self._skip_depth = max(0, self._skip_depth - 1)
+                return
+        elif tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             if tag == "svg":
                 self._foreign = max(0, self._foreign - 1)
@@ -1203,6 +1482,14 @@ class _Extractor(HTMLParser):
         elif tag in ("p", "div", "section", "li", "td", "th", "dl") or tag in _OWN_BLOCKS:
             self._flush_paragraph()
 
+    def parse_html_declaration(self, i):
+        # `<![CDATA[` вне SVG и MathML — фиктивный комментарий до первого `>`,
+        # а не секция до `]]>`: мета-тег за ним живой.
+        if not self._foreign and self.rawdata.startswith("<![CDATA[", i):
+            j = self.rawdata.find(">", i + 9)
+            return -1 if j < 0 else j + 1
+        return super().parse_html_declaration(i)
+
     def handle_data(self, data):
         if self._in_ld:
             self._ld_buf += data
@@ -1227,7 +1514,17 @@ class _Extractor(HTMLParser):
         text = data.strip()
         if lead:
             self._glue = False
+        # Центы верхним индексом — «$19<sup>99</sup>»: это $19.99, а не $1999.
+        if (self._glue and self._open and self._open[-1] == "sup"
+                and re.fullmatch(r"\d{2}", text)):
+            chunks = self._main_chunks if self._in_main else self._chunks
+            if chunks and chunks[-1][0][-1:].isdigit() \
+                    and not re.search(r"[.,]\d{1,2}$", chunks[-1][0]):
+                text = "." + text
         self._emit(text)
+        for prop in self._props:
+            if len(prop[2]) < 20:
+                prop[2].append(text)
         if data[-1:].isspace():
             self._glue = False
 
@@ -1275,6 +1572,14 @@ class _Extractor(HTMLParser):
         return self._join(self._framed)
 
     @property
+    def service_blocks(self) -> list:
+        self._flush_paragraph()
+        found = self._paragraphs
+        if self._saw_main and any(in_main for _, in_main, _ in found):
+            found = [p for p in found if p[1]]
+        return [text for text, _, kind in found if kind == _SERVICE]
+
+    @property
     def paragraphs(self) -> list:
         self._flush_paragraph()
         found = self._paragraphs
@@ -1316,6 +1621,9 @@ _CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
 _FRAME_TAGS = _CHROME_TAGS | {"header"}
 _FRAME_ROLES = _CHROME_ROLES | {"banner"}
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+# Элементы с сырым текстом: их содержимое — не разметка до закрывающего тега.
+_RAW_TEXT_TAGS = {"script", "style", "iframe", "textarea", "title", "xmp"}
+
 _BREAKOUT = {"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
              "dl", "dt", "em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head",
              "hr", "i", "img", "li", "listing", "menu", "meta", "nobr", "ol", "p",
@@ -1343,6 +1651,8 @@ _IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
 # панель; `S:0`, `P:0` — потоковый рендер React: скрипт переносит блок на
 # место сразу после загрузки.
 _STYLE_HIDDEN = re.compile(r"(?<![\w-])(?:display\s*:\s*none|visibility\s*:\s*hidden)(?![\w-])", re.I)
+_STYLE_NONE = re.compile(r"(?<![\w-])display\s*:\s*none(?![\w-])", re.I)
+_STYLE_VISIBLE = re.compile(r"(?<![\w-])visibility\s*:\s*visible(?![\w-])", re.I)
 _STREAMED_ID = re.compile(r"^[SP]:\d+$")
 
 
@@ -1360,7 +1670,9 @@ def _hides(attrs: dict) -> bool:
 
 
 def _is_aside(tag: str, attrs: dict) -> bool:
-    if tag == "nav" or attrs.get("role", "").lower() == "navigation":
+    # Врезка <aside> — не ответ: «Related reading…» становилась первым
+    # абзацем и прятала разгон.
+    if tag in ("nav", "aside") or attrs.get("role", "").lower() == "navigation":
         return True
     if tag in _ASIDE_NEVER:
         return False
@@ -1519,6 +1831,20 @@ NOT_LIVE = (("<!--", "-->"), ("<noscript", "</noscript>"), ("<pre", "</pre>"),
 # Мета-тег внутри скрипта (строка JavaScript) или инертного <template> браузер
 # не исполняет: для мета-переадресации это тоже не живая разметка.
 INERT = (("<script", "</script>"), ("<template", "</template>"))
+# Где <pre> и <code> — не примеры кода на странице: в комментарии, в строке
+# скрипта, в инертном шаблоне.
+NOT_SHOWN = (("<!--", "-->"),) + INERT
+# Значение атрибута с разметкой внутри — `srcdoc` у <iframe>, `data-*`: мета-тег
+# в нём принадлежит чужому документу или вовсе строка, а не живая разметка.
+_MARKUP_ATTRIBUTE = re.compile(
+    r"""\s[\w:.-]+\s*=\s*(?:"[^"<>]{0,2000}<[^"]{0,20000}"|'[^'<>]{0,2000}<[^']{0,20000}')""")
+
+
+def drop_markup_attributes(text: str) -> str:
+    """Стирает значения атрибутов, в которых есть `<`."""
+    if "=" not in text:
+        return text
+    return _MARKUP_ATTRIBUTE.sub(" x=''", text)
 EMPTY_MOUNT = re.compile(
     r"<div[^<>]{0,300}\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?"
     r"[^<>]{0,300}>\s*</div>", re.I)
@@ -1573,8 +1899,24 @@ _WINDOWS_ENV = {"APPDATA", "LOCALAPPDATA", "USERPROFILE", "TEMP", "TMP", "PROGRA
 _LLM_HINTS = ("language model", "as an ai", "certainly!", "sure!", "hope this helps",
               "rewritten", "cannot fulfill", "языковая модель", "ии-модель", "конечно!",
               "надеюсь, это поможет")
+# Вторые байты UTF-8 0x80–0xBF в cp1251: «Аренда» → «РђСЂРµРЅРґР°». Пара
+# «Р/С + знак» встречается и в обычном тексте («ТАСС»), поэтому нужны две
+# подряд. Неразрывный пробел и мягкий перенос из набора убраны.
+_CP1251_TAIL = ("\u0402\u0403\u201a\u0453\u201e\u2026\u2020\u2021\u20ac\u2030\u0409\u2039"
+                "\u040a\u040c\u040b\u040f\u0452\u2018\u2019\u201c\u201d\u2022\u2013\u2014"
+                "\u2122\u0459\u203a\u045a\u045c\u045b\u045f\u040e\u045e\u0408\u00a4\u0490"
+                "\u00a6\u00a7\u0401\u00a9\u0404\u00ab\u00ac\u00ae\u0407\u00b0\u00b1\u0406"
+                "\u0456\u0491\u00b5\u00b6\u00b7\u0451\u2116\u0454\u00bb\u0458\u0405\u0455"
+                "\u0457")
 MOJIBAKE = re.compile(r"â€[\u0080-\u00bf\u2018-\u201e\u2122\u0153\u02dc]|Ã[\u0080-\u00bf]"
-                      r"|Ð[\u0080-\u00bf]Ð|Ñ[\u0080-\u008f]")
+                      # «Ã„rzte», «Ãœbersicht», «Ã‰tudiants»: cp1252 кладёт эти
+                      # вторые байты выше U+00FF. Кавычки и многоточие — только
+                      # перед буквой: «AMANHÃ”» — португальский текст в кавычках.
+                      r"|Ã[\u20ac\u201a\u0192\u201e\u2020\u2021\u02c6\u2030\u0160\u2039\u0152"
+                      r"\u017d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178]"
+                      r"|[ÃÅ][\u2018\u2019\u201c\u201d\u2026](?=[^\W\d_])"
+                      r"|Ð[\u0080-\u00bf]Ð|Ñ[\u0080-\u008f]"
+                      r"|(?:[РС][" + _CP1251_TAIL + r"]){2}")
 
 
 def visible_text(raw: str) -> str:
@@ -1585,7 +1927,8 @@ def visible_text(raw: str) -> str:
 def find_slots(text: str, markdown: bool = False) -> list:
     """
     Следы незаполненного шаблона в тексте: [(вид, образец)], не больше трёх
-    образцов на вид. В исходнике Markdown `{{ }}` и `{% %}` — синтаксис Hugo
+    образцов на вид (полей шаблона и скобок — двенадцати: они предмет
+    находки, и четвёртое новое поле базовая линия должна видеть). В исходнике Markdown `{{ }}` и `{% %}` — синтаксис Hugo
     и Jekyll, а не шов: их там не ищем.
     """
     text = (text or "").replace("\u2019", "'")
@@ -1596,7 +1939,8 @@ def find_slots(text: str, markdown: bool = False) -> list:
     kinds = [("leftover", SLOT_LEFTOVER, ("[object", "nan", "undefined")),
              ("lorem", SLOT_LOREM, ("lorem",)),
              ("llm", LLM_PHRASES, _LLM_HINTS),
-             ("mojibake", MOJIBAKE, ("ã", "â€", "ð", "ñ"))]
+             ("mojibake", MOJIBAKE, ("ã", "â€", "ð", "ñ", "å", "рѕ", "рµ", "р°", "рё",
+                                     "с‚", "сђ"))]
     if not markdown:
         kinds.insert(0, ("template", SLOT_TEMPLATE, ("{", "%")))
         kinds.append(("bracket", SLOT_BRACKET, ("[",)))
@@ -1617,7 +1961,7 @@ def find_slots(text: str, markdown: bool = False) -> list:
                 continue
             if sample not in samples:
                 samples.append(sample)
-            if len(samples) >= (12 if kind == "bracket" else 3):
+            if len(samples) >= (12 if kind in ("bracket", "template") else 3):
                 break
         found += [(kind, sample) for sample in samples]
     return found
@@ -1647,10 +1991,14 @@ def essence(raw: str) -> str:
     if lowered_hint or "NEXT_REDIRECT" in raw:
         live = drop_spans(raw, NOT_LIVE)
         if lowered_hint:
-            parts += [m for m in _REFRESH_META.findall(drop_spans(live, INERT))
+            parts += [m for m in _REFRESH_META.findall(
+                drop_spans(drop_markup_attributes(live), INERT))
                       if "equiv" in m.lower()]
         parts += [f"<script>{m}</script>" for m in _NEXT_SCRIPT.findall(live)]
-    parts += _TIME_TAG.findall(raw)
+    # <time> тоже только живой: закомментированный, вырванный из комментария,
+    # выглядел бы настоящей датой.
+    if _TIME_TAG.search(raw):
+        parts += _TIME_TAG.findall(drop_spans(raw, NOT_LIVE + INERT))
     mount = EMPTY_MOUNT.search(raw)
     if mount:
         parts.append(mount.group(0))
@@ -1659,7 +2007,8 @@ def essence(raw: str) -> str:
         parts += [marker for marker in BRIEF_MARKERS if marker in prose]
     # Есть ли на странице примеры кода: от этого зависит, шов `{FOLDER_NAME}`
     # или нотация автора.
-    if _CODE_TAG.search(raw, 0, 400_000):
+    if _CODE_TAG.search(raw, 0, 400_000) and _CODE_TAG.search(
+            drop_spans(raw[:400_000], NOT_SHOWN)):
         parts.append("<pre></pre>")
     return "\n".join(parts)
 
@@ -1874,7 +2223,7 @@ def _parse_frontmatter(block: str) -> dict:
             # и перенос длинного значения на следующую строку. Последний —
             # валидный YAML, который дампер делает сам, а пакет объявлял
             # такую страницу «без title».
-            wrapped = []
+            wrapped, items, nested = [], [], False
             while i < len(lines) and (not lines[i].strip()
                                       or lines[i][:1] in (" ", "\t", "-")):
                 nxt = lines[i]
@@ -1882,15 +2231,27 @@ def _parse_frontmatter(block: str) -> dict:
                 stripped = nxt.strip()
                 if not stripped:
                     continue
+                if stripped == "-" or stripped.startswith("- "):
+                    items.append(stripped[1:].strip())
+                    continue
                 if nxt[:1] == "-" or ":" in stripped.split(" ")[0]:
-                    wrapped = []          # список или вложенный объект — не значение
+                    nested = True         # вложенный объект — не значение
                     continue
                 wrapped.append(stripped)
+            # Список из одного элемента — `keyword:\n  - leipzig` — это его
+            # значение; длинный список и вложенный объект — не значение.
+            if len(items) == 1 and not nested and not wrapped:
+                wrapped = [_yaml_scalar(items[0])]
+            elif items or nested:
+                wrapped = []
             if not wrapped:
                 continue
             value = " ".join(wrapped)
         else:
             value = _yaml_scalar(value)
+            # `keyword: [munich]` — тот же список из одного элемента.
+            if value[:1] == "[" and value[-1:] == "]" and "," not in value and "[" not in value[1:]:
+                value = _yaml_scalar(value[1:-1])
         value = _clean(_unquote_value(value))
         if value:
             out[key] = value
@@ -1899,12 +2260,58 @@ def _parse_frontmatter(block: str) -> dict:
 
 # ── страница ──────────────────────────────────────────────────────────────────
 
+_SAFE_PATH = re.compile(r"^/(?!/)[^\s:{}%?#<>\"']*$")
+
+
+def _source_url(path: str, root: str, base_url: str, meta: dict, as_index: bool) -> str:
+    """
+    Адрес исходника Markdown, если его задаёт не имя файла: `_index.md`
+    Hugo — страница раздела, `permalink:` (Jekyll, Eleventy) и `url:` (Hugo) —
+    адрес целиком, `slug:` (Hugo) — последний сегмент. Иначе пусто.
+    """
+    base = base_url.rstrip("/") + "/"
+    # Jekyll (`_config.yml`) адрес из `url:` шапки не берёт — только `permalink:`.
+    jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
+    for key in ("permalink",) if jekyll else ("permalink", "url"):
+        value = (meta.get(key) or "").strip()
+        if _SAFE_PATH.match(value):
+            return normalize_url(urljoin(base, quote(value.lstrip("/"), safe="/~-._")))
+    name = os.path.basename(path).lower()
+    url = ""
+    if name in ("_index.md", "_index.markdown"):
+        url = path_to_url(os.path.join(os.path.dirname(path), "index.md"), root, base_url)
+    slug = (meta.get("slug") or "").strip()
+    # В Jekyll `slug` меняет адрес только записей блога — их адрес строит
+    # `_jekyll_post_url`.
+    if (slug and not url and not as_index
+            and re.fullmatch(r"[^\s/:{}%?#<>\"']+", slug) and not jekyll):
+        own = path_to_url(path, root, base_url).rstrip("/")
+        if own + "/" != base:
+            url = normalize_url(own.rsplit("/", 1)[0] + "/" + quote(slug, safe="~-._"),
+                                directory=True)
+    return url
+
+
 def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Page:
     raw, encoding = read_text(path)
     notes = []
-    if not is_utf8(encoding):
+    declared = _declared_charset(raw[:4096].encode("ascii", "ignore"))
+    if not is_utf8(encoding) and is_utf8(declared) and not encoding.startswith("utf-"):
+        # Объявлен UTF-8, а байты в другой кодировке: браузер и краулер
+        # слушаются объявления и вместо каждой буквы показывают «�».
+        notes.append(tr("в <meta charset> объявлен UTF-8, а файл в {a0}: браузер и поисковик "
+                        "покажут вместо букв знаки «�». Пересохрани файл в UTF-8",
+                        a0=encoding))
+    elif not is_utf8(encoding):
         notes.append(tr("файл прочитан как {a0}, а не UTF-8", a0=encoding))
-    elif "\ufffd" in raw:
+    elif (declared and not is_utf8(declared) and not encoding.startswith("utf-16")
+          and not raw.isascii()):
+        # Устаревший `<meta charset="windows-1251">` на UTF-8-файле: без
+        # charset в заголовке Content-Type браузер покажет «РђСЂРµРЅРґР°».
+        notes.append(tr("в <meta charset> объявлен {a0}, а файл в UTF-8: если сервер не "
+                        "присылает charset в Content-Type, браузер покажет кракозябры. "
+                        "Исправь объявление на utf-8", a0=declared))
+    if "\ufffd" in raw and is_utf8(encoding):
         notes.append(tr("в файле {a0} байт(а) не в UTF-8 — на их месте знак замены; "
                         "остальной текст прочитан как UTF-8", a0=raw.count("\ufffd")))
 
@@ -1943,6 +2350,13 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         # там отсутствие title — находка.
         if not m and not toml and md_headings and md_headings[0][0] == 1:
             meta = {"title": md_headings[0][1]}
+        # Картинки — вне блоков кода (там примеры синтаксиса), со ссылочной
+        # формой `![alt][ref]` и с сырым <img> без alt.
+        shown = _strip_fences(body)
+        raw_imgs = re.findall(r"<img\b[^>]*>", shown, re.I)
+        declared = _source_url(path, root, base_url, meta, as_index)
+        if declared:
+            url = declared
         page = Page(
             path=path, url=url,
             title=_clean(meta.get("title", "")),
@@ -1958,16 +2372,18 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             encoding=encoding,
             notes=notes,
             paragraphs=_md_paragraphs(body),
-            alts=[(m.group(1).strip(), m.group(2)) for m in
-                  re.finditer(r"!\[([^\[\]\n]{0,1000})\]\(([^)\s]*)", body) if m.group(1).strip()],
+            alts=[(m.group(1).strip(), m.group(2) or "") for m in
+                  re.finditer(r"!\[([^\[\]\n]{0,1000})\](?:\(([^)\s]*)|\[[^\]\n]*\])", shown)
+                  if m.group(1).strip()],
             slots=find_slots(text, markdown=True),
             blocks={"li": _md_list_items(_strip_fences(body)),
                     "table": len(re.findall(r"^[ \t>]*\|[^\n]+\|[ \t]*$", body, re.M)) and 1 or 0,
-                    "img": len(re.findall(r"!\[[^\[\]\n]{0,1000}\]\(", body)),
-                    "img_no_alt": 0,
+                    "img": len(re.findall(r"!\[[^\[\]\n]{0,1000}\][(\[]", shown)) + len(raw_imgs),
+                    "img_no_alt": sum(1 for t in raw_imgs if not re.search(
+                        r"\salt(?:\s*=|[\s/>])", t, re.I)),
                     # В Markdown alt есть всегда: `![](x.png)` — пустой, а не
                     # отсутствующий.
-                    "img_empty_alt": len(re.findall(r"!\[[ \t]*\]\(", body)),
+                    "img_empty_alt": len(re.findall(r"!\[[ \t]*\][(\[]", shown)),
                     "script": 0, "p": 0},
         )
     else:
@@ -2002,8 +2418,10 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             blocks=ex.blocks,
             alts=ex.alts,
             shown=ex.shown_text,
-            microdata=ex.microdata,
+            microdata=ex.microdata + ex.hidden_prices,
+            service=ex.service_blocks,
         )
+        page.__dict__["_canonicals"] = (ex.canonicals, ex.canonicals_in_body)
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что
     # и ссылки. Относительный `<base href>` раньше оставлял canonical
@@ -2019,12 +2437,38 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         base_for_links = urljoin(location, base_href) if base_href else location
     except ValueError:
         base_for_links = location
+    in_head, in_body = page.__dict__.pop("_canonicals", ((), ()))
+    if len(in_head) > 1:
+        # Разные canonical на одной странице поисковик не учитывает вовсе:
+        # раньше молча побеждал последний.
+        written = set()
+        for href in in_head:
+            try:
+                written.add(urldefrag(urljoin(base_for_links, href))[0])
+            except ValueError:
+                written.add(href)
+        if len(written) > 1:
+            page.notes.append(tr("на странице {a0} разных canonical: {a1} — поисковик не учтёт "
+                                 "ни один. Оставь один в <head>",
+                                 a0=len(written), a1=", ".join(sorted(written)[:3])))
+            page.canonical = ""
+    if in_body and [h for h in in_body if h]:
+        page.notes.append(tr("canonical в <body> ({a0}) поисковик не читает — перенеси его "
+                             "в <head>", a0=next(h for h in in_body if h)))
     if page.canonical:
         # Записан ли canonical полным адресом. Относительный достраивается от
         # --site, и его схема и хост — это --site, а не то, как пишет сам сайт.
         try:
             written = urlsplit(page.canonical)
             page.__dict__["_canonical_absolute"] = bool(written.scheme and written.netloc)
+            # `//www.host/a/` (или относительный при `<base href="//www.host/">`)
+            # называет хост явно, а схему берёт у запроса: сверяется только хост.
+            based = urlsplit(base_href) if base_href and not written.netloc else None
+            if based is not None and based.netloc:
+                page.__dict__["_canonical_absolute"] = bool(based.scheme)
+            page.__dict__["_canonical_host_only"] = bool(
+                (written.netloc and not written.scheme)
+                or (based is not None and based.netloc and not based.scheme))
         except ValueError:
             pass
         try:
@@ -2048,11 +2492,18 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             own_path = re.sub(r"/{2,}", "/", own.path or "/")
             own_path = quote(unicodedata.normalize("NFC", own_path),
                              safe="/~-._!$&'()*+,;=:@%")
+            # `ko%CC%88ln` — NFD в %-кодах: `url_key` сводит его к файлу
+            # `köln` (NFC), но хостинг, который сравнивает байты, ответит 404.
+            # Адресом остаётся форма файла.
+            decoded = unquote(own_path)
+            if unicodedata.normalize("NFC", decoded) != decoded:
+                own_path = urlsplit(page.url).path
             if own_path != urlsplit(page.url).path:
                 site_parts = urlsplit(page.url)
                 page.url = urlunsplit((site_parts.scheme, site_parts.netloc, own_path, "", ""))
     seen = set()
     forms = []
+    written_forms = set()
     foreign = []
     for href in hrefs:
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
@@ -2084,6 +2535,11 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             seen.add(key)
             page.links.append(absolute)
             forms.append((key, form, unquote(raw_path)))
+        elif key != page.key and (key, unquote(raw_path)) not in written_forms:
+            # Та же страница в другой записи: меню ведёт на `/about/`, а текст —
+            # на `/about.html`. Вторая форма тоже проверяется на 404.
+            forms.append((key, form, unquote(raw_path)))
+        written_forms.add((key, unquote(raw_path)))
     page.__dict__["_link_forms"] = forms
     unfollowed = []
     for href in nofollow_hrefs:
@@ -2132,6 +2588,34 @@ def _group_end(pattern: str, i: int) -> int:
     return -1
 
 
+class _Glob:
+    """
+    Шаблон из буквального текста и `*` без регулярного выражения: каждая часть
+    ищется слева направо один раз, время линейно от длины адреса. `/*a*a*a…b`
+    в чужом robots.txt или `_headers` больше не подвешивает проверку (#399).
+    """
+
+    def __init__(self, body: str, anchored: bool = True):
+        self.parts, self.anchored = body.split("*"), anchored
+
+    def match(self, text: str):
+        parts = self.parts
+        if not text.startswith(parts[0]):
+            return None
+        if len(parts) == 1:
+            return True if not self.anchored or text == parts[0] else None
+        pos = len(parts[0])
+        for part in parts[1:-1]:
+            at = text.find(part, pos)
+            if at < 0:
+                return None
+            pos = at + len(part)
+        last = parts[-1]
+        if self.anchored:
+            return True if text.endswith(last) and len(text) - len(last) >= pos else None
+        return True if text.find(last, pos) >= 0 else None
+
+
 def _route_regex(pattern: str):
     """
     `/glossary/*` (Netlify) или `/glossary/(.*)`, `/:slug*` (Vercel) → выражение.
@@ -2143,6 +2627,8 @@ def _route_regex(pattern: str):
     Шаблон, который не разобрать, даёт None: правило пропускается, а не
     закрывает или открывает всё подряд.
     """
+    if not any(ch in pattern for ch in "\\(){}:?+"):
+        return _Glob(pattern)
     out, i = [], 0
     while i < len(pattern):
         ch = pattern[i]
@@ -2202,8 +2688,18 @@ _TOML_FOR = re.compile(r"""^\s*for\s*=\s*["']([^"']+)["']""", re.M)
 # Ключ — в начале строки (`[headers.values]`) или во встроенной таблице
 # (`values = { "X-Robots-Tag" = "noindex" }`). Строки-комментарии снимаются
 # до поиска: `# X-Robots-Tag = "noindex"` закрывал весь сайт.
-_TOML_TAG = re.compile(r"""(?:^|[{,])\s*["']?X-Robots-Tag["']?\s*=\s*["']([^"']+)["']""",
+# Ключ `values.X-Robots-Tag` прямо в `[[headers]]` и литерал в тройных
+# кавычках — тот же TOML.
+_TOML_TAG = re.compile(r"""(?:^|[{,])\s*(?:values\s*\.\s*)?["']?X-Robots-Tag["']?\s*=\s*"""
+                       r"""["']{1,3}([^"']+)["']""",
                        re.I | re.M)
+_TOML_HEADERS = re.compile(r"^\s*\[\[\s*headers\s*\]\]", re.M)
+
+
+# Директивы со значением через двоеточие: `max-image-preview:large` — это не
+# имя бота, и директивы после неё раньше приписывались «боту max-image-preview».
+_VALUED_DIRECTIVES = ("max-snippet", "max-image-preview", "max-video-preview",
+                      "unavailable_after")
 
 
 def _closes(value: str) -> bool:
@@ -2214,6 +2710,8 @@ def _closes(value: str) -> bool:
     """
     agent = ""
     for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.partition(":")[0] in _VALUED_DIRECTIVES:
+            continue
         if token.endswith(":") and len(token) > 1:
             agent = token[:-1]
             continue
@@ -2229,6 +2727,9 @@ def _hides_snippet(value: str) -> bool:
     agent = ""
     tokens = re.split(r"[,\s]+", (value or "").lower())
     for i, token in enumerate(tokens):
+        if (token.partition(":")[0] in _VALUED_DIRECTIVES
+                and not token.startswith("max-snippet")):
+            continue
         if token.endswith(":") and len(token) > 1 and token != "max-snippet:":
             agent = token[:-1]
             continue
@@ -2245,9 +2746,10 @@ def _hides_snippet(value: str) -> bool:
 
 
 def _same_host(a: str, b: str) -> bool:
+    # `www.` здесь не снимается: правило хостинга для www-зеркала (часто —
+    # его noindex) к голому домену не относится, это разные хосты запроса.
     a, b = (a or "").lower().split(":")[0], (b or "").lower().split(":")[0]
-    strip = lambda h: h[4:] if h.startswith("www.") else h
-    return bool(a) and strip(a) == strip(b)
+    return bool(a) and a.rstrip(".") == b.rstrip(".")
 
 
 def _vercel_applies(entry: dict, host: str) -> bool:
@@ -2325,7 +2827,7 @@ def header_noindex_rules(root: str, host: str = "", test=None) -> list:
         except SourceError:
             text = ""
         text = "\n".join(x for x in text.splitlines() if not x.lstrip().startswith("#"))
-        for block in text.split("[[headers]]")[1:]:
+        for block in _TOML_HEADERS.split(text)[1:]:
             block = block.split("[[", 1)[0]
             where, tag = _TOML_FOR.search(block), _TOML_TAG.search(block)
             if where and tag and test(tag.group(1)):
@@ -2372,13 +2874,16 @@ def _apply_header_rules(pages: list, root: str, base_url: str, problems: list) -
         path = urlsplit(page.url).path
         if base and path.startswith(base + "/"):
             path = path[len(base):]
-        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        # Правило пишут и буквами (`/город/*`), и %-кодами: сверяются обе формы.
+        forms = {path, unicodedata.normalize("NFC", unquote(path))}
+        matches = lambda regex: any(regex.match(p) or regex.match(p.rstrip("/")) for p in forms)
         reopened = {source for regex, source, _, closes in rules
                     if not closes and matches(regex)}
         for regex, source, pattern, closes in rules:
             if closes and source not in reopened and matches(regex):
                 if not page.noindex:
                     page.robots = (page.robots + ",noindex").strip(",")
+                    page.__dict__["_noindex_header"] = "%s, %s" % (source, pattern)
                 hits[(source, pattern)] += 1
                 break
     for (source, pattern), n in sorted(hits.items()):
@@ -2412,6 +2917,8 @@ def _unfollows(value: str) -> bool:
     """`nofollow` или `none` в X-Robots-Tag — для всех или для Google."""
     agent = ""
     for token in re.split(r"[,\s]+", (value or "").lower()):
+        if token.partition(":")[0] in _VALUED_DIRECTIVES:
+            continue
         if token.endswith(":") and len(token) > 1:
             agent = token[:-1]
             continue
@@ -2431,7 +2938,9 @@ def _apply_directive(pages: list, root: str, base_url: str, test, directive: str
     base = urlsplit(base_url).path.rstrip("/")
     for page in pages:
         path = _header_path(page, base)
-        matches = lambda regex: regex.match(path) or regex.match(path.rstrip("/"))
+        # Правило пишут и буквами (`/город/*`), и %-кодами: сверяются обе формы.
+        forms = {path, unicodedata.normalize("NFC", unquote(path))}
+        matches = lambda regex: any(regex.match(p) or regex.match(p.rstrip("/")) for p in forms)
         reopened = {source for regex, source, _, on in rules if not on and matches(regex)}
         if any(on and source not in reopened and matches(regex)
                for regex, source, _, on in rules) and not already(page):
@@ -2462,6 +2971,9 @@ def host_redirect_rules(root: str) -> tuple:
         # Это мягкий 404, и неверная форма ссылки остаётся находкой.
         if regex and str(status).startswith("200") and regex.match("/indexgap-probe/any/depth"):
             return
+        # Правило с ответом 404/410 путь не отдаёт, а закрывает.
+        if str(status)[:1] in ("4", "5"):
+            return
         if regex:
             rules.append(regex)
 
@@ -2473,7 +2985,9 @@ def host_redirect_rules(root: str) -> tuple:
 
     for line in text_of(os.path.join(root, "_redirects")).splitlines():
         fields = line.split("#", 1)[0].split()
-        if len(fields) >= 2:
+        # Условное правило (`Country=de`, `Role=admin`, параметр запроса)
+        # срабатывает не на каждый запрос: путь им не отдаётся.
+        if len(fields) >= 2 and not any("=" in f for f in fields[1:]):
             status = next((f for f in fields[1:] if re.match(r"^\d{3}!?$", f)), "301")
             add(fields[0], status)
     near = [root, os.path.dirname(os.path.abspath(root))]
@@ -2484,7 +2998,8 @@ def host_redirect_rules(root: str) -> tuple:
             for block in text.split("[[redirects]]")[1:]:
                 block = block.split("[[", 1)[0]
                 found = _TOML_FROM.search(block)
-                if found:
+                if found and not re.search(r"^\s*conditions\s*=|^\s*\[redirects\.conditions\]",
+                                           block, re.M):
                     status = _TOML_STATUS.search(block)
                     add(found.group(1), status.group(1) if status else "301")
             break
@@ -2500,7 +3015,8 @@ def host_redirect_rules(root: str) -> tuple:
             rewrites_forms = bool(data.get("cleanUrls")) or isinstance(data.get("trailingSlash"), bool)
             for section in ("redirects", "rewrites"):
                 for entry in data.get(section) or ():
-                    if isinstance(entry, dict) and isinstance(entry.get("source"), str):
+                    if (isinstance(entry, dict) and isinstance(entry.get("source"), str)
+                            and not entry.get("has")):
                         add(entry["source"], "200" if section == "rewrites" else "301")
         break
     return rules, rewrites_forms
@@ -2528,8 +3044,12 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     for page in pages:
         forms = page.__dict__.pop("_link_forms", ())
         written.append((page, forms))
+        voted = set()
         for key, form, _written in forms:
-            votes[key][form] += 1
+            # Голосует первая запись ссылки на страницу, как и раньше.
+            if key not in voted:
+                voted.add(key)
+                votes[key][form] += 1
     redirects, host_rewrites = host_redirect_rules(root)
     kinds, flat, files = {}, [], {}
     for page in pages:
@@ -2542,15 +3062,29 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         # `a.html` рядом с `a/index.html`: какую форму отдаст хостинг, не понять.
         key = page.key
         kinds[key] = kind if kinds.get(key, kind) == kind else None
-        files[key] = os.path.basename(page.path or "")
+        # Имя в NFC, как и адрес страницы: macOS пишет его в NFD.
+        files[key] = unicodedata.normalize("NFC", os.path.basename(page.path or ""))
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
+    # Сборку `.next/server` отдаёт сервер Next.js по маршрутам: `/pricing`,
+    # а `/pricing.html` — 404.
+    by_route = bool(re.search(r"/\.next/server/(app|pages)$",
+                              os.path.abspath(root).replace(os.sep, "/").rstrip("/")))
+    locale = _next_default_locale(root) if by_route else ""
     for page in flat:
         counted = {f: n for f, n in (votes.get(page.key) or {}).items() if f in usable}
-        form = (min(counted, key=lambda f: (-counted[f], order[f])) if counted else "file")
+        form = (min(counted, key=lambda f: (-counted[f], order[f])) if counted
+                else "bare" if by_route else "file")
         if form in ("slash", "index"):
             continue
         file_url = _file_url(page.path, root, base_url)
+        if locale:
+            rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+            if rel.lower() in (locale + ".html", locale + ".htm"):
+                page.url = base_url.rstrip("/") + "/"
+                continue
+            if rel.startswith(locale + "/"):
+                file_url = _file_url(os.path.join(root, rel[len(locale) + 1:]), root, base_url)
         if form == "bare":
             file_url = _EXT_RE.sub("", file_url)
         parts = urlsplit(file_url)
@@ -2564,6 +3098,8 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         wrong = []
         html = (page.path or "").lower().endswith((".html", ".htm"))
         for key, form, path in forms:
+            # `/faq/?x=1` — та же форма адреса, что и `/faq/`.
+            key = key.split("?", 1)[0]
             kind = kinds.get(key)
             # `/b/index.md`, `/c.htm` при `c.html`, `/d/INDEX.HTML`: `url_key`
             # сводит их к странице, а хостинг отдаёт файл только под его
@@ -2571,7 +3107,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             # переписывает `b.md` сам.
             exact = (html and form in ("file", "index")
                      and (kind, form) in (("folder", "index"), ("flat", "file"))
-                     and path.rsplit("/", 1)[-1] != files.get(key))
+                     and unicodedata.normalize("NFC", path.rsplit("/", 1)[-1]) != files.get(key))
             if (kind, form) not in always and not exact:
                 continue
             local = path[len(base):] if base and path.startswith(base + "/") else path
@@ -2579,6 +3115,107 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
                 wrong.append((key, path))
         if wrong:
             page.__dict__["_wrong_forms"] = wrong
+
+
+def _read_jekyll_config(root: str) -> str:
+    try:
+        with open(os.path.join(root, "_config.yml"), encoding="utf-8", errors="replace") as fh:
+            return fh.read(200_000)
+    except OSError:
+        return ""
+
+
+def _jekyll_hidden(name: str, config: str) -> bool:
+    """
+    Каталог, который Jekyll не публикует: `_layouts`, `_includes`, `_drafts`,
+    `_data` и прочие `_`-каталоги. `_posts` публикуется под адресами по дате,
+    коллекция из `collections:` конфига — тоже; их не трогаем.
+    """
+    if not name.startswith("_") or name == "_posts":
+        return False
+    return not re.search(r"^[ \t]+-?[ \t]*" + re.escape(name[1:]) + r"[ \t]*:?[ \t]*$",
+                         config, re.M)
+
+
+_JEKYLL_POST = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-(.+)\.(?:md|markdown|html?)$", re.I)
+_JEKYLL_STYLES = {
+    "date": "/:categories/:year/:month/:day/:title:output_ext",
+    "pretty": "/:categories/:year/:month/:day/:title/",
+    "none": "/:categories/:title:output_ext",
+}
+
+
+def _jekyll_post_url(page, root: str, base_url: str, config: str) -> None:
+    """
+    `_posts/2024-01-05-hello.md` — запись блога Jekyll: адрес строится по
+    `permalink` конфига (по умолчанию `/2024/01/05/hello.html`), а не по пути.
+    """
+    rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+    parts = rel.split("/")
+    if "_posts" not in parts[:-1]:
+        return
+    found = _JEKYLL_POST.match(parts[-1])
+    meta = page.meta or {}
+    if not found or _SAFE_PATH.match((meta.get("permalink") or "").strip()):
+        return
+    style = re.search(r"^permalink[ \t]*:[ \t]*['\"]?([^'\"\s#]+)", config, re.M)
+    template = style.group(1) if style else "date"
+    template = _JEKYLL_STYLES.get(template, template)
+    if not template.startswith("/") or re.search(r":(?!categories|year|month|day|title"
+                                                 r"|output_ext|slug)\w", template):
+        return                             # стиль, который здесь не разобрать
+    categories = [p for p in parts[:parts.index("_posts")]]
+    head = FRONTMATTER.match(page.raw or "")
+    if head and head.group(1):
+        block = head.group(1)
+        line = re.search(r"^categor(?:y|ies)[ \t]*:(.*)$", block, re.M | re.I)
+        if line:
+            value = line.group(1).strip()
+            if value:
+                categories += [c for c in re.split(r"[\s,\[\]'\"]+", value) if c]
+            else:
+                rest = block[line.end():]
+                for item in re.finditer(r"^[ \t]*-[ \t]*['\"]?([^'\"\n]+?)['\"]?[ \t]*$|^\S",
+                                        rest, re.M):
+                    if not item.group(1):
+                        break
+                    categories.append(item.group(1).strip())
+    seen = []
+    for c in categories:
+        c = c.lower()
+        if c not in seen:
+            seen.append(c)
+    year, month, day, title = found.groups()
+    title = (meta.get("slug") or "").strip() or title
+    path = template
+    for key, value in (("categories", "/".join(seen)), ("output_ext", ".html"),
+                       ("year", year), ("month", month), ("day", day),
+                       ("title", title), ("slug", title)):
+        path = path.replace(":" + key, value)
+    path = re.sub(r"/{2,}", "/", path)
+    page.url = normalize_url(urljoin(base_url.rstrip("/") + "/",
+                                     quote(path.lstrip("/"), safe="/~-._")))
+
+
+def _next_default_locale(root: str) -> str:
+    """
+    Язык по умолчанию сборки `.next/server/pages` с i18n: его страницы
+    (`en.html`, `en/about.html`) Next.js отдаёт без префикса — `/`, `/about`.
+    Берётся из `.next/routes-manifest.json`.
+    """
+    if os.path.basename(os.path.abspath(root)) != "pages":
+        return ""
+    up = os.path.dirname(os.path.dirname(os.path.abspath(root)))
+    try:
+        with open(os.path.join(up, "routes-manifest.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return ""
+    i18n = data.get("i18n") if isinstance(data, dict) else None
+    locale = i18n.get("defaultLocale") if isinstance(i18n, dict) else None
+    if isinstance(locale, str) and re.fullmatch(r"[A-Za-z0-9-]{2,20}", locale):
+        return locale
+    return ""
 
 
 def _host_serves_any_form(root: str) -> tuple:
@@ -2599,7 +3236,10 @@ def _host_serves_any_form(root: str) -> tuple:
     if (re.search(r"/\.next/server/(app|pages)$", real)
             or os.path.isfile(os.path.join(up, "routes-manifest.json"))
             or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
-            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)):
+            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS
+                   if m not in _REPO_ONLY_MARKERS)):
+        # Один `.git` — не исходники: checkout ветки gh-pages и есть то, что
+        # отдаёт хостинг.
         return True, True
     near = [root, os.path.dirname(os.path.abspath(root))]
     for folder in near:
@@ -2653,8 +3293,11 @@ def _mark_canonical_forms(pages: list, root: str, base_url: str,
         name = os.path.basename(page.path).lower()
         last = local.rstrip("/").rsplit("/", 1)[-1].lower()
         if name.startswith("index."):
-            # `a/index.html`: отдаётся по /a/ и /a/index.html.
-            if local.endswith("/") or last.startswith("index."):
+            # `a/index.html`: отдаётся по /a/ и /a/index.html — но не по
+            # /a/index.htm и не по /a/index.md.
+            if local.endswith("/") or last == name:
+                continue
+            if last.startswith("index.") and not _EXT_RE.search(last):
                 continue
             form = "file" if _EXT_RE.search(last) else "bare"
             if form == "bare" and bare_ok:
@@ -2665,6 +3308,8 @@ def _mark_canonical_forms(pages: list, root: str, base_url: str,
                 form = "slash"
             elif last.startswith("index.") and _EXT_RE.search(last):
                 form = "index"
+            elif _EXT_RE.search(last) and last != name:
+                form = "file"             # /about.htm при about.html
             else:
                 continue
         if any(regex.match(local) for regex in redirects):
@@ -2715,6 +3360,9 @@ def _apply_fetch_manifest(pages: list, root: str, base_url: str) -> None:
             page.url = urlunsplit((site.scheme, site.netloc, urlsplit(url).path or "/", "", ""))
 
 
+_INDEX_NAME = re.compile(r"index\.(?:html?|md|markdown)$", re.I)
+
+
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
     """
     Возвращает (страницы, проблемы). Проблемы — это файлы, которые не прочитались,
@@ -2722,11 +3370,12 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
-    todo, maybe_error = [], set()
+    todo, maybe_error, hidden_dirs = [], set(), []
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
     jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
+    jekyll_config = _read_jekyll_config(root) if jekyll else ""
     def unreadable(exc):
         if not os.path.isdir(root):
             return                  # нет самого каталога — об этом скажут выше
@@ -2764,13 +3413,24 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                     problems.append(tr(
                         "каталог {a0}/ пропущен как сборочный. Если проверять "
                         "нужно собранный сайт — передай его каталог явно.", a0=name))
+        # В готовом сайте служебное имя каталога (`venv`, `.guides`) — не
+        # повод молча терять его страницы: о пропуске говорится вслух.
+        if not source_repo:
+            hidden_dirs.extend(
+                os.path.relpath(os.path.join(dirpath, d), root).replace(os.sep, "/")
+                for d in sorted(dirnames)
+                if (d.startswith(".") or d in ALWAYS_SKIP) and d not in (".git", ".svn")
+                and _has_pages(os.path.join(dirpath, d), exts))
         # Порядок обхода — по имени: readdir отдаёт каталоги в порядке
         # файловой системы, и список «первых пяти» менялся от машины к машине.
         dirnames[:] = sorted(d for d in dirnames
-                             if not d.startswith(".") and d not in skip and d not in OWN_DIRS)
+                             if not d.startswith(".") and d not in skip and d not in OWN_DIRS
+                             and not (jekyll and _jekyll_hidden(d, jekyll_config)))
         for name in sorted(filenames):
             if name.startswith(".") or name.lower() in OWN_FILES:
                 continue
+            if jekyll and name.startswith("_"):
+                continue                   # Jekyll не публикует `_`-файлы
             if not name.lower().endswith(exts):
                 continue
             path = os.path.join(dirpath, name)
@@ -2778,17 +3438,31 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             # она короткая, и в sitemap ей не место. Её выдаёт почти любой
             # генератор, и каждая получала «сироту» и «тонкую».
             rel = os.path.relpath(path, root).replace(os.sep, "/")
-            if _ERROR_FILE.search(rel) or _TOP_ERROR.match(rel):
+            top_error = _TOP_ERROR.match(rel)
+            if (_ERROR_FILE.search(rel) or _DYNAMIC_ROUTE.search(rel)
+                    or (top_error and "/" not in rel[:top_error.start(1)])):
                 continue
-            if _ERROR_PAGE.search(rel):
+            # `en/404.html` — служебная в корне языка, но `api/404/` — может
+            # быть и раздел: решают ссылки.
+            if top_error or (_ERROR_PAGE.search(rel) and not _numbered_sibling(path)):
                 # `status/404/index.html` в глубине сборки — это может быть
                 # статья про код ответа, а не страница ошибки. Её судьбу
                 # решают ссылки: на страницу ошибки сайт не ссылается.
                 maybe_error.add(path)
-            readme_home = (jekyll and name.lower() == "readme.md"
+            # GitHub Pages собирает Jekyll и без _config.yml; README.md —
+            # главная и у Docsify, MkDocs, GitBook. В проекте с исходниками
+            # другого генератора — нет.
+            readme_home = ((jekyll or not source_repo) and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
+    if hidden_dirs:
+        problems.append(tr(
+            "каталоги со служебными именами пропущены, страницы в них не проверялись: {a0}",
+            a0=", ".join(d + "/" for d in hidden_dirs[:5])
+            + (tr(" и ещё {a0}", a0=len(hidden_dirs) - 5) if len(hidden_dirs) > 5 else "")))
     for kind, path, value in _parse_all(todo, jobs):
+        if kind == "page" and jekyll:
+            _jekyll_post_url(value, root, base_url, jekyll_config)
         if kind == "error":
             problems.append(value)
         elif kind == "fragment":
@@ -2800,12 +3474,32 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     if maybe_error:
         linked = {url_key(link) for page in loaded if page.path not in maybe_error
                   for link in page.links}
+        dropped = sorted(page.url for page in loaded if page.path in maybe_error
+                         and page.key not in linked
+                         and re.search(r"/index\.html?$", page.path.replace(os.sep, "/"), re.I))
         loaded = [page for page in loaded
                   if page.path not in maybe_error or page.key in linked]
+        # Статья `/http/404/` без входящих ссылок неотличима от страницы
+        # ошибки — но молча пропадать ей нельзя: в sitemap её не будет, а
+        # сирота — ровно то, что sitemap должен вывести к поисковику.
+        if dropped:
+            problems.append(tr(
+                "{a0} страниц(ы) в каталоге с именем кода ответа (…/404/) никто не "
+                "ссылается — сочтены страницами ошибки, не проверялись и в sitemap не "
+                "попадут: {a1}. Если это статьи — поставь на них ссылку",
+                a0=len(dropped), a1=", ".join(dropped[:3]) + (" …" if len(dropped) > 3 else "")))
     # Сырой markdown убирается до разбора совпавших адресов: иначе двойник
     # `guide.md` побеждал `guide.html` по числу ссылок, потом выбрасывался как
     # сырой файл — и страница пропадала вовсе.
     loaded, raw_md = (loaded, []) if jekyll else _drop_raw_markdown(loaded, root)
+    # В какой форме сайт ссылается на адрес — до `_settle_flat_urls`, которая
+    # эти формы забирает. Нужно только при совпавших адресах.
+    link_forms = defaultdict(set)
+    if len({page.key for page in loaded}) < len(loaded):
+        for item in loaded:
+            for key, form, _ in item.__dict__.get("_link_forms", ()):
+                if form != "bare":
+                    link_forms[key].add("flat" if form == "file" else "folder")
     _settle_flat_urls(loaded, root, base_url)
     _apply_fetch_manifest(loaded, root, base_url)
     _apply_header_rules(loaded, root, base_url, problems)
@@ -2815,6 +3509,29 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             "не проверялись: {a1}", a0=len(fragments),
             a1=", ".join(os.path.relpath(p, root).replace(os.sep, "/") for p in fragments[:5])))
     position = {}
+
+    def served(a, b):
+        """Тот из двух файлов, который отдаёт хост, — или None, если не ясно."""
+        da, na = os.path.split(a.path)
+        db, nb = os.path.split(b.path)
+        # В одном каталоге index.html и старый index.htm: сервер отдаёт
+        # index.html (он раньше в DirectoryIndex), а проверялась копия.
+        if da == db and {na.lower(), nb.lower()} == {"index.html", "index.htm"}:
+            return a if na.lower() == "index.html" else b
+        folder_a, folder_b = (_INDEX_NAME.match(na) is not None,
+                              _INDEX_NAME.match(nb) is not None)
+        if folder_a == folder_b:
+            return None
+        # `about.html` и `about/index.html` хост отдаёт по разным адресам:
+        # `/about.html` и `/about/`. Если сайт ссылается на адрес только в
+        # одной форме, проверяется файл, который по ней и откроется.
+        forms = link_forms.get(a.key, set())
+        if forms == {"folder"}:
+            return a if folder_a else b
+        if forms == {"flat"}:
+            return b if folder_a else a
+        return None
+
     for page in loaded:
         other = by_key.get(page.key)
         if other is None:
@@ -2826,9 +3543,11 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
         # что раньше встретился в обходе: заглушка `about.html` рядом
         # с настоящей `about/index.html` уносила её исходящие ссылки,
         # и целевые страницы становились ложными сиротами.
+        host = served(page, other)
         keep, drop = ((page, other)
-                      if (len(page.links), len(page.text)) >
-                         (len(other.links), len(other.text))
+                      if (host is page if host is not None else
+                          (len(page.links), len(page.text)) >
+                          (len(other.links), len(other.text)))
                       else (other, page))
         problems.append(
             tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
@@ -2842,6 +3561,17 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             "{a0} файл(ов) .md рядом со сборкой HTML — это файлы, которые сайт отдаёт "
             "как есть, а не страницы; не проверялись: {a1}",
             a0=len(raw_md), a1=", ".join(os.path.relpath(p, root) for p in raw_md[:5])))
+    # `Guide/` и `guide/` на Linux — две страницы, а на macOS, Windows и
+    # хостинге без учёта регистра одна затирает другую.
+    folded = defaultdict(list)
+    for page in pages:
+        folded[page.key.lower()].append(page)
+    twins = sorted(sorted(os.path.relpath(p.path, root).replace(os.sep, "/") for p in group)
+                   for group in folded.values() if len(group) > 1)
+    for group in twins[:5]:
+        problems.append(tr("{a0} различаются только регистром букв: на macOS, Windows и "
+                           "хостинге без учёта регистра один файл затрёт другой",
+                           a0=", ".join(group)))
     _settle_canonical_origins(pages, base_url, problems)
     pages.sort(key=lambda p: p.url)
     return pages, problems
@@ -2883,26 +3613,46 @@ def _settle_canonical_origins(pages: list, base_url: str, problems: list) -> Non
     каждую страницу находкой — о нём одна заметка. Голосуют только canonical,
     записанные полным адресом: относительный достроен от --site и о сайте
     ничего не говорит. Если большинства нет, мерило — --site.
+
+    Относительный canonical на себя всё же голос: браузер достраивает его от
+    того адреса, по которому страница отдана. Без этого два canonical на
+    `http://` из восьми страниц перевешивали сайт. `//www.host/a/` сверяется
+    только по хосту: схему он берёт у запроса.
     """
-    votes = []
+    votes, neutral, host_only = [], 0, []
     for page in pages:
-        if (page.canonical and page.__dict__.get("_canonical_absolute")
-                and url_key(page.canonical) == page.key):
+        if not page.canonical or url_key(page.canonical) != page.key:
+            continue
+        if page.__dict__.get("_canonical_host_only"):
+            host_only.append(page)
+        elif page.__dict__.get("_canonical_absolute"):
             origin = _origin(page.canonical)
             if origin:
                 votes.append((page, origin))
-    if not votes:
-        return
+        else:
+            neutral += 1
     site = _origin(base_url)
+    if not votes and not host_only:
+        return
     counts = Counter(origin for _, origin in votes)
+    if site is not None and neutral:
+        counts[site] += neutral
+    if not counts and site is not None:
+        counts[site] = 0
+    if not counts:
+        return
     top, count = max(counts.items(),
                      key=lambda item: (item[1], item[0] == site, item[0][0] == "https"))
-    total = len(votes)
+    total = len(votes) + (neutral if site is not None else 0)
     home = top if count * 2 > total else site
     if home is None:
         return
     for page, origin in votes:
         if origin != home:
+            page.__dict__["_canonical_origin"] = "%s://%s" % home
+    for page in host_only:
+        origin = _origin(page.canonical)
+        if origin and origin[1] != home[1]:
             page.__dict__["_canonical_origin"] = "%s://%s" % home
     if site is not None and home != site:
         problems.append(tr(
@@ -2977,6 +3727,29 @@ def default_jobs() -> int:
         value = 0
     return value or min(8, os.cpu_count() or 1)
 
+def _numbered_sibling(path: str) -> bool:
+    """
+    `product/401/` рядом с `product/402/` — карточка каталога с номером, а не
+    страница ошибки: у соседей тоже номера, и не коды ответа. Без этого
+    непривязанная карточка выпадала молча и уносила с собой находку «сирота».
+    """
+    folder = os.path.dirname(path)
+    own = os.path.basename(path)
+    if own.lower().startswith("index."):
+        own, folder = os.path.basename(folder), os.path.dirname(folder)
+    own = own.split(".")[0]
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return False
+    for name in names:
+        stem = name.split(".")[0]
+        if (stem != own and stem.isdigit() and len(stem) == len(own)
+                and not _ERROR_PAGE.search(stem + ".html")):
+            return True
+    return False
+
+
 def _has_pages(path: str, exts) -> bool:
     for _dirpath, _dirnames, filenames in os.walk(path):
         if any(name.lower().endswith(exts) for name in filenames):
@@ -3009,6 +3782,9 @@ _ERROR_PAGE = re.compile(
 _ERROR_FILE = re.compile(
     r"(^|/)(5xx|4xx|_not-found|_error|_global-error|offline-plugin-app-shell-fallback)"
     r"(\.html?|/index\.html?)$", re.I)
+# `[slug].html`, `[...path].html` — оболочка динамического маршрута Next.js
+# (fallback getStaticPaths), а не адрес: по `/blog/%5Bslug%5D.html` никто не ходит.
+_DYNAMIC_ROUTE = re.compile(r"(^|/)\[[^/\[\]]+\]\.html?$", re.I)
 # Коды и `200.html` (запасной вход SPA у Nuxt, SvelteKit, Surge) — служебные
 # только в корне сборки или в корне языка: `status/404/` в глубине — обычная
 # страница, если на неё ссылаются.
