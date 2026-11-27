@@ -654,6 +654,10 @@ def boilerplate_profile(pages: list, cfg: dict = None, words: dict = None) -> di
             rest = _locale_split(p.url)[2]
             if "/" in rest:
                 sections[rest.split("/", 1)[0]].append(p)
+            elif re.search(r"[-_]", rest.strip("-_")):
+                # Плоские адреса `/rent-berlin/` — раздел по началу slug: без
+                # этого одна добавленная страница снимала шаблон со всех клонов.
+                sections[re.split(r"[-_.]+", rest.strip("-_"), maxsplit=1)[0] + "-"].append(p)
         for part in sections.values():
             if cfg["boilerplate_min_pages"] <= len(part) < len(members):
                 for url, share in measure(part).items():
@@ -1393,6 +1397,9 @@ _CLOSED_BY_DESIGN = {"print", "print.html", "toc", "toc.html", "search", "search
                      "404", "404.html", "search-results"}
 
 
+_INVISIBLE = re.compile("[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
+
+
 def technical_issues(pages: list, cfg: dict = None, language: str = "",
                      shells: set = None) -> list:
     """Плоский список находок: (уровень, url, код, пояснение)."""
@@ -1421,10 +1428,12 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         if not language:
             first = urlsplit(p.url).path.strip("/").split("/")[0].lower()
             language = first if _is_locale(first) else ""
+        # Невидимые знаки не делают заголовок другим: «Berlin&#8203;:» на
+        # экране то же, что «Berlin:».
         if p.title:
-            titles[(language, p.title.strip().lower())].append(p.url)
+            titles[(language, _INVISIBLE.sub("", p.title).strip().lower())].append(p.url)
         if p.description:
-            descriptions[(language, p.description.strip().lower())].append(p.url)
+            descriptions[(language, _INVISIBLE.sub("", p.description).strip().lower())].append(p.url)
 
     for p in pages:
         for note in p.notes:

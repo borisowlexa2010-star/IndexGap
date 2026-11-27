@@ -67,7 +67,9 @@ HEAD_TAGS = {"html", "head", "base", "basefont", "bgsound", "link", "meta",
 # Ссылок и подписей здесь нет намеренно: два соседних <a> — это два разных
 # пункта, и склеивать их в «словослово» нельзя.
 INLINE_TAGS = {"b", "i", "em", "strong", "code", "small", "sub", "sup",
-               "mark", "u", "s", "abbr", "var", "kbd", "font", "big", "tt"}
+               "mark", "u", "s", "abbr", "var", "kbd", "font", "big", "tt",
+               # <wbr> — только место для переноса: «$1,<wbr>600» — одно число.
+               "wbr"}
 
 # Теги без закрывающей пары: они не открывают основной блок и не меняют глубину.
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -152,6 +154,35 @@ def gunzip(data: bytes) -> bytes:
     return out
 
 
+def _xml_doctype(data: bytes) -> bool:
+    """
+    Есть ли DOCTYPE в прологе — по разбору, а не по первым 64 КБ: длинный
+    комментарий до `<!DOCTYPE` проводил DTD мимо проверки. Разбор кончается
+    на первом элементе: позже объявление типа стоять не может.
+    """
+    from xml.parsers import expat
+    found = []
+
+    class Stop(Exception):
+        pass
+
+    def doctype(*_):
+        found.append(True)
+        raise Stop
+
+    def element(*_):
+        raise Stop
+
+    parser = expat.ParserCreate()
+    parser.StartDoctypeDeclHandler = doctype
+    parser.StartElementHandler = element
+    try:
+        parser.Parse(data, True)
+    except (Stop, expat.ExpatError, ValueError):
+        pass
+    return bool(found)
+
+
 def parse_xml(data):
     """
     XML без объявления типа документа.
@@ -164,7 +195,7 @@ def parse_xml(data):
     if isinstance(data, str):
         data = data.encode("utf-8")
     probe = data[:65536].replace(b"\x00", b"").upper()
-    if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe:
+    if b"<!DOCTYPE" in probe or b"<!ENTITY" in probe or _xml_doctype(data):
         raise SourceError(tr("в XML объявлен DOCTYPE — такой файл не читается: "
                              "ни sitemap, ни выгрузке он не нужен"))
     try:
@@ -2132,6 +2163,34 @@ def _group_end(pattern: str, i: int) -> int:
     return -1
 
 
+class _Glob:
+    """
+    Шаблон из буквального текста и `*` без регулярного выражения: каждая часть
+    ищется слева направо один раз, время линейно от длины адреса. `/*a*a*a…b`
+    в чужом robots.txt или `_headers` больше не подвешивает проверку (#399).
+    """
+
+    def __init__(self, body: str, anchored: bool = True):
+        self.parts, self.anchored = body.split("*"), anchored
+
+    def match(self, text: str):
+        parts = self.parts
+        if not text.startswith(parts[0]):
+            return None
+        if len(parts) == 1:
+            return True if not self.anchored or text == parts[0] else None
+        pos = len(parts[0])
+        for part in parts[1:-1]:
+            at = text.find(part, pos)
+            if at < 0:
+                return None
+            pos = at + len(part)
+        last = parts[-1]
+        if self.anchored:
+            return True if text.endswith(last) and len(text) - len(last) >= pos else None
+        return True if text.find(last, pos) >= 0 else None
+
+
 def _route_regex(pattern: str):
     """
     `/glossary/*` (Netlify) или `/glossary/(.*)`, `/:slug*` (Vercel) → выражение.
@@ -2143,6 +2202,8 @@ def _route_regex(pattern: str):
     Шаблон, который не разобрать, даёт None: правило пропускается, а не
     закрывает или открывает всё подряд.
     """
+    if not any(ch in pattern for ch in "\\(){}:?+"):
+        return _Glob(pattern)
     out, i = [], 0
     while i < len(pattern):
         ch = pattern[i]

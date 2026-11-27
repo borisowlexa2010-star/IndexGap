@@ -246,7 +246,8 @@ def foreign_sitemap(out_dir: str, manifest: dict, base_dir: str = None) -> str:
 
 def build_sitemap(pages: list, out_dir: str, base_url: str,
                   manifest: dict = None, today: str = None,
-                  public_prefix: str = "", base_dir: str = None) -> dict:
+                  public_prefix: str = "", base_dir: str = None,
+                  force: bool = True) -> dict:
     """
     Пишет sitemap.xml (или sitemap.xml-индекс + шарды) в out_dir.
 
@@ -339,6 +340,18 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         chunk.append((entry, row))
         size += weight
     shards.append(chunk)
+
+    # Шард, которого нет в манифесте, — чужой файл, как и чужой sitemap.xml:
+    # без --force (`force=False`) он не заменяется, и ничего не пишется.
+    if not force and len(shards) > 1:
+        own = set(_own_files(out_dir, manifest, base_dir))
+        for i in range(1, len(shards) + 1):
+            path = os.path.join(out_dir, f"sitemap-{i}.xml")
+            if os.path.isfile(path) and f"sitemap-{i}.xml" not in own:
+                raise SourceError(tr(
+                    "{a0} уже существует, и написал его не indexgap. Заменять без спроса не "
+                    "стал.\n    Если заменить нужно — добавь --force; если нет — укажи другой "
+                    "каталог через --out-dir.", a0=path))
 
     if len(shards) == 1:
         write_urlset(os.path.join(out_dir, "sitemap.xml"), shards[0])

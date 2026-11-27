@@ -246,8 +246,8 @@ def _robots_pattern(rule: str):
     rule = _robots_norm(rule)
     anchored = rule.endswith("$")
     body = rule[:-1] if anchored else rule
-    regex = "".join(".*" if ch == "*" else re.escape(ch) for ch in body)
-    return re.compile(regex + ("$" if anchored else ""))
+    from .core import _Glob
+    return _Glob(body, anchored)
 
 
 def _robots_group(robots: dict, agent: str = "googlebot") -> dict:

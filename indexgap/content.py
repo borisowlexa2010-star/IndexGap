@@ -85,7 +85,11 @@ _SAME_SIGNS = str.maketrans({"٫": ".", "٬": ",", "٪": "%",
                              "\u200e": None, "\u200f": None, "\u061c": None,
                              "\u2066": None, "\u2067": None, "\u2068": None,
                              "\u2069": None, "\u202a": None, "\u202b": None,
-                             "\u202c": None, "\u202d": None, "\u202e": None})
+                             "\u202c": None, "\u202d": None, "\u202e": None,
+                             # Невидимые знаки без ширины и мягкий перенос:
+                             # «$&#8203;1,900» и «1,6&shy;00» на экране — одно число.
+                             "\u200b": None, "\u2060": None, "\ufeff": None,
+                             "\u180e": None, "\u00ad": None})
 
 
 def _same_signs(text: str) -> str:

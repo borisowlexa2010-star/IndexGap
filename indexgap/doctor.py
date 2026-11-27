@@ -134,8 +134,12 @@ def _child_sitemap(source: str, loc: str) -> tuple:
         inside = real == base or real.startswith(base + os.sep)
         if inside and real != me and os.path.isfile(real):
             return real, ""
+    # Индекс с диска в сеть не ведёт: sitemap.xml из чужого PR иначе посылал
+    # запрос из CI на любой адрес, внутренний тоже, и вписывал ответ в отчёт.
     if remote:
-        return loc, ""
+        return "", tr("{a0}: дочерний файл не найден рядом с индексом, а в сеть "
+                      "индекс с диска не ведёт — передайте его отдельным --sitemap",
+                      a0=loc)
     return "", tr("{a0}: дочерний файл не найден рядом с индексом", a0=loc)
 
 

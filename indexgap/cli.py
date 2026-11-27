@@ -1098,7 +1098,7 @@ def cmd_sitemap(args):
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
                                    public_prefix=args.public_prefix,
-                                   base_dir=manifest_base)
+                                   base_dir=manifest_base, force=args.force)
     save_manifest(manifest_path, result["manifest"])
     print(tr("Включено: {a0}   Исключено (noindex, canonical, черновики): {a1}", a0=result['included'], a1=result['excluded']))
     if result["drafts"]:
@@ -1226,6 +1226,10 @@ def cmd_doctor(args):
     # База читается до работы: тот же файл может быть и базой, и результатом.
     previous = doctor.load_run(args.baseline) if getattr(args, "baseline", "") else None
     history_dir = getattr(args, "history", "") or ""
+    if history_dir and history.foreign_trend(history_dir):
+        raise SourceError(tr("{a0} уже существует и это не график пакета.\n    Перезаписывать "
+                             "чужой файл я не буду — укажи другую папку --history.",
+                             a0=history.foreign_trend(history_dir)))
     baseline_label = args.baseline if getattr(args, "baseline", "") else ""
     if previous is None and history_dir:
         previous = history.latest(history_dir)
@@ -1353,7 +1357,13 @@ def cmd_doctor(args):
     json_path = report_pair(args.out)[1]
     run = {"site": args.site, "funnel": funnel_result, "segments": segments,
            "ai_crawlers": crawl or None, "ai_segments": ai_seg}
-    trend = doctor.compare_runs(run, previous) if previous is not None else None
+    try:
+        trend = doctor.compare_runs(run, previous) if previous is not None else None
+    except (TypeError, KeyError, AttributeError, ValueError):
+        # Прогон, поправленный руками, ронял doctor трассировкой после всей работы.
+        print(tr("  ! прошлый прогон {a0} повреждён — сравнение с ним пропущено",
+                 a0=baseline_label))
+        trend = None
     if trend is not None:
         _print_trend(trend, baseline_label)
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
@@ -1807,10 +1817,27 @@ def cmd_portfolio(args):
     specs = portfolio.read_portfolio(args.portfolio)
     print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
     results = []
+    # Файлы отчётов проектов проверяются до работы, как --out у `check`: путь
+    # из JSON портфеля затирал чужой файл, а «beta/x» и «beta x» давали одно
+    # имя в --reports, и второй отчёт молча заменял первый.
+    taken = {}
+    key_of = lambda out: os.path.normcase(os.path.abspath(report_pair(out)[0]))
     for spec in specs:
         if not spec.get("out") and args.reports:
-            spec["out"] = os.path.join(args.reports,
-                                       portfolio.report_name(spec["name"]) + ".html")
+            stem, n = portfolio.report_name(spec["name"]), 1
+            path = os.path.join(args.reports, stem + ".html")
+            while key_of(path).lower() in {k.lower() for k in taken}:
+                n += 1
+                path = os.path.join(args.reports, f"{stem}-{n}.html")
+            spec["out"] = path
+        if spec.get("out"):
+            key = key_of(spec["out"])
+            if key in taken:
+                raise SourceError(tr("{a0}: один файл отчёта у двух проектов — «{a1}» и «{a2}»",
+                                     a0=spec["out"], a1=taken[key], a2=spec["name"]))
+            taken[key] = spec["name"]
+            _check_report_pair(spec["out"])
+    for spec in specs:
         result = portfolio.run_one(spec)
         results.append(result)
         if result["error"]:
