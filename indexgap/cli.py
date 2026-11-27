@@ -1616,7 +1616,9 @@ def cmd_doctor(args):
                             **({"baseline": dict(path=baseline_label, **trend)} if trend else {}),
                             "ai_crawlers": crawl or None, "ai_segments": ai_seg,
                             "foreign": foreign, "live": live, "near_page_one": near,
-                            "notes": notes})
+                            "notes": notes,
+                            # HTML отсылает «полный список — в JSON»: он здесь.
+                            "issues": _serialize_issues(analysis.get("issues") or [])})
     print(tr("\nОтчёт: {a0}\nДанные: {a1}", a0=path, a1=json_path))
     if history_dir:
         saved = history.save(history_dir, run)
@@ -2448,10 +2450,10 @@ def cmd_diff(args):
         delta = compare_baseline(after, diffs.moved_findings(
             _serialize_issues(before), result, new_pages))
         said = {i[1] for i in items if i[2] in ("page-closed", "nosnippet-added")}
-        shown = 0
+        shown = shown_warnings = 0
         raised = set()
         for item in delta["new"]:
-            if item["level"] != "critical":
+            if item["level"] not in ("critical", "warning"):
                 continue
             if item["code"] in _DIFF_SAID and item["url"] in said:
                 # Строка diff уже названа, но уровень берётся у check: новый
@@ -2459,9 +2461,12 @@ def cmd_diff(args):
                 if item["code"] == "nosnippet":
                     raised.add(item["url"])
                 continue
-            items.append(("critical", item["url"], "new-finding",
+            # Новые «внимание» тоже строки отчёта: битая ссылка на удалённую
+            # страницу — warning, и карточка «внимание» показывала ноль.
+            items.append((item["level"], item["url"], "new-finding",
                           f"{item['code']} — {item['message']}"))
-            shown += 1
+            shown += item["level"] == "critical"
+            shown_warnings += item["level"] == "warning"
         items = [("critical",) + tuple(i[1:]) if i[2] == "nosnippet-added" and i[1] in raised
                  else i for i in items]
         findings = {
@@ -2469,7 +2474,7 @@ def cmd_diff(args):
             # Без тех, что уже названы как закрывшиеся страницы: счёт сходится
             # с числом строк `new-finding` в отчёте.
             "new_critical": shown,
-            "new_warning": sum(1 for i in delta["new"] if i["level"] == "warning"),
+            "new_warning": shown_warnings,
             "fixed_critical": sum(1 for i in delta["fixed"] if i.get("level") == "critical"),
         }
     items = checks.sort_issues(items)

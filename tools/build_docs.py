@@ -102,8 +102,8 @@ WHY = {
    "Informational: new pages per URL template, so a generator that suddenly "
    "produced ten thousand pages is noticed before they reach the sitemap.",
  "new-finding":
-   "A critical finding of the ordinary check that the old build did not have: the "
-   "deploy introduces it.",
+   "A critical or warning finding of the ordinary check that the old build did not "
+   "have: the deploy introduces it.",
  "unsupported-number":
    "A generated page that states a number absent from its own data row is not "
    "a traffic problem — it is a page that misinforms a reader who came looking "
@@ -757,8 +757,8 @@ LEVEL_OVERRIDES = {
     "template-change": {"levels": {"warning", "info"},
                         "message": "titles, H1s, descriptions, canonicals or the URL form "
                                    "changed on most pages of one URL template at once"},
-    "new-finding": {"levels": {"critical"},
-                    "message": "a critical finding that the old build did not have"},
+    "new-finding": {"levels": {"critical", "warning"},
+                    "message": "a finding that the old build did not have"},
     "ai-crawler-blocked": {"levels": {"critical", "info"},
                            "message": "OAI-SearchBot is closed: … (critical for the "
                                       "AI-search crawlers, info for training crawlers)"},

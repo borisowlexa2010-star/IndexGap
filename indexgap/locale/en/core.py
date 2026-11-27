@@ -46,6 +46,13 @@ MESSAGES = {
         "{a0} closes {a1} page(s) to indexing with an X-Robots-Tag: noindex header — rule {a2}",
     "файл прочитан как {a0}, а не UTF-8":
         "read as {a0}, not UTF-8",
+    "в <meta charset> объявлен UTF-8, а файл в {a0}: браузер и поисковик покажут вместо букв знаки «�». Пересохрани файл в UTF-8":
+        "<meta charset> declares UTF-8, but the file is {a0}: browsers and search engines "
+        "will show “�” instead of the letters. Re-save the file as UTF-8",
+    "в <meta charset> объявлен {a0}, а файл в UTF-8: если сервер не присылает charset в Content-Type, браузер покажет кракозябры. Исправь объявление на utf-8":
+        "<meta charset> declares {a0}, but the file is UTF-8: unless the server sends a "
+        "charset in Content-Type, browsers will show garbled text. Change the declaration "
+        "to utf-8",
     "фронтматтер не распознан":
         "frontmatter not recognised",
     "фронтматтер открыт, но не закрыт: строка `---` в конце блока":

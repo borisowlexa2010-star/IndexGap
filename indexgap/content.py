@@ -2341,6 +2341,9 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
             if not docs and _EMPTY_SLOT.search(value):
                 # `opt_*()`, `if ()`, «| — побитовое ИЛИ» — заголовки справочника.
                 empty.append(value.strip())
+            if not mojibake:
+                # title и description видны в выдаче, а visible_text их не видит.
+                mojibake += [s for k, s in find_slots(value, markdown=True) if k == "mojibake"]
         for block in page.jsonld or []:
             try:
                 data = json.loads(block)
