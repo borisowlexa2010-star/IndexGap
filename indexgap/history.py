@@ -20,6 +20,7 @@ import json
 import os
 
 from .core import SourceError
+from .doctor import valid_run
 from .i18n import tr
 
 
@@ -33,7 +34,30 @@ def runs(root: str) -> list:
     if not os.path.isdir(folder):
         return []
     names = [n for n in os.listdir(folder) if n.endswith(".json")]
-    return [os.path.join(folder, n) for n in sorted(names, key=_order)]
+    # Порядок — по времени записи с поясом, а не по имени: имя — местное
+    # время машины, и прогон из другого пояса (или файл с именем не по
+    # времени) навсегда оставался «последним».
+    return [os.path.join(folder, n)
+            for n in sorted(names, key=lambda n: (_when(os.path.join(folder, n)),) + _order(n)[1:])]
+
+
+def _when(path: str) -> float:
+    """Время прогона: `_saved`, иначе имя файла, иначе время изменения файла."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            saved = json.load(fh).get("_saved")
+        return datetime.datetime.fromisoformat(saved).timestamp()
+    except (OSError, ValueError, TypeError, AttributeError, OverflowError):
+        pass
+    try:
+        return datetime.datetime.strptime(os.path.basename(path)[:19],
+                                          "%Y-%m-%dT%H-%M-%S").timestamp()
+    except (ValueError, OverflowError, OSError):
+        pass
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
 
 
 def _order(name: str) -> tuple:
@@ -60,7 +84,7 @@ def latest(root: str) -> dict:
                 data = json.load(fh)
         except (OSError, ValueError):
             continue
-        if isinstance(data, dict) and isinstance(data.get("funnel"), dict):
+        if valid_run(data):
             data.setdefault("_path", path)
             return data
     return None
@@ -80,7 +104,7 @@ def save(root: str, run: dict, now: datetime.datetime = None) -> str:
     while os.path.exists(path):
         n += 1
         path = os.path.join(folder, f"{stamp}-{n}.json")
-    record = {**run, "_saved": now.isoformat(timespec="seconds")}
+    record = {**run, "_saved": now.astimezone().isoformat(timespec="seconds")}
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(record, fh, ensure_ascii=False, indent=1, default=str)
     return path
@@ -95,6 +119,8 @@ def series(root: str) -> dict:
                 data = json.load(fh)
         except (OSError, ValueError):
             continue
+        if not valid_run(data):
+            continue                      # битый или правленный руками прогон
         when = (data.get("_saved") or os.path.basename(path)[:19].replace("T", " "))
         dates.append(when.replace("T", " ")[:16])
         for step in (data.get("funnel") or {}).get("steps") or ():
@@ -149,8 +175,11 @@ def render(root: str, site: str = "") -> str:
         for d, v in pts:
             parts.append(f'<circle cx="{x(d):.1f}" cy="{y(v):.1f}" r="3" fill="{color}">'
                          f'<title>{html.escape(name)}: {v} ({html.escape(dates[d])})</title></circle>')
+        # Шага нет в последнем прогоне — значение старое, и это видно по дате.
+        last = (f"{pts[-1][1]}" + (f" ({html.escape(dates[pts[-1][0]])})"
+                                   if pts[-1][0] != len(dates) - 1 else "")) if pts else "0"
         legend.append(f'<li><span style="background:{color}"></span>{html.escape(name)}: '
-                      f'{pts[-1][1] if pts else 0}</li>')
+                      f'{last}</li>')
     for i, when in enumerate(dates):
         if len(dates) <= 12 or i in (0, len(dates) - 1) or i % max(1, len(dates) // 8) == 0:
             parts.append(f'<text x="{x(i):.1f}" y="{height - pad + 16}" text-anchor="middle" '

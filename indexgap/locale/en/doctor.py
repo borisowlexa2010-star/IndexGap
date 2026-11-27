@@ -372,4 +372,6 @@ MESSAGES = {
         '{a0}: robots.txt answered it with {a1} ({a2} of {a3} requests). Crawlers read a 5xx robots.txt as “do not crawl the site”',
     'лог {a0} обрезан или повреждён — прочитано только то, что было до места поломки':
         'log {a0} is truncated or corrupt — only the lines before the damage were read',
+    '{a0}: данные прогона doctor повреждены или правлены руками — сравнивать с ними нельзя':
+        '{a0}: the doctor run data is damaged or was edited by hand — it cannot be compared against',
 }

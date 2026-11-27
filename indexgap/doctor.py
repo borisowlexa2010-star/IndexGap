@@ -1791,7 +1791,62 @@ def load_run(path: str) -> dict:
         raise SourceError(tr("{a0}: не JSON прогона doctor ({a1})", a0=path, a1=exc))
     if not isinstance(data, dict) or not isinstance(data.get("funnel"), dict):
         raise SourceError(tr("{a0}: это не данные `indexgap doctor` — нет поля funnel", a0=path))
+    if not valid_run(data):
+        raise SourceError(tr("{a0}: данные прогона doctor повреждены или правлены руками — "
+                             "сравнивать с ними нельзя", a0=path))
     return data
+
+
+def valid_run(data) -> bool:
+    """
+    Прогон, с которым можно сравнивать: поля того вида, что пишет `doctor`.
+    Правленный руками или битый файл истории ронял сравнение трассировкой —
+    уже после того, как новый прогон был записан.
+    """
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def strs(v):
+        return v is None or (isinstance(v, list) and all(isinstance(u, str) for u in v))
+
+    if not isinstance(data, dict) or not isinstance(data.get("funnel"), dict):
+        return False
+    f = data["funnel"]
+    steps = f.get("steps")
+    if steps is not None and not (isinstance(steps, list) and all(
+            isinstance(s, dict) and (s.get("count") is None or num(s["count"]))
+            and all(isinstance(s.get(k) or "", str) for k in ("id", "name", "engine"))
+            for s in steps)):
+        return False
+    if not all(strs(f.get(k)) for k in ("not_indexed", "missing_from_sitemap", "blocked")):
+        return False
+    for key in ("engine_keys", "kinds", "display"):
+        if f.get(key) is not None and not isinstance(f[key], dict):
+            return False
+    if not all(strs(v) for v in (f.get("engine_keys") or {}).values()):
+        return False
+    for key in ("segments", "ai_segments"):
+        part = data.get(key)
+        if part is None:
+            continue
+        if not isinstance(part, dict):
+            return False
+        rows, marked = part.get("rows") or [], part.get("highlighted") or []
+        if not (isinstance(rows, list) and isinstance(marked, list)):
+            return False
+        if not all(isinstance(r, dict) and isinstance(r.get("segment"), str) and num(r.get("lost"))
+                   for r in rows):
+            return False
+        if not all(isinstance(h, dict) and isinstance(h.get("segment"), str) for h in marked):
+            return False
+    crawl = data.get("ai_crawlers")
+    if crawl is not None:
+        bots = crawl.get("bots") if isinstance(crawl, dict) else None
+        if not isinstance(crawl, dict) or not (bots is None or isinstance(bots, list) and all(
+                isinstance(b, dict) and isinstance(b.get("name"), str) and num(b.get("pages"))
+                for b in bots)):
+            return False
+    return data.get("_saved") is None or isinstance(data["_saved"], str)
 
 
 def _step_key(step: dict) -> tuple:
@@ -1836,12 +1891,44 @@ def compare_runs(current: dict, previous: dict) -> dict:
     def has(funnel, flag):
         return bool(funnel.get(flag, True))
 
+    # Набор источников индекса сменился (добавили выгрузку Bing) — шаг индекса
+    # вырос не потому, что страницы вернулись. Имена из файлов без метки не
+    # считаются: недельная выгрузка под новым именем — тот же источник.
+    def named(funnel):
+        return {n for n in (funnel.get("kinds") or funnel.get("engine_keys") or {})
+                if str(n).lower() in sources.TOOLS}
+    sources_changed = {}
+    if has(cur_f, "has_index") and has(old_f, "has_index") and named(cur_f) != named(old_f):
+        sources_changed = {"added": sorted(named(cur_f) - named(old_f)),
+                           "removed": sorted(named(old_f) - named(cur_f))}
+        steps = [s for s in steps if s["id"] not in ("indexed", "with-impressions")]
+
+    def in_index(funnel):
+        keys = funnel.get("engine_keys")
+        if not isinstance(keys, dict):
+            return None
+        return {k for urls in keys.values() for k in urls or ()}
+
     def moved(field, flag):
         if not (has(cur_f, flag) and has(old_f, flag)):
             return [], []
+        if field == "not_indexed" and sources_changed:
+            return [], []
         now, was = _keys(cur_f.get(field) or ()), _keys(old_f.get(field) or ())
         shown = {url_key(u): u for u in list(old_f.get(field) or ()) + list(cur_f.get(field) or ())}
-        return (sorted(shown[k] for k in now - was), sorted(shown[k] for k in was - now))
+        gone, came = was - now, now - was
+        # Страница уходит из списка и тогда, когда выпала раньше по воронке:
+        # стала noindex, удалена, ушла из sitemap. Это не «вернулась».
+        if field == "not_indexed":
+            idx_now, idx_was = in_index(cur_f), in_index(old_f)
+            if idx_now is not None:
+                gone = {k for k in gone if k in idx_now}
+            if idx_was is not None:
+                came = {k for k in came if k in idx_was}
+        elif isinstance(cur_f.get("display"), dict):
+            live = set(cur_f["display"]) - _keys(cur_f.get("blocked") or ())
+            gone = {k for k in gone if k in live}
+        return (sorted(shown[k] for k in came), sorted(shown[k] for k in gone))
 
     newly_lost, recovered = moved("not_indexed", "has_index") if not swapped else ([], [])
     in_index_now = cur_f.get("engine_keys")
@@ -1851,11 +1938,14 @@ def compare_runs(current: dict, previous: dict) -> dict:
         now_keys = set().union(*(set(v) for v in in_index_now.values()))
         recovered = [u for u in recovered if url_key(u) in now_keys]
     newly_off_map, back_on_map = moved("missing_from_sitemap", "has_sitemap")
-    same_inputs = not swapped and all(
-        has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap"))
+    same_inputs = (not swapped and not sources_changed
+                   and all(has(cur_f, f) == has(old_f, f) for f in ("has_index", "has_sitemap")))
+    # Логи ботов были только в одном прогоне: шаг «открыто ИИ-поиском» и
+    # разделы ИИ-поиска сравнивать не с чем.
+    logs_differ = bool(current.get("ai_crawlers")) != bool(previous.get("ai_crawlers"))
 
     def sections(key):
-        if key == "segments" and not same_inputs:
+        if (key == "segments" and not same_inputs) or (key == "ai_segments" and logs_differ):
             # Потери раздела считаются по другим шагам — разница ничего не значит.
             return {"rows": [], "new_gaps": [], "closed_gaps": []}
         if key == "ai_segments" and not (current.get(key) and previous.get(key)):
@@ -1894,7 +1984,8 @@ def compare_runs(current: dict, previous: dict) -> dict:
         "bots": bots,
         # Шаги, которые были только в одном из прогонов: «индекс», «sitemap».
         "not_compared": [f[4:] for f in ("has_index", "has_sitemap")
-                         if has(cur_f, f) != has(old_f, f)],
+                         if has(cur_f, f) != has(old_f, f)] + (["logs"] if logs_differ else []),
+        "sources_changed": sources_changed,
         "site_changed": (current.get("site") or "") != (previous.get("site") or ""),
         "index_sources": {"before": src_was, "after": src_now} if swapped else None,
     }

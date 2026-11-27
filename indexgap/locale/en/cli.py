@@ -673,4 +673,6 @@ MESSAGES = {
         '  ! {a0} sitemap address(es) are caught by a host rule (redirects in vercel.json, `301!`/`404!` in _redirects) before the file — the search engine gets a redirect or an error, not the page: {a1}',
     '  ! {a0} объявляет другой sitemap ({a1}), а записан {a2} — поисковик будет читать объявленный. Пропиши в robots.txt `Sitemap: {a2}`':
         '  ! {a0} declares a different sitemap ({a1}), but {a2} was written — search engines will read the declared one. Add `Sitemap: {a2}` to robots.txt',
+    '  ! источники индекса другие (добавлены: {a0}; убраны: {a1}) — шаг индекса и разделы не сравниваются':
+        '  ! the index sources are different (added: {a0}; removed: {a1}) — the index step and the sections are not compared',
 }

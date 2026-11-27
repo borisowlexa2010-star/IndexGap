@@ -1605,17 +1605,25 @@ def _print_trend(trend: dict, path: str, limit: int = 8) -> None:
     if trend.get("site_changed"):
         print(tr("  ! прогоны для разных сайтов — сравнение почти ничего не значит"))
     quiet = True
-    names = {"index": tr("индекс"), "sitemap": "sitemap"}
+    names = {"index": tr("индекс"), "sitemap": "sitemap",
+             "logs": tr("Открыто ИИ-поиском (по логам)")}
     for step in trend.get("not_compared") or ():
         quiet = False
         print(tr("  ! данные для шага «{a0}» есть только в одном из прогонов — "
                  "этот шаг и разделы не сравниваются", a0=names.get(step, step)))
     swapped = trend.get("index_sources")
+    changed = trend.get("sources_changed") or {}
     if swapped:
         quiet = False
         print(tr("  ! индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг "
                  "индекса и разделы не сравниваются",
                  a0=", ".join(swapped["before"]), a1=", ".join(swapped["after"])))
+    elif changed:
+        quiet = False
+        print(tr("  ! источники индекса другие (добавлены: {a0}; убраны: {a1}) — "
+                 "шаг индекса и разделы не сравниваются",
+                 a0=", ".join(changed.get("added") or ()) or "—",
+                 a1=", ".join(changed.get("removed") or ()) or "—"))
     for step in trend["steps"]:
         quiet = False
         print(tr("  {a0:<30} {a1:>6} → {a2:<6} ({a3:+d})",
@@ -2006,10 +2014,18 @@ def cmd_portfolio(args):
     specs = portfolio.read_portfolio(args.portfolio)
     print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
     results = []
+    # «shop/a» и «shop a» дают одно имя файла: отчёты затирали друг друга
+    # и сводный отчёт. Занятое имя получает номер.
+    taken = {os.path.normcase(os.path.abspath(p)) for p in report_pair(args.out)}
+    taken |= {os.path.normcase(os.path.abspath(s["out"])) for s in specs if s.get("out")}
     for spec in specs:
         if not spec.get("out") and args.reports:
-            spec["out"] = os.path.join(args.reports,
-                                       portfolio.report_name(spec["name"]) + ".html")
+            stem, n = portfolio.report_name(spec["name"]), 1
+            spec["out"] = os.path.join(args.reports, stem + ".html")
+            while os.path.normcase(os.path.abspath(spec["out"])) in taken:
+                n += 1
+                spec["out"] = os.path.join(args.reports, f"{stem}-{n}.html")
+            taken.add(os.path.normcase(os.path.abspath(spec["out"])))
         result = portfolio.run_one(spec)
         results.append(result)
         if result["error"]:
@@ -2025,10 +2041,14 @@ def cmd_portfolio(args):
     site_patterns = [p for p in patterns if p.get("scope") == "site"]
     if page_patterns:
         print(tr("\nОбщие грабли на страницах (доля страниц проекта):"))
-        for p in page_patterns[:10]:
+        # Критичное — в первую очередь: десяток сведений не должен вытеснять его.
+        shown = sorted(page_patterns, key=lambda p: p["level"] != "critical")[:10]
+        for p in shown:
             shares = ", ".join(f"{n} {p['detail'][n]['share']:.0%}" for n in p["projects"])
             mark = tr("  ← похоже на непонастроенный порог") if p.get("threshold_suspect") else ""
             print(tr("  {a0:<24} {a1} проекта: {a2}{a3}", a0=p['code'], a1=p['project_count'], a2=shares, a3=mark))
+        if len(page_patterns) > len(shown):
+            print(tr("         … и ещё {a0}", a0=len(page_patterns) - len(shown)))
         if any(p.get("threshold_suspect") for p in page_patterns):
             print(tr("    Порог, срабатывающий почти на всех страницах всех проектов, —\n    это вопрос к порогу, а не к страницам. Правится в indexgap.json\n    или профилем: `indexgap profiles`."))
     else:
