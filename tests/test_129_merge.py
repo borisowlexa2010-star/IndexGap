@@ -55,5 +55,15 @@ class WideCount(unittest.TestCase):
         self.assertIn("4", checks._wide_note("短期赴新", 8))
 
 
+
+class UnderscoreCode(unittest.TestCase):
+    def test_an_underscore_code_is_the_same_language(self):
+        from indexgap import hreflang
+        self.assertTrue(hreflang._same_language("de_DE", "de"))
+        self.assertTrue(hreflang._same_language("de-DE", "de"))
+        self.assertFalse(hreflang._same_language("uk", "de"))
+        self.assertFalse(hreflang._same_language("", "de"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -184,7 +184,10 @@ def check_tag(code: str) -> str:
 
 
 def _same_language(a: str, b: str) -> bool:
-    return (a or "").split("-")[0].lower() == (b or "").split("-")[0].lower() and a and b
+    # `de_DE` — неверная запись `de-DE` (о ней своя находка), но язык тот же.
+    def base(code):
+        return re.split(r"[-_]", code or "")[0].lower()
+    return bool(a and b) and base(a) == base(b)
 
 
 def clusters(pages: list) -> dict:
