@@ -128,6 +128,10 @@ adversarial test site from the earlier rounds.
   * clones where the city appears every few words;
   * multi-word or hyphenated cities;
   * LSH mode on large sites (498 of 500 test clones, up from 428).
+  On a site built from one template per city or country, pairs that 1.28 called
+  `similar` can now be critical `near-duplicate`. On a large real multilingual
+  build about a hundred pages moved, all of them clones that differ in the
+  place name and one paragraph.
 * `check --baseline` warns when the baseline used a different duplicate method.
 * `template-skeleton`:
   * two templates in one directory are found;
