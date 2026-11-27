@@ -1,5 +1,95 @@
 # Changelog
 
+## 1.30.0 — 2026-11-27
+
+This release covers the 17 findings 1.29 left open: 14 needed new design work
+and 3 had been called working as designed. Each fix has regression tests. The
+fixes were measured on the demo site, on a large real multilingual build and on
+the adversarial test sites from every round.
+
+### New findings
+
+* `broken-image` (warning): a page refers to an image that is not in the build.
+  It covers `<img src>`, `srcset`, `<picture><source>`, `<video poster>` and
+  `<link rel=icon>`.
+  * Addresses are resolved like links. For `/_next/image?url=…` and other
+    image optimisers, the source file is checked.
+  * Not checked: other hosts, `data:` and `blob:`, template placeholders, and
+    endpoints without a file extension.
+  * Builds that do not hold the site's images are skipped: `.next/server/app`,
+    fetch mirrors and source repositories.
+  * A build with no image files at all gets one note instead of a warning on
+    every page.
+* `stale-event-part` (warning): a page runs an ongoing event series and also
+  marks up a past one-off event. The page is not reported as `stale-event`.
+
+### Facts
+
+* Years and dates on a page are compared with the row's year and date columns
+  when a column name or a repeated template phrase ties them together.
+  Mismatches are listed under `check-by-eye`, for example "1978 (row has 1987)".
+  Copyright years, the current and next year, and years that are really prices
+  or house numbers are not compared.
+* `fact-drift` reports prices swapped between identically named plans or
+  products in a translation: Basic $29 / Pro $49 shown as Basic $49 / Pro $29.
+* An open-ended recurring event (`eventSchedule` without `endDate`) no longer
+  hides every other date on the page.
+* An ISO date-time such as `2027-02-20T09:00` is no longer listed as the
+  quantity "20 T".
+
+### Sitemap, IndexNow and doctor
+
+* The content hash behind `lastmod` and the IndexNow queue notices changes to
+  currency signs, minus signs and decimal separators: `$900` → `€900`,
+  `-5` → `+5`, `1,500` → `1.500`.
+* Upgrading keeps existing manifests valid. Old hashes are checked with the
+  previous method and replaced quietly, so unchanged pages keep their `lastmod`
+  and are not resubmitted.
+* `doctor` keeps the index step when an export lists only pages the search
+  engine declined to index.
+  * Those pages show as lost, with the engine's reason, in the JSON and HTML.
+  * Pages the export does not list are not counted as lost.
+  * `--baseline` reports them as dropped out of the index.
+* The `doctor` HTML report has a "Since the previous run" section with the
+  `--baseline` / `--history` comparison. Before, it was only in the console
+  and the JSON.
+
+### Addresses and URL forms
+
+* When a build has both `about.html` and `about/index.html`, the skipped file's
+  links still count for reachability. Pages linked only from it are no longer
+  false orphans.
+* A page in a directory named `index` (`glossary/index/index.html`) is checked
+  as its own page at `/glossary/index/`. VitePress-style `/section/index`
+  links are unaffected.
+* Some URL forms are reported only when the hosting does not serve them.
+  `cleanUrls`, `trailingSlash` or a redirect rule keeps them quiet.
+  * hreflang links in such a form give a `hreflang-bad-code` warning. Examples:
+    `/de/a` for `de/a/index.html`, or `/de/a/` for `de/a.html`.
+  * A page whose only inbound links use a form the host answers with 404 is an
+    orphan at warning level.
+  * `indexgap diff` warns when URLs change shape (`/x/` → `/x.html`) and the old
+    form is neither served nor redirected.
+* A link `/c.html` to a folder `c.html/` is no longer `wrong-link-form`.
+
+### Duplicates and templates
+
+* Large near-duplicate groups (30 or more pages) are checked in about linear
+  time, with the same findings. A 10,000-page template site went from about
+  15 minutes to about 1.5.
+* The JSON lists large groups once in `duplicate_groups` instead of every pair.
+  It caps each group finding's subject at 10 addresses, with `subject_total`.
+  Report files shrink from hundreds of MB to tens.
+* `--baseline` no longer reports a whole clone group as new when one page joins
+  or leaves it. It still reads baselines from earlier versions.
+* Sites over 400 pages no longer lose clones with many substituted words, and
+  adding one page no longer changes the near-duplicate count.
+* `template-skeleton` finds template pages with a shared URL ending
+  (`/berlin-rent/`). With stricter conditions it also finds bare URLs
+  (`/berlin/`).
+* `heavy-images` also names pages whose inline `data:` images add up to more
+  than 1 MB.
+
 ## 1.29.0 — 2026-11-27
 
 A third round of 50 adversarial testers reported 413 weak spots. All were
