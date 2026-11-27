@@ -1227,6 +1227,13 @@ class _Extractor(HTMLParser):
         text = data.strip()
         if lead:
             self._glue = False
+        # Центы верхним индексом — «$19<sup>99</sup>»: это $19.99, а не $1999.
+        if (self._glue and self._open and self._open[-1] == "sup"
+                and re.fullmatch(r"\d{2}", text)):
+            chunks = self._main_chunks if self._in_main else self._chunks
+            if chunks and chunks[-1][0][-1:].isdigit() \
+                    and not re.search(r"[.,]\d{1,2}$", chunks[-1][0]):
+                text = "." + text
         self._emit(text)
         if data[-1:].isspace():
             self._glue = False

@@ -172,6 +172,9 @@ NOT_A_UNIT = {
     "это", "как", "что", "год", "года", "году", "годов", "г", "гг", "стр",
     "and", "or", "the", "a", "an", "of", "in", "on", "at", "to", "for", "by",
     "is", "are", "no", "am", "pm",
+    # Порядковые окончания: колонка этажей «4th», «5th» не делает «19th-century»
+    # фактом.
+    "st", "nd", "rd", "th", "er", "ème", "º", "ª",
 }
 
 
@@ -193,6 +196,12 @@ def units_from_dataset(rows: list, keyword_field: str = None, min_count: int = 2
             for match in UNIT_AFTER_NUMBER.finditer(str(value)):
                 unit = match.group(1).strip().lower()
                 if unit and not unit.isdigit() and unit not in NOT_A_UNIT:
+                    counter[unit] += 1
+            # Единица только в названии колонки: `deposit_months: 3`.
+            if re.fullmatch(r"\s*\d+(?:[.,]\d+)?\s*", str(value)):
+                from .content import column_unit
+                unit = column_unit(field)
+                if unit:
                     counter[unit] += 1
     return [unit for unit, count in counter.most_common() if count >= min_count]
 

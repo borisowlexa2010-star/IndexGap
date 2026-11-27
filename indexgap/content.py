@@ -120,10 +120,34 @@ _SCALE_AFTER = re.compile(
     _SP + r"?(?:([" + _CJK_SCALES + r"])|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
 
 
-def _scale_in(unit: str) -> tuple:
+# Множители, которые пишут только при цене: «$2.54M», «£2.6m», «₹2.5 Cr»,
+# «₹25.2 L», «R$ 2,67 mi», «$2.58B». Без валюты «5 m» — это метры, поэтому
+# они читаются только после знака или кода валюты. Одна строчная «m» — только
+# вплотную к числу.
+_PRICE_SCALES = {"m": 10**6, "mm": 10**6, "mn": 10**6, "mi": 10**6, "b": 10**9,
+                 "cr": 10**7, "l": 10**5}
+# «$50 B&B» и «$5 M-F» — не миллиарды и не миллионы.
+_PRICE_SCALE_AFTER = re.compile(
+    r"(?:" + _SP + r"?(?:((?i:mm|mn|mi|cr))|([MBL]))|(m))(?![\w&'’/\-]|\.\w)\.?")
+
+
+def _price_scale_at(text: str, end: int) -> tuple:
+    """Как `_scale_at`, но ещё и с множителями, которые пишут только при цене."""
+    factor, length = _scale_at(text, end)
+    if factor != 1:
+        return factor, length
+    match = _PRICE_SCALE_AFTER.match(text, end)
+    if not match:
+        return 1, 0
+    word = (match.group(1) or match.group(2) or match.group(3)).lower()
+    return _PRICE_SCALES[word], match.end() - end
+
+
+def _scale_in(unit: str, price: bool = False) -> tuple:
     """(слово, множитель) множителя внутри подписи единицы — или ("", 1).
 
     Слово множителя — целым словом: «k» в «kg» и «mil» в «miles» — не тысяча.
+    С `price` — и множитель цены («$ M»), если в подписи есть валюта.
     """
     lowered = (unit or "").lower()
     for word, factor in sorted(SCALES.items(), key=lambda kv: -len(kv[0])):
@@ -132,6 +156,11 @@ def _scale_in(unit: str) -> tuple:
                 return word, factor
         elif re.search(r"(?<![^\W\d_])" + re.escape(word) + r"(?![^\W\d_])", lowered):
             return word, factor
+    if price and _MONEY.search(unit or ""):
+        for word in re.findall(r"[^\W\d_]+", unit or ""):
+            if word.lower() in _PRICE_SCALES and (word.lower() != "l" or word == "L") \
+                    and (len(word) > 1 or word in "MBLm"):
+                return word.lower(), _PRICE_SCALES[word.lower()]
     return "", 1
 
 
@@ -165,17 +194,22 @@ PERCENT_WORD = re.compile(
 # вовсе, и единственная настоящая выдумка на странице — `$95` при `$60`
 # в данных — была единственным, о чём проверка молчала.
 CURRENCY_CODES = ("USD|EUR|GBP|JPY|CNY|INR|AUD|CAD|CHF|SGD|AED|RUB|BRL|MXN|KRW|TRY|"
-                  "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH")
+                  "PLN|SEK|NOK|DKK|HKD|NZD|ZAR|THB|IDR|MYR|PHP|VND|SAR|QAR|KZT|UAH|"
+                  "CZK|HUF|BGN|EGP|PKR|KES|NGN|TWD|CLP")
+# Коды, совпадающие со словами («ron» — ром, «ils» — «они», «cop»), — только
+# заглавными.
+_CASED_CODES = "RON|ILS|NIS|COP|ARS"
 # Доллар с буквой страны и местные сокращения: `S$35`, `HK$200`, `R$ 90`,
 # `RM 35`, `Rp 350.000`. Раньше такие цены не находились вовсе.
-LOCAL_PREFIXES = r"(?:US|S|A|AU|C|CA|HK|NZ|NT|R|MX|COL|CL)\$|RM|Rp\.?|Rs\.?|₱|₫|₩|₪|₺|₴|₸|৳"
+LOCAL_PREFIXES = (r"(?:US|S|A|AU|C|CA|HK|NZ|NT|R|MX|COL|CL)\$|RM|Rp\.?|Rs\.?|₱|₫|₩|₪|₺|₴|₸|৳|"
+                  r"฿|₦|₵|₡|₲|₭|₮|﷼|kr\.?|Dhs\.?|KSh|SFr\.")
 _LOCAL_PREFIX = re.compile(LOCAL_PREFIXES)
 # Знак с пробелом — «$ 2,900», «€ 1.900» — та же цена: так пишут в нидерландской,
 # немецкой и французской типографике. Но знак, перед которым стоит число
 # («1.900 € 12 Monate»), — это валюта после числа, а не перед следующим.
 PREFIX_PRICE = re.compile(
     r"(?<![\w.,$])((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽]" + _SP
-    + r"|(?:" + CURRENCY_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
+    + r"|(?:" + CURRENCY_CODES + "|" + _CASED_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
 
 # Валюта после числа: `9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `3万円`. Раньше
 # ценой считалась только валюта перед числом, и выдуманная цена на испанском,
@@ -191,18 +225,21 @@ CURRENCY_WORDS = (
     "रुपये|रुपया|रुपए|บาท|đồng|"
     "دلار|یورو|تومن|ڈالر|روپے|روپیہ|ডলার|টাকা|রুপি|डॉलर|डालर|यूरो|"
     "ดอลลาร์|ยูโร|דולר|דולרים|יורו|долар(?:ів|а|и)?|гривень|"
-    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|TL|"
+    "ringgit|rupiah|dong|riyals?|dirhams?|shekels?|rand|naira|TL|kr|лв|Dhs|KSh|ر\\.س|د\\.إ|"
     "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로|엔"
 )
 # Валютные слова CJK пишутся вплотную к следующему слову («35ドルです»), поэтому
 # для них граница слова не нужна, в отличие от `dollar` в `dollars-and-sense`.
 CJK_CURRENCY_WORDS = "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로"
+# «1.540,– €», «1508,-- €», «1510.-€»: прочерк вместо копеек перед валютой.
+_NO_CENTS = r"(?:[.,](?:--?|[–—]))"
 SUFFIX_PRICE = re.compile(
-    NOT_INSIDE + r"(" + NUMBER + r")"
+    NOT_INSIDE + r"(" + NUMBER + r")" + _NO_CENTS + r"?"
     # Слово-множитель — целым словом: «18945 kgbp» — не тысячи фунтов.
-    r"(?:" + _SP + r"?(?:[" + _CJK_SCALES + r"]|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))))?"
+    r"(?:" + _SP + r"?(?:[" + _CJK_SCALES + r"]|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))"
+    r"|(?-i:Cr|mn|mi)(?![^\W\d_]))|(?-i:MM|M|B)(?![^\W\d_]))?"
     + _SP + r"?(?:" + CJK_CURRENCY_WORDS + r"|[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS
-    + "|" + CURRENCY_CODES + r")(?![^\W\d_]))", re.I | re.U)
+    + "|" + CURRENCY_CODES + "|(?-i:" + _CASED_CODES + r"))(?![^\W\d_]))", re.I | re.U)
 
 
 # Общее «число + слово»: ловит «12 лет», «25 тонн», «3500 заказов» —
@@ -231,6 +268,8 @@ NON_UNITS = {
     "правила", "штука", "штуки", "часть", "части", "человек", "минимум",
     "максимум", "топ", "номер", "версия", "версии", "этап", "этапа", "этапов",
     "step", "steps", "ways", "way", "reasons", "tips", "things", "times",
+    # Порядковые окончания: «the 20th of each month», «a 19th-century house».
+    "st", "nd", "rd", "th",
     "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
     "сентября", "октября", "ноября", "декабря",
     "january", "february", "march", "april", "may", "june", "july", "august",
@@ -284,12 +323,34 @@ NON_UNITS |= {
 # та же единица. Без них ошибка уходила из критичных в «просмотри глазами».
 _UNIT_SHORT = {"minutes": ("min", "mins"), "hours": ("hr", "hrs"),
                "seconds": ("sec", "secs"), "months": ("mo", "mos"),
-               "years": ("yr", "yrs")}
+               "years": ("yr", "yrs"), "weeks": ("wk", "wks"),
+               "kilograms": ("kg", "kgs"), "kilometres": ("km", "kms")}
 # И обратно: в таблице `34 min` и `3 mo`, в тексте — «44 minutes» и «5 months».
 # Раньше короткая форма в данных не давала длинной, и выдумка уходила в
 # «просмотри глазами».
 _UNIT_LONG = {short: (long, long[:-1]) + shorts
               for long, shorts in _UNIT_SHORT.items() for short in shorts}
+_UNIT_LONG["km"] += ("kilometers", "kilometer")
+_UNIT_LONG["kms"] += ("kilometers", "kilometer")
+_UNIT_SHORT["kilometers"] = _UNIT_SHORT["kilometres"]
+
+# Формы одной единицы, которые после числа значат одно и то же: падежи и
+# число в русском, немецком, испанском, итальянском, португальском, японские
+# написания месяца и площадь. Только слова, которые после числа не бывают ничем
+# другим: «год» и «an» сюда не входят — «в 2026 году», «$5 an hour».
+_UNIT_FAMILIES = (
+    {"месяц", "месяца", "месяцев"}, {"минута", "минуты", "минут", "минуту"},
+    {"час", "часа", "часов"}, {"день", "дня", "дней"},
+    {"неделя", "недели", "недель", "неделю"},
+    {"monat", "monate", "monaten", "monats"}, {"minute", "minuten"},
+    {"stunde", "stunden"}, {"woche", "wochen"}, {"jahr", "jahre", "jahren"},
+    {"mes", "meses"}, {"minuto", "minutos", "minuti"}, {"semana", "semanas"},
+    {"año", "años"}, {"día", "días"}, {"mese", "mesi"},
+    {"giorno", "giorni"}, {"mês", "meses"}, {"dia", "dias"}, {"ano", "anos"},
+    {"ヶ月", "か月", "カ月", "ヵ月", "ケ月"}, {"个月", "個月"},
+    {"m²", "m2", "sqm", "sq m", "square metres", "square meters", "square metre", "square meter"},
+    {"м²", "м2", "кв. м", "кв.м", "кв м"},
+)
 
 
 def _unit_forms(units: list) -> list:
@@ -301,8 +362,15 @@ def _unit_forms(units: list) -> list:
             continue
         out.add(unit)
         lowered = unit.lower()
-        if re.fullmatch(r"[a-z]{4,}s", lowered) and not lowered.endswith("ss"):
+        # «days» → «day», «beds» → «bed»: «a 9-day wait», «a 5-bed house».
+        if re.fullmatch(r"[a-z]{3,}s", lowered) and not lowered.endswith(("ss", "us", "is")):
             out.add(unit[:-1])
+        # Другие формы того же слова: в данных «3 месяца», на странице —
+        # «5 месяцев» и «1 месяц»; в данных «3ヶ月», на странице «5か月».
+        for family in _UNIT_FAMILIES:
+            if lowered in family or (_CJK_CHAR.search(lowered)
+                                     and any(lowered.startswith(f) for f in family)):
+                out.update(family)
         out.update(_UNIT_SHORT.get(lowered, ()))
         out.update(_UNIT_SHORT.get(lowered + "s", ()))
         out.update(_UNIT_LONG.get(lowered, ()))
@@ -429,7 +497,7 @@ def _numbers_in(text: str, fact_pattern) -> dict:
                     found.setdefault(earlier, found[number])
     for match in PREFIX_PRICE.finditer(text or ""):
         sign = match.group(1).strip()
-        factor, length = _scale_at(text, match.end())
+        factor, length = _price_scale_at(text, match.end())
         # «$1,600–2,400», «$950 to 1,900»: второй край — та же валюта, а
         # множитель в конце («$1.5–2 million») относится к обоим краям.
         second = _RANGE_SECOND.match(text, match.end() + length)
@@ -445,7 +513,7 @@ def _numbers_in(text: str, fact_pattern) -> dict:
                 and not _SUFFIX_AFTER.match(text, second.end()):
             second = None
         if second:
-            more, more_length = _scale_at(text, second.end())
+            more, more_length = _price_scale_at(text, second.end())
             more_scale = text[second.end():second.end() + more_length].strip().rstrip(".")
             value = _scaled(second.group(1), more)
             # Диапазон идёт вверх. «From $1,450 - 2 bedrooms» — не диапазон цен.
@@ -464,10 +532,10 @@ def _numbers_in(text: str, fact_pattern) -> dict:
                 scale = ""
             found.setdefault(number, (sign + " " + scale).strip())
     for match in SUFFIX_PRICE.finditer(text or ""):
-        factor, _ = _scale_at(text, match.end(1))
+        factor, _ = _price_scale_at(text, match.end(1))
         number = _scaled(match.group(1), factor)
         if number:
-            unit = match.group(0)[len(match.group(1)):].strip()
+            unit = re.sub(r"^" + _NO_CENTS, "", match.group(0)[len(match.group(1)):]).strip()
             found.setdefault(number, unit)
             if factor == 1:
                 for earlier in _listed_before(text, match.start(1)):
@@ -551,8 +619,10 @@ def _listed_before(text: str, start: int) -> list:
     return out
 
 
-_SCALE = re.compile(r"(?:\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|/\s?)(?:5|10|100)\b(?!\s?%)",
-                    re.I)
+# Только после оценки: «4.6 out of 5», «4,6 из 5», «4.6/5». «A deposit of 10
+# weeks» и «Kaution von 5 Monaten» — не шкала, и число не должно пропадать.
+_SCALE = re.compile(r"(\d(?:\s+(?!out\b)[^\W\d_]{1,12})?)(?:\s*\b(?:out\s+of|of|из|von|sur|su|de|na)\s+|\s?/\s?)"
+                    r"(?:5|10|100)\b(?!\s?%)", re.I)
 
 
 def _generic_numbers_in(text: str) -> dict:
@@ -560,10 +630,15 @@ def _generic_numbers_in(text: str) -> dict:
     found = {}
     # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
     # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
-    text = _SCALE.sub(" ", _cjk_compounds(_same_signs(text)))
+    text = _SCALE.sub(r"\1 ", _cjk_compounds(_same_signs(text)))
     for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
+            continue
+        # «$2.54M», «2.68M USD»: множитель цены — часть цены первого эшелона.
+        if unit in _PRICE_SCALES and (
+                _MONEY.search(text[max(0, match.start(1) - 4):match.start(1)])
+                or _MONEY.match(text[match.end():match.end() + 6].lstrip(_SP[1:-1]))):
             continue
         factor, _ = _scale_at(text, match.end(1))
         number = _scaled(match.group(1), factor)
@@ -793,9 +868,15 @@ def _date_parts(row: dict) -> set:
     return out
 
 
+# Иероглиф или кана перед числом — граница слова, а не артикул: «徒歩5分»,
+# «押金3个月», «月租4500元» пишут без пробела. Латиница перед числом («A90») —
+# по-прежнему артикул.
+_CJK_BEFORE_DIGIT = re.compile(r"([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff])(?=\d)")
+
+
 def _numbers_of(value) -> list:
     """Числа из одного значения строки — кроме тех, что сидят в артикуле."""
-    text, out = _without_dates(str(value)), []
+    text, out = _CJK_BEFORE_DIGIT.sub(r"\1 ", _without_dates(str(value))), []
     for match in _GLUED_UNIT.finditer(text):
         out.append(match.group(1))
     for match in ROW_NUMBER.finditer(text):
@@ -817,10 +898,16 @@ def _column_scale(column) -> int:
     return factor
 
 
+# «Free» в ячейке цены — это ноль: «Entry is $0» на такой странице верно.
+_FREE = re.compile(r"free|gratis|gratuit[eo]?|gratuita|kostenlos|бесплатно|безкоштовно", re.I)
+
+
 def _row_numbers(row: dict) -> set:
     out = set()
     for column, value in (row or {}).items():
         text = _same_signs(str(value))
+        if _FREE.fullmatch(text.strip()):
+            out.add("0")
         # Колонка в тысячах или миллионах — «цена, млн», `price_k`, «价格(万元)»:
         # её число значит и само себя, и себя с множителем. Раньше множитель
         # со страницы снимался с любого числа строки, и «$34k» при «34 minutes»
@@ -841,6 +928,10 @@ def _row_numbers(row: dict) -> set:
             if factor != 1:
                 out.add(_norm_number(match.group(1)))
                 out.add(_scaled(match.group(1), factor))
+        # «$2.54M», «₹2.5 Cr» в ячейке: множитель цены читается при валюте.
+        for number, unit in _numbers_in(text, None).items():
+            if _scale_in(unit, price=True)[0]:
+                out.add(number)
     return out
 
 
@@ -1026,7 +1117,7 @@ def _shown(number: str, unit: str) -> str:
     # Множитель показывается так, как стоит на странице: «5万元», а не
     # «50000 万元», которое читается как пятьсот миллионов.
     lowered = (unit or "").lower()
-    word, factor = _scale_in(unit)
+    word, factor = _scale_in(unit, price=True)
     if word:
         try:
             raw = _norm_number(repr(round(float(number) / factor, 6)))
@@ -1034,13 +1125,15 @@ def _shown(number: str, unit: str) -> str:
             raw = ""
         if raw:
             glue = "" if word[0] in _CJK_SCALES and lowered.startswith(word) else " "
-            if unit and unit[0] in "$€£¥₹₽":
-                parts = unit.split()
+            parts = unit.split()
+            code = parts[0].upper() in CURRENCY_CODES.split("|")
+            if unit and (unit[0] in "$€£¥₹₽" or _LOCAL_PREFIX.fullmatch(parts[0]) or code):
                 rest = " ".join(parts[1:])
+                sign = parts[0] + (" " if code else "")
                 # «$1.6k» — множитель в одну букву пишут вплотную.
                 if len(rest) == 1:
-                    return f"{parts[0]}{raw}{rest}"
-                return f"{parts[0]}{raw} {rest}".strip()
+                    return f"{sign}{raw}{rest}"
+                return f"{sign}{raw} {rest}".strip()
             return f"{raw}{glue}{unit}".strip()
     if unit and unit in "$€£¥₹₽":
         return f"{unit}{number}"
@@ -1061,6 +1154,11 @@ _MEASURES = (
     ("month", r"mos?|months?|месяц|месяца|месяцев|мес|monate?n?|monat|mois|mes|meses|mesi|mese|"
               r"mês|ヶ月|か月|カ月|ヵ月|ケ月|个月|個月|개월"),
     ("year", r"yrs?|years?|год|года|лет|jahre?n?|jahr|ans?|années?|años?|ann[oi]|anos?|年|년"),
+    # Расстояние, площадь и вес: «34 km» при `34 minutes` в строке — тоже
+    # перестановка полей шаблона.
+    ("km", r"km|kms|kilomet(?:er|re)s?|км|километр(?:а|ов)?|kilómetros?|kilometri"),
+    ("m2", r"m²|m2|sqm|sq\.?" + _SP + r"?m|square" + _SP + r"+met(?:er|re)s?|м²|м2|кв\.?" + _SP + r"?м|㎡|平米"),
+    ("kg", r"kgs?|kilos?|kilogram(?:me)?s?|кг|килограмм(?:а|ов)?"),
 )
 _MEASURE = [(name, re.compile(r"(?:" + words + r")\.?", re.I)) for name, words in _MEASURES]
 
@@ -1090,11 +1188,57 @@ def _row_measures(row: dict, fact_pattern) -> dict:
         text = _same_signs(str(value))
         strong = _numbers_in(text, fact_pattern)
         scaled = _column_scale(column) != 1
+        # Единица только в названии колонки — `deposit_months: 3`: число
+        # меряется ею. Раньше голое число годилось для любой меры, и «залог 34
+        # месяца» при `commute_minutes: 34` проходил молча.
+        named = column_unit(column) if re.fullmatch(NUMBER, text.strip()) else ""
         for raw in _numbers_of(text):
             number = _norm_number(raw)
             if number:
-                out[number].add("" if scaled else _measure(strong.get(number, "")))
+                unit = strong.get(number, "") or named
+                measure = "" if scaled else _measure(unit)
+                out[number].add(measure)
+                if measure == "money":
+                    # Валюта числа: «€1,296» при `$1,296` — не та же цена.
+                    out[number].add("cur:" + _currency(unit))
     return out
+
+
+# Единица времени в конце названия колонки: `deposit_months`, `commute_min`.
+# «price_per_month» — цена за месяц, а не месяцы, и сюда не подходит.
+_COLUMN_UNIT = re.compile(
+    r"(?<![^\W_])(?<!per_)(?<!per )(minutes|mins|hours|hrs|days|weeks|months|years|yrs)$", re.I)
+
+
+def column_unit(column) -> str:
+    """Единица из названия колонки — `deposit_months` → `months` — или пусто."""
+    match = _COLUMN_UNIT.search(str(column or "").strip())
+    return match.group(1).lower() if match else ""
+
+
+# Валюты, которые пишут одним знаком или словом: «$» — и доллар США, и
+# канадский, и песо; «£» — и фунт, и египетский фунт. Внутри одной семьи
+# валюта не сверяется: различаются только явно разные — доллар и евро.
+_CURRENCY_FAMILIES = (
+    {"USD", "CAD", "AUD", "NZD", "SGD", "HKD", "TWD", "MXN", "COP", "CLP", "ARS", "BRL", "PHP"},
+    {"JPY", "CNY"}, {"GBP", "EGP"}, {"INR", "PKR", "LKR", "NPR"},
+    {"KR", "SEK", "NOK", "DKK", "ISK"}, {"RON", "MDL"},
+    {"DINAR", "KWD", "BHD", "JOD", "IQD", "LYD", "TND", "DZD", "RSD"},
+    {"SAR", "QAR", "OMR", "IRR", "YER"}, {"TRY", "LBP", "SYP"}, {"AED", "MAD"},
+)
+
+
+def _currency(unit: str) -> str:
+    """Код валюты подписи цены — `USD`, `EUR` — или пусто, если её не прочесть."""
+    from .facts import _kind
+    code = _kind(unit)
+    return code if code != "%" else ""
+
+
+def _same_currency(one: str, other: str) -> bool:
+    if one == other:
+        return True
+    return any(one in family and other in family for family in _CURRENCY_FAMILIES)
 
 
 def _bare_numbers(row: dict) -> set:
@@ -1138,7 +1282,15 @@ def _supported(number: str, unit: str, allowed: set, measures: dict = None,
     if not wanted:
         return True
     have = measures[number]
-    return "" in have or wanted in have
+    if "" in have:
+        return True
+    if wanted == "money" and wanted in have:
+        page = _currency(unit)
+        codes = {h[4:] for h in have if h.startswith("cur:")}
+        if page and codes and "" not in codes \
+                and not any(_same_currency(page, code) for code in codes):
+            return False
+    return wanted in have
 
 
 # Число, которое страница посчитала из своей строки: «три месяца аренды
@@ -1153,8 +1305,12 @@ DERIVED_MAX_INPUTS = 12   # в строке длиннее совпадение 
 
 
 _MONEY = re.compile(
-    r"(?:" + LOCAL_PREFIXES + r"|[" + CURRENCY_SIGNS + r"]|" + CJK_CURRENCY_WORDS + r")|"
-    r"(?<![^\W\d_])(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES + r")(?![^\W\d_])", re.I | re.U)
+    # Сокращения из букв — целым словом: «rs» в «hours» и «rm» в «rms» — не
+    # рупии и не ринггиты, иначе срок в часах считался ценой.
+    r"(?<![^\W\d_])(?:" + LOCAL_PREFIXES + r")(?![^\W\d_])|[" + CURRENCY_SIGNS + r"]|"
+    + CJK_CURRENCY_WORDS + r"|"
+    r"(?<![^\W\d_])(?:" + CURRENCY_WORDS + "|" + CURRENCY_CODES + "|(?-i:" + _CASED_CODES
+    + r"))(?![^\W\d_])", re.I | re.U)
 _PERCENT_COLUMN = re.compile(r"%|percent|pct|процент|discount|скидк", re.I)
 
 
@@ -1318,6 +1474,11 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                     if n not in constants}
         dates = _date_parts(row) - allowed
         bare = _bare_numbers(row)
+        # Голое число до множителя прощается, только если цены в строке нет
+        # другой: при `price: $1,200,000` «$3k» не берётся из `beds: 3`, а
+        # «$4.5M» — из `rating: 4.5`.
+        if any(_MONEY.search(str(v)) and re.search(r"\d", str(v)) for v in row.values()):
+            bare = set()
 
         def supported(number, unit):
             if number in dates:

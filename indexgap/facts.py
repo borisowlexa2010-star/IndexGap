@@ -58,6 +58,14 @@ _CURRENCY = {
     "dong": "VND", "vnd": "VND", "riyal": "SAR", "riyals": "SAR", "dirham": "AED",
     "dirhams": "AED", "shekel": "ILS", "shekels": "ILS", "₦": "NGN", "naira": "NGN",
     "rand": "ZAR", "zar": "ZAR", "₸": "KZT", "pln": "PLN", "zł": "PLN", "złotych": "PLN",
+    # Слова и знаки, которые проверка по данным уже читает как цену.
+    "reais": "BRL", "real": "BRL", "фунт": "GBP", "фунтов": "GBP", "фунта": "GBP",
+    "pfund": "GBP", "francs": "CHF", "franc": "CHF", "fr": "CHF", "sfr": "CHF",
+    "kronor": "SEK", "kroner": "NOK", "kr": "KR", "kč": "CZK", "lei": "RON", "лв": "BGN",
+    "гривен": "UAH", "гривна": "UAH", "гривни": "UAH", "гривны": "UAH", "сум": "UZS",
+    "сомов": "KGS", "лари": "GEL", "دينار": "DINAR", "جنيه": "EGP", "ريالات": "SAR",
+    'ש"ח': "ILS", "nis": "ILS", "रुपए": "INR", "रु": "INR", "₵": "GHS", "₡": "CRC",
+    "₲": "PYG", "₭": "LAK", "₮": "MNT", "﷼": "IRR", "dhs": "AED", "ksh": "KES",
 }
 
 # Знак `$` без буквы страны пишут и для песо, и для канадского, и для
@@ -80,9 +88,13 @@ def _kind(unit: str) -> str:
     text = (unit or "").strip().lower()
     if text == "%":
         return "%"
+    from .content import CURRENCY_CODES, _CASED_CODES
     for word in text.replace(".", " ").split():
         if word in _CURRENCY:
             return _CURRENCY[word]
+        # Любой код ISO, который читает проверка по данным: `SEK`, `NOK`, `QAR`.
+        if word.upper() in (CURRENCY_CODES + "|" + _CASED_CODES).split("|"):
+            return "ILS" if word.upper() == "NIS" else word.upper()
     for ch in text:
         if ch in _CURRENCY:
             return _CURRENCY[ch]
