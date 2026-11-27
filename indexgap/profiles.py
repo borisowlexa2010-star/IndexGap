@@ -195,6 +195,11 @@ def apply(config: dict, name: str) -> dict:
     notes = settings.unknown_keys(out)
     for section in ("content", "aeo", "freshness"):
         notes += settings.check_section(section, out.get(section))
+    if (out.get("freshness") and "freshness" in (out.get("_user_keys") or ())
+            and not profile.get("checks_freshness", False)):
+        # Настройка либо действует, либо названа: даты читает только «events».
+        notes.append(tr("раздел freshness в indexgap.json не действует: сроки дат проверяет только профиль events, а выбран «{a0}»",
+                        a0=(name or DEFAULT_PROFILE).strip().lower()))
     out["_config_notes"] = notes
     out["_profile"] = (name or DEFAULT_PROFILE).strip().lower()
     out["_profile_title"] = profile["title"]

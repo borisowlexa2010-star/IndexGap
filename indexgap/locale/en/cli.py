@@ -98,6 +98,7 @@ MESSAGES = {
         "    Name the publish directory: --key-dir ./public",
     "   (угадано — проверь)": "   (guessed — check it)",
     "   (уже был, не тронут)": "   (already there, untouched)",
+    "   (уже был, вписано из флагов: {a0})": "   (already there; updated from the flags: {a0})",
     "  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками.":
         "  ! --write-key without --key-dir: the key file must sit at the SITE ROOT, "
         "not next to your sources.",

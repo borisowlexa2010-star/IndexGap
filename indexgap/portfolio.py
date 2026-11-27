@@ -203,9 +203,10 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             if given:
                 result["notes"].append(tr("hreflang взят из sitemap для {a0} страниц(ы): в "
                                           "самих страницах его нет или он неполный", a0=given))
-        home = spec.get("home") or (spec["site"]
-                                    if url_key(spec["site"]) in {p.key for p in pages}
-                                    else None)
+        own_home = own.get("home") if isinstance(own.get("home"), str) else ""
+        home = spec.get("home") or own_home or (spec["site"]
+                                                if url_key(spec["site"]) in {p.key for p in pages}
+                                                else None)
         # Тот же robots.txt и то же правило, что в `check`: файл сборки сайта,
         # живущего под /repo/, поисковик не читает — судить по нему нельзя.
         base = urlsplit(spec["site"]).path.strip("/")

@@ -231,6 +231,9 @@ MESSAGES = {
         "template has crowded out the content.",
     "Пользовательский контент и лента": "User-generated content and feeds",
     "Профиль «{a0}» неизвестен. Доступны: ": "Unknown profile “{a0}”. Available: ",
+    "раздел freshness в indexgap.json не действует: сроки дат проверяет только профиль events, а выбран «{a0}»":
+        "the freshness section in indexgap.json has no effect: dates are checked only "
+        "by the events profile, and “{a0}” is selected",
     "Прошедшее событие, открытое для индексации, — мусор в выдаче и удар по доверию. Проверка `stale-event` смотрит именно это.":
         "An event that has passed while still open to indexing is junk in the "
         "results and a hit to trust. That is exactly what `stale-event` looks at.",

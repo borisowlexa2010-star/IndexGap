@@ -2489,6 +2489,10 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
         path = (url or "") if "://" not in (url or "") else (urlsplit(url).path or "/")
         if base and path.startswith(base + "/"):
             path = path[len(base):]
+        # Находка о файле сайта (`robots.txt`) адресована именем без «/»:
+        # правило `/robots.txt` или полный адрес с ней не сходились.
+        if path and path[0] != "/":
+            path = "/" + path
         return path
 
     def pattern_of(pattern):
@@ -2508,7 +2512,9 @@ def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
         hit = False
         for code in (issue[2], "*"):
             rule = rules.get(code)
-            if rule is True or (rule and any(
+            # Находка о сайте целиком (адрес пуст) — не главная: её снимает
+            # только `true`, а не шаблон `/`, который пустой путь тоже ловил.
+            if rule is True or (rule and path and any(
                     fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase(path.rstrip("/"), p.rstrip("/"))
                     for p in rule)):
                 hit = True
@@ -2811,10 +2817,11 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                         if j >= cfg["near_duplicate"] and a.url not in bare
                         and b.url not in bare
                         and tuple(sorted((a.url, b.url))) not in regional])
+    group_note = ""
     if groups:
         biggest = max(len(g) for g in groups)
-        notes.append(
-            tr("почти-дубли образуют {a0} групп(ы), в самой большой {a1} страниц. Чинится по группам: одна остаётся, остальные переписываются под другой интент или отдают ей canonical.", a0=len(groups), a1=biggest))
+        group_note = tr("почти-дубли образуют {a0} групп(ы), в самой большой {a1} страниц. Чинится по группам: одна остаётся, остальные переписываются под другой интент или отдают ей canonical.", a0=len(groups), a1=biggest)
+        notes.append(group_note)
 
     # Две пустые оболочки совпадают на 100% — и это ничего не значит.
     # Пока они оставались в `duplicates`, счётчик «похожих пар» показывал
@@ -2856,6 +2863,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
         "graph": graph,
         "unique_share": boiler["shares"],
         "duplicates": pairs,
+        "duplicate_group_note": group_note,
         "duplicate_method": dupes["method_id"],
         "duplicate_method_label": dupes["method"],
         # Пары крупных групп-клонов показаны выборкой: «похожих пар» тогда

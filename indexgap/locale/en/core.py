@@ -56,6 +56,12 @@ MESSAGES = {
         "{a0}: expected an object at the top level.",
     "Не удалось прочитать {a0}: {a1}": "Could not read {a0}: {a1}",
     "нужно число не меньше 0": "a number of at least 0 is needed",
+    "нужно конечное число не больше 100000000": "a finite number no greater than 100000000 is needed",
+    "записан в {a0}": "saved in {a0}",
+    "{a0} {a1}: такого {a2} нет ни в {a3}, ни в рабочем каталоге.":
+        "{a0} {a1}: no such {a2} in {a3} or in the working directory.",
+    "каталога": "directory",
+    "файла": "file",
     "поле «{a0}» в indexgap.json мне не знакомо и не действует":
         "field “{a0}” in indexgap.json is not one I know and has no effect",
 
