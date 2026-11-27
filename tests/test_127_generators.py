@@ -264,8 +264,17 @@ class PlanRoutesAndSlugs(Base):
         self.assertEqual({r["code"] for r in audit["rejected"]}, {"same-intent"})
 
     def test_own_slug_collision_is_a_failure_not_a_skip(self):
-        audit = self.audit("keyword,slug,city\nrent in berlin,berlin,Berlin\n"
-                           "cheap flats berlin,berlin,Berlin\nrent in munich,munich,Munich\n")
+        text = ("keyword,slug,city\nrent in berlin,berlin,Berlin\n"
+                "cheap flats berlin,berlin,Berlin\nrent in munich,munich,Munich\n")
+        # С 1.29 повтор собственного slug виден уже в разборе.
+        audit = self.audit(text)
+        self.assertEqual([(r["code"], r["keyword"]) for r in audit["rejected"]],
+                         [("slug-collision", "cheap flats berlin")])
+        # Если разбор его пропустил (шаблон с другой колонкой), запись — отказ.
+        path = self.path("d.csv")
+        data = generate.read_dataset(path)
+        audit = generate.audit_dataset(data["rows"], data["fields"], "keyword",
+                                       {"own_slug_is_path": False})
         self.assertEqual([s for _i, _k, s, _r in audit["keep"]],
                          ["berlin", "berlin", "munich"])
         out = self.path("out")

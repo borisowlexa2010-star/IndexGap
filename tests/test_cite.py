@@ -43,7 +43,8 @@ class TestNothingLeavesWithoutSend(unittest.TestCase):
     def run_cli(self, argv, env=None):
         out = io.StringIO()
         with mock.patch.dict(os.environ, {**NO_KEYS, **(env or {})}), \
-                mock.patch.object(sys, "stdout", out):
+                mock.patch.object(sys, "stdout", out), \
+                mock.patch.object(sys, "stderr", out):
             code = cli.main(argv)
         return code, out.getvalue()
 

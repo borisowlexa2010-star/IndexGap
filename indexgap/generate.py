@@ -83,6 +83,10 @@ def _stem(token: str) -> str:
     for _ in range(2):
         changed = False
         for ending in _ENDINGS:
+            # «Пушкино» — не «Пушкин», «Иваново» — не «Иванов»: -ино/-ово
+            # у названий мест — часть имени, а не окончание.
+            if ending == "о" and token[-3:-1] in ("ин", "ов", "ев", "ын"):
+                continue
             if token.endswith(ending) and len(token) - len(ending) >= 4:
                 token = token[:-len(ending)]
                 changed = True
@@ -100,12 +104,14 @@ def intent_key(value: str) -> frozenset:
     набор — это один интент и одна страница. «виза в таиланд для россиян»
     даёт другой: там есть слово, которого нет в первом.
     """
-    tokens = re.findall(r"\w+", (value or "").lower(), flags=re.UNICODE)
+    # «c++» и «c#» — не «c»: плюс и решётка на конце слова входят в него.
+    tokens = re.findall(r"\w+[+#]*", (value or "").lower(), flags=re.UNICODE)
     # Цифра — значимое слово. Фильтр «длиннее одного символа» отбрасывал её,
     # и «1 комнатная квартира» становилась тем же интентом, что и
     # «5 комнатная квартира»: на каталоге недвижимости удалялось 80% строк.
-    return frozenset(_stem(t) for t in tokens
-                     if t not in STOPWORDS and (len(t) > 1 or t.isdigit()))
+    # Буква — тоже: «витамин c» и «витамин d», «класс b» и «класс c» — разные
+    # товары, а без неё оба ключа становились одним интентом.
+    return frozenset(_stem(t) for t in tokens if t not in STOPWORDS)
 
 
 # Предлоги направления. «london to paris» и «paris to london» — один набор
@@ -270,14 +276,15 @@ def read_dataset(path: str) -> dict:
         if not rows_raw:
             raise SourceError(tr("{a0}: в книге нет данных.", a0=path))
         fields = [str(c).strip() for c in rows_raw[0]]
-        rows = []
-        for raw in rows_raw[1:]:
+        rows, lines = [], []
+        for number, raw in enumerate(rows_raw[1:], start=2):
             row = {fields[i]: str(raw[i]).strip()
                    for i in range(min(len(fields), len(raw)))}
             if any(v for v in row.values()):
                 rows.append(row)
+                lines.append(number)
         return {"rows": rows, "fields": fields, "encoding": "xlsx",
-                "delimiter": "", "problems": []}
+                "delimiter": "", "problems": [], "lines": lines}
 
     text, encoding = read_text(path)
     as_json = _json_rows(text, path)
@@ -318,8 +325,13 @@ def read_dataset(path: str) -> dict:
     if not fields or fields == [""]:
         raise SourceError(tr("{a0}: не удалось прочитать шапку — файл пустой?", a0=path))
 
-    ragged = []
+    ragged, lines = [], []
     for number, raw in enumerate(reader, start=2):
+        # Строка файла, с которой начинается запись: пустые строки и ячейки
+        # с переводом строки сдвигают её относительно номера записи.
+        breaks = sum(str(x).count("\n") for v in raw.values()
+                     for x in (v if isinstance(v, list) else [v]) if x is not None)
+        line = reader.line_num - breaks
         row = {}
         for key, value in raw.items():
             if key == "__extra__":
@@ -330,13 +342,14 @@ def read_dataset(path: str) -> dict:
             row[str(key).strip()] = (value or "").strip() if isinstance(value, str) else value
         if any((v or "").strip() for v in row.values()):
             rows.append(row)
+            lines.append(line)
     if ragged:
         shown = ", ".join(str(n) for n in ragged[:5])
         problems.append(
             tr("в {a0} строк(ах) колонок больше, чем в шапке — лишнее отброшено (строки {a1}{a2})", a0=len(ragged), a1=shown, a2=tr(' и далее') if len(ragged) > 5 else ''))
     return {"rows": rows, "fields": fields, "encoding": encoding,
             "delimiter": "" if single_column else getattr(dialect, "delimiter", ","),
-            "problems": problems}
+            "problems": problems, "lines": lines}
 
 
 # ── аудит семантики ───────────────────────────────────────────────────────────
@@ -404,12 +417,20 @@ def query_intent(keyword: str) -> str:
 
 
 def audit_dataset(rows: list, fields: list, keyword_field: str,
-                  cfg: dict = None) -> dict:
+                  cfg: dict = None, lines: list = None) -> dict:
     """
     Проверяет семантику до генерации. Возвращает строки, годные к генерации,
     и объяснённые отбраковки.
+
+    `lines` — номера строк файла (из read_dataset): по ним отбраковка
+    называет строку, которую человек откроет. Без них — номер записи + 2.
+    `cfg["own_slug_is_path"]` — собственный slug и есть адрес (шаблон пути
+    без других колонок): тогда повтор собственного slug — тоже совпадение.
     """
     cfg = {**CONFIG, **(cfg or {})}
+
+    def line_of(i):
+        return lines[i] if lines and i < len(lines) else i + 2
     variables = [f for f in fields if f != keyword_field]
 
     exact = defaultdict(list)
@@ -425,12 +446,12 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     for key, idxs in sorted(exact.items()):
         if not key:
             for i in idxs:
-                rejected.append({"row": i + 2, "code": "empty-keyword",
+                rejected.append({"row": line_of(i), "code": "empty-keyword",
                                  "reason": tr("пустой ключ"), "keyword": ""})
             continue
         if len(idxs) > 1:
             for i in idxs[1:]:
-                rejected.append({"row": i + 2, "code": "exact-duplicate",
+                rejected.append({"row": line_of(i), "code": "exact-duplicate",
                                  "reason": tr("точный дубль ключа"), "keyword": key})
         kept.append(idxs[0])
 
@@ -447,26 +468,31 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
         filled = sum(1 for f in variables if (row.get(f) or "").strip())
         share = filled / len(variables) if variables else 1.0
         if variables and cfg["min_fields_filled"] and share < cfg["min_fields_filled"]:
-            rejected.append({"row": i + 2, "keyword": key, "code": "too-few-fields",
+            rejected.append({"row": line_of(i), "keyword": key, "code": "too-few-fields",
                              "reason": tr("заполнено {a0} из {a1} полей", a0=filled, a1=len(variables))})
             continue
 
         if not re.search(r"\w", key, flags=re.UNICODE):
-            rejected.append({"row": i + 2, "keyword": key, "code": "no-letters-or-digits",
+            rejected.append({"row": line_of(i), "keyword": key, "code": "no-letters-or-digits",
                              "reason": tr("ключ не содержит ни одной буквы или цифры")})
             continue
 
-        slug = slugify(key)
-        if slug in seen_slugs:
-            rejected.append({"row": i + 2, "keyword": key, "code": "slug-collision",
-                             "reason": tr("slug совпадает с «{a0}»", a0=seen_slugs[slug])})
-            continue
-        seen_slugs[slug] = key
         # Собственная колонка `slug` задаёт адрес сама (см. write_tasks), и
         # в разбор уходит именно он: раньше --json называл slug, которого
-        # в записанных путях не было.
+        # в записанных путях не было. Совпадение ищется тоже по нему: строки
+        # «c++ course» и «c course» со своими slug не спорят, а два
+        # одинаковых собственных slug — спорят. Без регистра: на macOS и
+        # Windows `Munich` и `munich` — один каталог.
         own = (row.get("slug") or "").strip()
-        survivors.append((i, key, _path_segment(own) if own else slug, row))
+        slug = _path_segment(own) if own else slugify(key)
+        if not own or cfg.get("own_slug_is_path", True):
+            mark = slug.lower()
+            if mark in seen_slugs:
+                rejected.append({"row": line_of(i), "keyword": key, "code": "slug-collision",
+                                 "reason": tr("slug совпадает с «{a0}»", a0=seen_slugs[mark])})
+                continue
+            seen_slugs[mark] = key
+        survivors.append((i, key, slug, row))
 
     for column, count in sorted(empty_columns.items()):
         if count == len(kept) and kept:
@@ -501,7 +527,7 @@ def audit_dataset(rows: list, fields: list, keyword_field: str,
     final = [s for pos, s in enumerate(survivors) if pos not in drop]
     for pos, (i, key, slug, row) in enumerate(survivors):
         if pos in drop:
-            rejected.append({"row": i + 2, "keyword": key, "code": "same-intent",
+            rejected.append({"row": line_of(i), "keyword": key, "code": "same-intent",
                              "reason": tr("тот же интент, что и у другой строки")})
 
     return {
