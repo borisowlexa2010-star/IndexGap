@@ -681,9 +681,22 @@ _META_TAG = re.compile(r"<meta\b[^>]{0,2000}>", re.I)
 _REFRESH = re.compile(r"http-equiv\s*=\s*[\"']?refresh", re.I)
 # Кавычки у атрибута необязательны: минификатор HTML пишет
 # `content=0;url=/en/`, и главная-заглушка не узнавалась.
+# `url=` по спецификации HTML необязателен: `content="0; /path/"` браузер
+# тоже исполняет как переадресацию.
 _REFRESH_CONTENT = re.compile(
-    r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*url\s*=\s*['\"]?"
+    r"(?<![-\w])content\s*=\s*[\"']?\s*(\d+(?:\.\d+)?)\s*[;,]\s*(?:url\s*=\s*)?['\"]?"
     r"([^\"'\s>]+)", re.I)
+# Заглушка на одном скрипте: весь <script> — это `location.replace("/x/")`
+# или `window.location.href = "/x/"`, и ничего больше. Условный переход
+# внутри приложения (`if (!user) location.href = …`) сюда не попадает.
+_JS_REDIRECT = re.compile(
+    r"^\s*(?:(?:window|self|top|document)\.)?location"
+    r"(?:\.replace\(\s*([\"'])([^\"'\s]+)\1\s*\)|(?:\.href)?\s*=\s*([\"'])([^\"'\s]+)\3)"
+    r"\s*;?\s*$")
+# RSC-поток Next.js с ошибкой-редиректом (`"digest":"NEXT_REDIRECT;…"`):
+# redirect() сработал при отрисовке, и шапка с подвалом вокруг пустого
+# <main> — не содержание страницы.
+_NEXT_DIGEST = re.compile(r'digest\\*"\s*:\s*\\*"NEXT_REDIRECT;')
 # Где «редирект» — не редирект: его показывают, выключили или держат про запас.
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 
@@ -721,15 +734,16 @@ def _redirect_target(page) -> str:
         return ""
     # Дешёвые признаки первыми: вычищать исходник в сотни килобайт стоит,
     # только если в нём вообще есть что искать.
-    by_script = ("NEXT_REDIRECT" in raw
-                 and len((getattr(page, "text", "") or "").split()) < 30)
+    few_words = len((getattr(page, "text", "") or "").split()) < 30
+    by_script = "NEXT_REDIRECT" in raw and (few_words or bool(_NEXT_DIGEST.search(raw)))
+    by_js = few_words and "location" in raw
     # Подстрока ищется на порядок быстрее выражения без учёта регистра, а на
     # большинстве страниц `http-equiv` нет вовсе.
     # `equiv` и `EQUIV` покрывают и `HTTP-equiv`: раньше смешанный регистр
     # пропускался, и редирект не узнавался.
     by_meta = (("equiv" in raw or "EQUIV" in raw or "Equiv" in raw)
                and bool(_REFRESH.search(raw)))
-    if not by_script and not by_meta:
+    if not by_script and not by_meta and not by_js:
         return ""
     live = drop_spans(raw, NOT_LIVE)
     if by_meta:
@@ -746,8 +760,15 @@ def _redirect_target(page) -> str:
     if by_script:
         for script in _SCRIPT.findall(live):
             found = _NEXT_REDIRECT.search(script)
-            if found:
+            if found and (few_words or _NEXT_DIGEST.search(script)):
                 return urljoin(page.url, found.group(1).strip())
+    if by_js:
+        for script in _SCRIPT.findall(live):
+            found = _JS_REDIRECT.match(script)
+            if found:
+                target = urljoin(page.url, (found.group(2) or found.group(4)).strip())
+                if url_key(target) != url_key(page.url):
+                    return target
     return ""
 
 
@@ -799,7 +820,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
         # в ней нет. Алиасы Hugo так и устроены, и всё за ними считалось
         # недостижимым.
         raw_landing = redirect_target(p)
-        landing = by_key.get(url_key(raw_landing)) if raw_landing else None
+        landing = (by_key.get(url_key(raw_landing))
+                   or by_key.get(url_key(raw_landing).split("?", 1)[0])) if raw_landing else None
         if landing and landing != p.url:
             targets.add(landing)
             landing_of[p.url] = landing
@@ -1071,6 +1093,8 @@ def broken_links(pages: list, graph: dict, base_path: str = "",
     except ValueError:                         # разные диски Windows
         root = ""
     literal, dynamic = build_routes(root) if graph.get("unresolved_from") else (set(), [])
+    stub_aims = {p.url: url_key(redirect_target(p)).split("?", 1)[0]
+                 for p in pages if redirect_target(p)}
     base = "/" + base_path.strip("/") if base_path.strip("/") else ""
 
     def is_route(path):
@@ -1104,7 +1128,12 @@ def broken_links(pages: list, graph: dict, base_path: str = "",
                 local = "/" + path.lstrip("/").partition("/")[2]
                 if local != base and not local.startswith(base + "/"):
                     continue
-            if _parent(path) in sections and not is_route(path):
+            # Цель заглушки-редиректа — её единственное содержание: раздел,
+            # куда переехали страницы, выпал из сборки — типовая ошибка
+            # алиасов Hugo. Поблажка «раздел отдаёт другое приложение» — для
+            # ссылок <a>, а не для редиректа, который генератор написал сам.
+            if ((_parent(path) in sections or stub_aims.get(source) == path)
+                    and not is_route(path)):
                 bad.append(path)
         if bad:
             found[source] = sorted(set(bad))
@@ -1549,7 +1578,7 @@ CODE_WEIGHT = {
     "jsonld-mismatch": 9, "microdata-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "redirect-home": 16, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -2280,7 +2309,7 @@ def drop_closed_noise(issues: list, pages: list) -> list:
     # пустоту — её единственная находка, и она остаётся.
     stubs = {p.url for p in pages if p.url in closed and redirect_target(p)}
     return [i for i in issues if i[1] not in closed or i[2] in KEEP_ON_CLOSED
-            or (i[2] == "broken-link" and i[1] in stubs)]
+            or (i[2] in ("broken-link", "redirect-home") and i[1] in stubs)]
 
 
 def apply_ignore(issues: list, ignore: dict, site: str = "") -> tuple:
@@ -2401,6 +2430,68 @@ def validate_config(cfg: dict) -> list:
     return notes
 
 
+def redirect_chain(page, by_key: dict, hops: int = 20) -> tuple:
+    """
+    Куда в итоге ведёт заглушка: (адреса по пути, петля ли). Каждый шаг —
+    `redirect_target` следующей заглушки сборки; цель вне сборки или обычная
+    страница — конец цепочки.
+    """
+    chain, seen = [page.url], {page.key}
+    current = page
+    for _ in range(hops):
+        target = redirect_target(current)
+        key = url_key(target) if target else ""
+        nxt = (by_key.get(key) or by_key.get(key.split("?", 1)[0])) if key else None
+        if nxt is None:
+            break
+        if nxt.key in seen:
+            return chain + [nxt.url], True
+        chain.append(nxt.url)
+        seen.add(nxt.key)
+        if not redirect_target(nxt):
+            break
+        current = nxt
+    return chain, False
+
+
+def redirect_stub_issues(pages: list, home_url: str = None) -> list:
+    """
+    Заглушки, у которых плоха сама цель, хотя она и есть в сборке.
+
+    Петля заглушек (`/a/` → `/b/` → `/a/`) — ERR_TOO_MANY_REDIRECTS в
+    браузере и ошибка для поисковика, а находки о ней не было: каждая цель
+    «в сборке есть». Заглушка на главную — мягкий 404 (так же оценивает и
+    `diff` правило vercel.json на главную); заглушка с текстом страницы —
+    чаще всего ошибка шаблона, превратившая статьи в редиректы.
+    """
+    by_key = {p.key: p for p in pages}
+    home = url_key(home_url) if home_url else ""
+    issues = []
+    for page in sorted(pages, key=lambda p: p.url):
+        target = redirect_target(page)
+        if not target:
+            continue
+        chain, loop = redirect_chain(page, by_key)
+        if loop:
+            shown = " → ".join(urlsplit(u).path or "/" for u in chain)
+            issues.append(("warning", page.url, "broken-link", tr(
+                "заглушка-редирект ведёт по кругу: {a0}. Браузер покажет ошибку «слишком "
+                "много переадресаций», поисковик страницу не получит", a0=shown)))
+            continue
+        if home and page.key != home and url_key(target) == home:
+            words = len((getattr(page, "text", "") or "").split())
+            if words >= 50:
+                issues.append(("warning", page.url, "redirect-home", tr(
+                    "страница с текстом (около {a0} слов) сразу перебрасывает на главную — "
+                    "текста поисковик не увидит, а редирект на главную он считает мягким "
+                    "404. Чаще всего это ошибка шаблона", a0=words)))
+            else:
+                issues.append(("info", page.url, "redirect-home", tr(
+                    "заглушка-редирект ведёт на главную — поисковик считает такой "
+                    "редирект мягким 404: лучше вести на ближайшую по смыслу страницу")))
+    return issues
+
+
 def run_all(pages: list, home_url: str = None, cfg: dict = None,
             language: str = "", blocked: set = frozenset()) -> dict:
     """
@@ -2483,6 +2574,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                 "этого раздела в сборке нет. Если раздел собирает этот же генератор, он "
                 "выпал из сборки, и на живом сайте это 404; если его отдаёт другое "
                 "приложение, всё в порядке.", a0=base_path.rstrip("/") + "/" + section + "/", a1=n))
+    issues += redirect_stub_issues(pages, home_url)
     if graph.get("home_redirected_from"):
         notes.append(tr(
             "главная {a0} — заглушка-редирект на {a1}. Глубина клика и "
@@ -2604,7 +2696,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # которые живой сайт отдаёт кодом 307.
     stubs = {p.url for p in pages if redirect_target(p)}
     if stubs:
-        issues = [i for i in issues if i[1] not in stubs or i[2] == "broken-link"]
+        issues = [i for i in issues if i[1] not in stubs or i[2] in ("broken-link", "redirect-home")]
         notes.append(tr(
             "заглушек-редиректов: {a0}. Как страницы они не проверялись — "
             "поисковик видит то, куда они ведут.", a0=len(stubs)))

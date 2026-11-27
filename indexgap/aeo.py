@@ -138,6 +138,13 @@ AI_AGENTS = {
 AI_SEARCH_AGENTS = {"oai-searchbot", "perplexitybot", "claude-searchbot", "bingbot"}
 
 
+# Опечатки, которые парсер Google принимает за настоящие директивы.
+_FIELD_TYPOS = {"dissallow": "disallow", "dissalow": "disallow", "disalow": "disallow",
+                "diasllow": "disallow", "disallaw": "disallow",
+                "useragent": "user-agent", "user agent": "user-agent",
+                "site-map": "sitemap"}
+
+
 def read_robots(path: str) -> dict:
     """
     Разбирает robots.txt проекта: какие агенты что запрещают.
@@ -148,6 +155,11 @@ def read_robots(path: str) -> dict:
 
     if not path:
         return {"found": False, "rules": {}, "sitemaps": []}
+    if os.path.isdir(path) and os.path.isfile(path + ".body"):
+        # Маршрут Next.js `robots.txt/` с ответом рядом — тот же поиск, что
+        # без --robots (`portfolio.build_file`): явный путь не должен терять
+        # все находки по robots.txt.
+        path = path + ".body"
     if os.path.isdir(path):
         return {"found": False, "error": tr("{a0} — это каталог, а нужен файл", a0=path),
                 "rules": {}, "sitemaps": []}
@@ -165,10 +177,19 @@ def read_robots(path: str) -> dict:
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
-            previous_was_agent = False
+            # RFC 9309 и парсер Google пропускают пустые строки и строки из
+            # одного комментария: `User-agent: Googlebot`, пустая строка,
+            # `User-agent: *` — одна группа, а не Googlebot без правил.
             continue
-        field, _, value = line.partition(":")
+        if ":" in line:
+            field, _, value = line.partition(":")
+        else:
+            # `Disallow /` без двоеточия Google читает как `Disallow: /`,
+            # если в строке ровно два слова.
+            words = line.split()
+            field, value = (words[0], words[1]) if len(words) == 2 else (line, "")
         field, value = field.strip().lower(), value.strip()
+        field = _FIELD_TYPOS.get(field, field)
         if field == "user-agent":
             if not previous_was_agent:
                 current = []
@@ -179,12 +200,17 @@ def read_robots(path: str) -> dict:
                 rules.setdefault(agent, {"disallow": [], "allow": []})
         elif field in ("disallow", "allow"):
             previous_was_agent = False
-            for agent in current or ["*"]:
+            # Правило до первого User-agent не входит ни в одну группу —
+            # RFC 9309 и Google его не применяют.
+            for agent in current:
                 rules.setdefault(agent, {"disallow": [], "allow": []})
                 rules[agent][field].append(value)
         elif field == "sitemap":
             previous_was_agent = False
-            sitemaps.append(value)
+            # Пустой или относительный Sitemap ничего не объявляет: Google
+            # принимает только полный адрес.
+            if "://" in value:
+                sitemaps.append(value)
         else:
             # Crawl-delay, Host, Clean-param и любая другая директива тоже
             # закрывают перечисление агентов. Без этого `Crawl-delay` между
@@ -204,7 +230,27 @@ _BLOCK_ALL = {"/", "/*", "/*$"}
 def _blocks_everything(entry: dict) -> bool:
     disallow = {d.strip() for d in (entry.get("disallow") or [])}
     allow = {a.strip() for a in (entry.get("allow") or [])}
-    return bool(disallow & _BLOCK_ALL) and not (allow & _BLOCK_ALL)
+    # `Allow: *` равен по длине `Disallow: /` и побеждает: открыто всё.
+    return bool(disallow & _BLOCK_ALL) and not (allow & (_BLOCK_ALL | {"*", "*$"}))
+
+
+def _site_closed(robots: dict, agent: str = "googlebot", pages=None) -> bool:
+    """
+    Агенту закрыт весь сайт: `Disallow: /`, и ни одна открытая страница сборки,
+    кроме главной, не пропущена каким-нибудь Allow. Robots.txt списком
+    разрешённых разделов (`Disallow: /` и `Allow: /rent/`) — не полный запрет:
+    по правилу самого длинного совпадения такие страницы открыты.
+    """
+    from urllib.parse import urlsplit
+    from .publish import indexable
+    if not _blocks_everything(_robots_group(robots, agent)):
+        return False
+    for page in pages or ():
+        parts = urlsplit(page.url)
+        path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        if path != "/" and indexable(page) and not blocking_rule(robots, path, agent):
+            return False
+    return True
 
 
 def _search_bot_closed(entry: dict) -> bool:
@@ -276,7 +322,9 @@ def blocking_rule(robots: dict, path: str, agent: str = "googlebot") -> str:
             if not rule:
                 continue
             if _robots_pattern(rule).match(path):
-                length = len(rule)
+                # Длина считается в той же записи, в которой сравнивается:
+                # `/каталог/` и `/%D0%BA…/` — одно правило одной длины.
+                length = len(_robots_norm(rule))
                 if length > best or (length == best and allowed):
                     best, verdict = length, ("" if allowed else rule)
     return "" if verdict is True else verdict
@@ -288,7 +336,7 @@ def blocked_urls(pages: list, robots: dict) -> set:
     читает. Полный запрет сайта — отдельная находка, а не тысяча закрытых.
     """
     from urllib.parse import urlsplit
-    if not robots.get("found") or _blocks_everything(_robots_group(robots)):
+    if not robots.get("found") or _site_closed(robots, "googlebot", pages):
         return set()
     found = set()
     for page in pages:
@@ -314,7 +362,7 @@ def check_blocked_pages(pages: list, robots: dict) -> list:
     if not robots.get("found"):
         return []
     issues = _search_agents_partly_blocked(pages, robots)
-    if _blocks_everything(_robots_group(robots)):
+    if _site_closed(robots, "googlebot", pages):
         return issues
     for page in sorted(pages, key=lambda p: p.url):
         if not indexable(page):
@@ -345,9 +393,16 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
     from .publish import indexable
     rules = robots.get("rules") or {}
     open_pages = [p for p in pages if indexable(p)]
+    # Googlebot закрыт целиком — постраничных находок нет, и вычитать его
+    # страницы нечего: иначе частичный запрет ChatGPT всплывал бы только
+    # после того, как починят Googlebot.
+    google_closed = _site_closed(robots, "googlebot", pages)
     issues = []
     for agent in sorted(AI_SEARCH_AGENTS):
-        entry = rules.get(agent)
+        # Бот без своей группы следует `*`. Когда у Googlebot группа своя,
+        # запрет под звёздочкой закрывает раздел только для этих ботов, и
+        # больше о нём не скажет никто.
+        entry = rules.get(agent) or (rules.get("*") if rules.get("googlebot") else None)
         if not entry or _search_bot_closed(entry):
             continue
         blocked = Counter()
@@ -355,7 +410,7 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
             parts = urlsplit(page.url)
             path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
             rule = blocking_rule(robots, path, agent)
-            if rule and not blocking_rule(robots, path):
+            if rule and (google_closed or not blocking_rule(robots, path)):
                 blocked[rule] += 1
         n = sum(blocked.values())
         if not n:
@@ -369,7 +424,7 @@ def _search_agents_partly_blocked(pages: list, robots: dict) -> list:
     return issues
 
 
-def check_robots(robots: dict) -> list:
+def check_robots(robots: dict, pages=None) -> list:
     """Находки по robots.txt: кого закрыли и что из-за этого теряется."""
     issues = []
     if not robots.get("found"):
@@ -382,26 +437,38 @@ def check_robots(robots: dict) -> list:
         return issues
 
     rules = robots.get("rules") or {}
-    star = rules.get("*") or {}
-    if _blocks_everything(star):
+    star_closed = "*" in rules and _site_closed(robots, "*", pages)
+    if star_closed:
         # Своя группа сильнее общей: `Googlebot` с `Allow: /` сайт видит, что
         # бы ни стояло под звёздочкой.
         allowed = sorted(a for a in _SEARCH_ENGINES
                          if a in rules and not _blocks_everything(rules[a]))
         if allowed:
-            issues.append(("warning", "robots.txt", "robots-blocks-all",
+            # Открыт только Яндекс, а Googlebot следует `*` — Google сайт не
+            # видит, и это критично, как и своя группа Googlebot с `Disallow: /`.
+            level = "warning" if "googlebot" in allowed else "critical"
+            issues.append((level, "robots.txt", "robots-blocks-all",
                            tr("Disallow: / для всех агентов, кроме {a0} — остальные поисковики "
                               "и ИИ-поиск сайт не видят", a0=", ".join(allowed))))
         else:
             issues.append(("critical", "robots.txt", "robots-blocks-all",
                            tr("Disallow: / для всех агентов — сайт закрыт от всех поисковиков целиком")))
-    elif "googlebot" in rules and _blocks_everything(rules["googlebot"]):
+    elif "googlebot" in rules and _site_closed(robots, "googlebot", pages):
         # Своя группа Googlebot с `Disallow: /` закрывает сайт от Google, даже
         # если под звёздочкой всё открыто. Раньше об этом молчали все три
         # проверки: постраничные оставляли полный запрет этой, а эта смотрела
         # только на `*`.
         issues.append(("critical", "robots.txt", "robots-blocks-all",
                        tr("Disallow: / для Googlebot — Google не обходит сайт целиком")))
+    # Своя группа Яндекса, Applebot и других поисковиков с `Disallow: /`:
+    # Googlebot и Bingbot сказаны выше и ниже, остальные молчали.
+    others = sorted(a for a in _SEARCH_ENGINES
+                    if a not in ("googlebot", "bingbot") and rules.get(a)
+                    and not star_closed and _site_closed(robots, a, pages))
+    if others:
+        issues.append(("warning", "robots.txt", "robots-blocks-all",
+                       tr("Disallow: / для {a0} — сайт закрыт от этих поисковиков",
+                          a0=", ".join(others))))
     for agent, why in sorted(AI_AGENTS.items()):
         entry = rules.get(agent)
         search = agent in AI_SEARCH_AGENTS
@@ -1008,7 +1075,7 @@ def run(pages: list, robots_path: str = "", cfg: dict = None) -> dict:
     """Все проверки машинной читаемости разом."""
     cfg = {**CONFIG, **(cfg or {})}
     robots = read_robots(robots_path)
-    issues = check_robots(robots) + check_blocked_pages(pages, robots)
+    issues = check_robots(robots, pages) + check_blocked_pages(pages, robots)
     for page in sorted(pages, key=lambda p: p.url):
         # Пустую оболочку `checks` уже назвал по имени. Оценивать её прямой
         # ответ и извлекаемость бессмысленно: оценивать нечего.

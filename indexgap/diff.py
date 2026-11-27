@@ -20,7 +20,7 @@ import re
 from collections import Counter, defaultdict, namedtuple
 from urllib.parse import urljoin, urlsplit
 
-from .checks import _url_pattern, redirect_target
+from .checks import _url_pattern, redirect_chain, redirect_target
 from .core import read_text, url_key
 from .i18n import tr
 from .publish import indexable, is_draft
@@ -605,15 +605,24 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
         if was and not now:
             reason, detail = _why_closed(b)
             level, missing = ("info" if reason == "redirect" else "critical"), ""
+            loop = home = False
             if reason == "redirect":
                 # Заглушка, которая ведёт в пустоту, — то же, что редирект
                 # удалённой страницы в пустоту.
                 full = urljoin(b.url, detail)
-                if _host_match(urlsplit(full).netloc, urlsplit(b.url).netloc) is not False \
-                        and url_key(full) not in new_keys:
+                same = _host_match(urlsplit(full).netloc, urlsplit(b.url).netloc) is not False
+                if same and url_key(full) not in new_keys:
                     level, missing = "warning", full
+                # Как у правила vercel.json (`_shadowed`): раздел на главную —
+                # мягкий 404, а петля заглушек — ошибка вместо страницы.
+                loop = same and redirect_chain(b, new)[1]
+                home = same and url_key(full) == url_key(urljoin(b.url, "/"))
+                if loop or home:
+                    level = "critical"
             closed.append({"url": b.url, "reason": reason, "detail": detail,
-                           "level": level, "redirect_missing": missing or None})
+                           "level": level, "redirect_missing": missing or None,
+                           **({"redirect_loop": True} if loop else {}),
+                           **({"redirect_home": True} if home else {})})
         elif was and now and rules:
             shadow = _shadowed(rules, b, new_keys)
             if shadow:
@@ -682,6 +691,12 @@ def _reason_text(item: dict) -> str:
         if item.get("redirect_missing"):
             return tr("страница стала заглушкой-редиректом на {a0} — а этой страницы в новой "
                       "сборке нет", a0=item["redirect_missing"])
+        if item.get("redirect_loop"):
+            return tr("страница стала заглушкой-редиректом на {a0}, а оттуда редирект ведёт "
+                      "по кругу — на живом сайте это ошибка вместо страницы", a0=detail)
+        if item.get("redirect_home"):
+            return tr("страница стала заглушкой-редиректом на главную — поисковик считает "
+                      "это мягким 404")
         return tr("страница стала заглушкой-редиректом на {a0}", a0=detail)
     if reason == "redirect-rule":
         if item.get("redirect_missing"):

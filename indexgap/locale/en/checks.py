@@ -293,6 +293,16 @@ MESSAGES = {
     "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. На живом сайте это 404 за редиректом":
         "the redirect stub leads to a page that is not in the build: {a0}. "
         "On the live site that is a 404 behind a redirect",
+    "заглушка-редирект ведёт по кругу: {a0}. Браузер покажет ошибку «слишком много переадресаций», поисковик страницу не получит":
+        "the redirect stub leads round in a loop: {a0}. A browser shows a "
+        "'too many redirects' error, and a search engine gets no page",
+    "страница с текстом (около {a0} слов) сразу перебрасывает на главную — текста поисковик не увидит, а редирект на главную он считает мягким 404. Чаще всего это ошибка шаблона":
+        "a page with text (about {a0} words) redirects straight to the home page: "
+        "a search engine will not see the text, and it treats a redirect to the "
+        "home page as a soft 404. Usually this is a template bug",
+    "заглушка-редирект ведёт на главную — поисковик считает такой редирект мягким 404: лучше вести на ближайшую по смыслу страницу":
+        "the redirect stub leads to the home page: a search engine treats such a "
+        "redirect as a soft 404, so point it at the closest page in meaning",
     'шаблон {a0}: {a1} страниц(ы) совпадают между собой до {a2:.0%} при пороге почти-дубля {a3:.0%}. Одна правка общего текста — и они станут критичными дублями. Разведи их своими данными, пока это сведения':
         'template {a0}: {a1} pages match each other by up to {a2:.0%}, and the near-duplicate threshold is {a3:.0%}. One edit to the shared text and they become critical duplicates. Give them their own data while this is still a warning',
     '{a0} страниц(ы) этого шаблона порог уже перешли.':

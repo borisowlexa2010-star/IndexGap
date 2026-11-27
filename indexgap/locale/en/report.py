@@ -158,6 +158,10 @@ MESSAGES = {
         "The link leads to a page of the build, but in a form the host does not serve: other letter case, /about.html for about/index.html, /faq/ for faq.html. The checks treat these forms as one page; the live server does not, and answers 404.",
     "Canonical указывает на саму страницу, но в форме, которой раскладка файлов не отдаёт: /about/ при about.html, /a.html или /a при a/index.html. Живой сервер отвечает на этот адрес 404 или редиректом, а он же уходит в sitemap и hreflang.":
         "The canonical points at the page itself, but in a form the file layout does not serve: /about/ for about.html, /a.html or /a for a/index.html. The live server answers that address with a 404 or a redirect, and the same address goes into the sitemap and hreflang.",
+    "Заглушка-редирект ведёт на главную. Поисковик считает редирект удалённой страницы на главную мягким 404; заглушка с текстом статьи — обычно ошибка шаблона.":
+        "A redirect stub leads to the home page. A search engine treats a removed "
+        "page redirected to the home page as a soft 404; a stub that still carries "
+        "an article's text is usually a template bug.",
     "Ссылка ведёт на страницу, которой в сборке нет: на живом сайте это 404. Чаще всего шаблон ссылается на строку данных, которую фильтр не пропустил в генерацию. Убери ссылку из шаблона или верни страницу.":
         "The link points at a page the build does not have: a 404 on the live "
         "site. Most often the template links to a data row that a filter kept out "

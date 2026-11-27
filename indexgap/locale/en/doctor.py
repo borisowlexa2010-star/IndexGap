@@ -336,6 +336,8 @@ MESSAGES = {
         'the translation says {a0}, the original ({a1}) says {a2} — the number drifted in translation or was left from an older version',
     'Disallow: / для Googlebot — Google не обходит сайт целиком':
         'Disallow: / for Googlebot: Google does not crawl any page of the site',
+    'Disallow: / для {a0} — сайт закрыт от этих поисковиков':
+        'Disallow: / for {a0}: the site is closed to these search engines',
     '{a0} не пускают на {a1} из {a2} открытых страниц (правило «Disallow: {a3}»): {a4}':
         '{a0} is kept off {a1} of {a2} open pages (rule “Disallow: {a3}”): {a4}',
     'в {a0} запрос(ах) ботов к страницам не нашёлся код ответа — открыл ли бот эти страницы, по логу не понять, и в шаг «открыто» они не засчитаны. Проверь, в каком поле лог пишет статус':
