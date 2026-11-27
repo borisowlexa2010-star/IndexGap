@@ -240,6 +240,16 @@ def _crawlers_html(crawl: dict, ai_seg: dict = None) -> str:
     out = (tr("<h2>Боты по логам сервера</h2>")
            + tr("<div class=\"scroll\"><table><thead><tr><th>бот</th><th>зачем приходит</th><th class=\"n\">запросов</th><th class=\"n\">страниц сайта</th><th class=\"n\">страниц с ошибкой</th></tr></thead><tbody>")
            + bots + "</tbody></table></div>")
+    ai_errors = [e for e in crawl.get("errors") or () if e.get("purpose") in crawlers.AI_PURPOSES]
+    if ai_errors:
+        body = "".join(
+            f'<tr><td>{_esc(e["bot"])}</td><td class="mono">{_esc(e["url"])}</td>'
+            f'<td>{_esc(", ".join(f"{s} × {n}" for s, n in e["statuses"].items()))}</td></tr>'
+            for e in ai_errors[:50])
+        out += (tr("<h3>Боты ИИ-поиска получили ошибку на страницах из сборки ({a0})</h3>",
+                   a0=len(ai_errors))
+                + tr("<div class=\"scroll\"><table><thead><tr><th>бот</th><th>страница</th><th>ответ</th></tr></thead><tbody>")
+                + body + "</tbody></table></div>")
     rows = (ai_seg or {}).get("rows") or []
     if rows and any(r.get("lost") for r in rows):
         marked = {h["segment"] for h in ai_seg.get("highlighted") or []}

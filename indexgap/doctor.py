@@ -600,30 +600,50 @@ def _url_column(rows: list) -> tuple:
 
 
 # Столбцы, где поисковик сам говорит, в индексе ли страница.
-_STATUS_HEADERS = ("coverage state", "coverage", "verdict", "index status",
+_STATUS_HEADERS = ("coverage state", "coverage", "coverage status", "abdeckung",
+                   "verdict", "index status",
                    "indexing status", "indexing state", "status", "статус",
                    "состояние", "состояние индексации")
+
+
+def _header_words(cell) -> str:
+    """`coverageState`, `coverage_state`, `Coverage State` → `coverage state`."""
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(cell or "").strip())
+    return " ".join(text.replace("_", " ").split()).lower()
+
+
+# `200 OK`, `301 Moved Permanently` — код с фразой, тоже ответ сервера.
+_HTTP_LINE = re.compile(r"(\d{3})\s+(.+)")
 # Фразы HTTP-ответа: столбец из одних таких — код сервера, а не индекс.
 _HTTP_REASONS = {"ok", "moved permanently", "found", "see other", "not modified",
                  "temporary redirect", "permanent redirect", "forbidden", "not found",
                  "gone", "internal server error", "bad gateway", "service unavailable",
                  "gateway timeout", "no response"}
 _INDEXED = re.compile(
-    r"(?<!not )(?<!не )\b(indexed|в поиске|в индексе|проиндексирован\w*|pass|valid)\b",
+    r"(?<!not )(?<!не )\b(indexed|в поиске|в индексе|проиндексирован\w*|pass|valid)\b"
+    # Вердикты панели на других языках: «Gesendet und indexiert», «Indexée, bien
+    # que bloquée…», «已编入索引». Отрицания к ним — в _NOT_INDEXED.
+    r"|\bindexiert|\bindexad[ao]s?\b|\bindexée?s?\b|\bindicizzat|geïndexeerd|zindeksowan"
+    r"|已编入索引|已建立索引|dizine eklendi|색인이 생성됨|색인되었",
     re.I)
-# «Indexed: No», «Indexed? false», «Non-indexed», «De-indexed», «В поиске нет»:
-# слово indexed здесь есть, а смысл обратный.
-_NEGATED = (r"\bindexed[\s:?()=\-]*(?:no|false|нет)\b(?!\s+\w)|\b(?:non|de|un)-?indexed\b"
-            r"|(?:в поиске|в индексе)[\s:?()=\-]*(?:нет|no)\b(?!\s+\w)|\bнет в (?:поиске|индексе)")
+# «Indexed: No», «Indexed — No», «Indexed? false», «Non-indexed», «De-indexed»,
+# «В поиске нет»: слово indexed здесь есть, а смысл обратный.
+_SEP = r"[\s:?()=\-\u2013\u2014/]*"
+_NEGATED = (r"\bindexed" + _SEP + r"(?:no|n|false|0|нет)\b(?!\s+\w)|\b(?:non|de|un)-?indexed\b"
+            r"|\b(?:not yet|never|no longer|previously|formerly|was) indexed\b"
+            r"|(?:в поиске|в индексе)" + _SEP + r"(?:нет|no)\b(?!\s+\w)|\bнет в (?:поиске|индексе)")
 _NOT_INDEXED = re.compile(
-    _NEGATED + r"|not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
+    _NEGATED + r"|nicht indexiert|sin indexar|no indexad|non index[ée]|não indexad|non indicizzat"
+    r"|niet geïndexeerd|niezindeksowan|nie zindeksowan|未编入索引|未建立索引|dizine eklenmedi"
+    r"|생성되지 않|색인되지 않"
+    r"|not indexed|not in index|unknown to|excluded|исключ|не проиндексир|не в поиске|"
     r"не в индексе|currently not|blocked|заблокир|duplicate|дубл|малоцен|"
     r"redirect|редирект|soft 404|not found|не найден|noindex|error|ошибк|fail",
     re.I)
 
 
 _SURELY_INDEXED = re.compile(
-    r"^\s*(?:submitted and )?indexed\b(?![\s:?()=\-]*(?:no|false|нет)\b(?!\s+\w))|\burl is on google\b|\bpage is indexed\b"
+    r"^\s*(?:submitted and )?indexed\b(?!" + _SEP + r"(?:no|n|false|0|нет)\b(?!\s+\w))|\burl is on google\b|\bpage is indexed\b"
     r"|^\s*(?:отправлена и )?проиндексирован", re.I)
 
 
@@ -633,12 +653,15 @@ def _status_column(rows: list, start: int):
         return None
     found = []
     for i, cell in enumerate(rows[0]):
-        header = str(cell or "").strip().lower()
+        header = _header_words(cell)
         if header not in _STATUS_HEADERS:
             continue
         values = [str(r[i]).strip() for r in rows[1:51] if i < len(r) and str(r[i]).strip()]
-        # «Status: 200» и «Status: OK» — ответ сервера, а не слово поисковика.
-        if not values or all(v.isdigit() or v.lower() in _HTTP_REASONS for v in values):
+        # «Status: 200», «Status: OK», «200 OK» — ответ сервера, а не слово поисковика.
+        if not values or all(v.isdigit() or v.lower() in _HTTP_REASONS
+                             or (_HTTP_LINE.fullmatch(v) and _HTTP_LINE.fullmatch(v).group(2).lower()
+                                 in _HTTP_REASONS)
+                             for v in values):
             continue
         # Порядок в _STATUS_HEADERS — от самого точного: у краулера рядом
         # стоят «Status» (ответ сервера) и «Coverage» (вердикт поисковика),
@@ -655,6 +678,8 @@ def _is_indexed_status(status: str) -> bool:
     дубль» — всё это строки с адресом, и раньше каждая засчитывалась как
     страница в индексе. Засчитывается только то, что сказано прямо.
     """
+    # Неразрывный пробел между словами — тот же пробел.
+    status = " ".join(str(status or "").split())
     if not status:
         return False
     # «Indexed, though blocked by robots.txt» — в индексе, хотя и со словом
@@ -847,12 +872,15 @@ def read_sources(specs: list, site: str = "") -> dict:
 # поэтому «impression» ловит и «Impressions», и «Impressões».
 _POSITION_WORDS = ("position", "позиция", "позиція", "posición", "posizione", "posição",
                    "positie", "pozycja", "posisi", "konum", "sıralama", "vị trí",
+                   "pozice", "sijainti", "pozíció", "θέση", "poziție", "poziţie", "placering",
                    "掲載順位", "排名", "순위")
 _IMPRESSION_WORDS = ("impression", "impr", "показ", "impresion", "impress",
                      "affichage", "wyświetl", "vertoning", "gösterim", "visning",
-                     "tayangan", "hiển thị",
+                     "tayangan", "hiển thị", "zobrazení", "näyttökerr", "megjelenés",
+                     "εμφανίσεις", "afișări", "afişări",
                      "表示回数", "展示", "曝光", "노출", "การแสดงผล")
 _CLICK_WORDS = ("click", "клик", "клік", "переход", "clic", "klick", "klik", "tıklama",
+                "napsautu", "kattint", "κλικ",
                 "nhấp", "クリック", "点击", "點擊", "클릭", "การคลิก")
 # CTR на некоторых языках назван через клики: «Klickrate», «Tỷ lệ nhấp».
 _RATE_WORDS = ("ctr", "rate", "taux", "tasa", "quote", "oran", "rasio", "tỷ lệ",

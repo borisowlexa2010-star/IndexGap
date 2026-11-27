@@ -377,4 +377,8 @@ MESSAGES = {
         'Several branches of a section are closed to indexing as a whole, by one template rule. The sitemap tells whether it is a decision or a mistake.',
     'Ссылки hreflang стоят в <body>: поисковики читают их только из <head>, и версии не связаны.':
         'hreflang links sit in <body>: search engines read them only from <head>, so the versions are not linked.',
+    '<h3>Боты ИИ-поиска получили ошибку на страницах из сборки ({a0})</h3>':
+        '<h3>AI search bots got an error on pages in the build ({a0})</h3>',
+    '<div class="scroll"><table><thead><tr><th>бот</th><th>страница</th><th>ответ</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>bot</th><th>page</th><th>response</th></tr></thead><tbody>',
 }
