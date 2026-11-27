@@ -47,7 +47,10 @@ LIKELY_CONTENT = ("content", "src/content", "app/content", "pages", "src/pages",
 # Куда генераторы кладут готовый сайт. Смотрится вторым: исходники, если они
 # есть, важнее собственной сборки. Без этого списка проект на Next.js, где
 # исходников в виде страниц нет вовсе, получал несуществующий `./content`.
-LIKELY_BUILD = (".next/server/app", "out", "dist", "public", "_site", "build")
+# `dist/client` и `build/client` — статическая часть сборки Astro и React Router
+# с сервером: стоят раньше `dist` и `build`, иначе адреса сдвигались на `/client/`.
+LIKELY_BUILD = (".next/server/app", "out", "dist/client", "build/client", "dist", "public",
+                "_site", "build", ".output/public", "docs/.vitepress/dist", ".vitepress/dist")
 
 # Где обычно записан адрес сайта.
 SITE_FILES = ("package.json", "astro.config.mjs", "astro.config.ts", "astro.config.js",

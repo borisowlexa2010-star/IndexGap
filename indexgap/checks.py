@@ -32,8 +32,9 @@ from collections import Counter, defaultdict, deque
 
 from . import hreflang
 from .core import EMPTY_MOUNT, INERT, NOT_LIVE, SourceError, drop_spans, is_dense
+from .core import drop_markup_attributes
 from .core import ALWAYS_SKIP, tokenize, url_key
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from .publish import indexable
 from .settings import display_width, text_volume
 from .i18n import tr
@@ -803,7 +804,7 @@ def _redirect_target(page) -> str:
         return ""
     live = drop_spans(raw, NOT_LIVE)
     if by_meta:
-        for tag in _META_TAG.findall(drop_spans(live, INERT)):
+        for tag in _META_TAG.findall(drop_spans(drop_markup_attributes(live), INERT)):
             if not _REFRESH.search(tag):
                 continue
             found = _REFRESH_CONTENT.search(tag)
@@ -1367,6 +1368,12 @@ def root_mismatch(pages: list, graph: dict, base_path: str = "") -> str:
             first = (os.path.commonpath(paths) if paths else ".").replace(os.sep, "/")
         except ValueError:
             first = "."
+        # Общий каталог страниц — не корень, если все адреса начинаются с его
+        # имени: `dist/client` при адресах `/client/…` значит, что корень — `dist`.
+        leading = {p.key.lstrip("/").partition("/")[2].split("/")[0] for p in pages}
+        if len(leading) == 1 and "/" in first and first.rsplit("/", 1)[-1] == unquote(
+                next(iter(leading))):
+            first = first.rsplit("/", 1)[0]
         return (tr("похоже, каталог не соответствует корню сайта: ссылки на страницах короче их собственных адресов на один сегмент. Из-за этого все страницы выглядят сиротами, и такой же сдвиг уедет в sitemap.\n    Проверь, какой каталог отображается в корень {a0} — сейчас это {a1}", a0=pages[0].url.split('/')[2], a1=first))
     return ""
 

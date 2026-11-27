@@ -904,6 +904,12 @@ class _Extractor(HTMLParser):
         # id, которыми управляют кнопки и ссылки: вкладки и раскрывашки,
         # скрытые до щелчка. Google считает их содержимое видимым.
         self._controls = set()
+        # Открытые <template>: True — декларативный теневой корень
+        # (`shadowrootmode`), его браузер рисует без скриптов, False — инертный.
+        self._templates = []
+        # Элемент с сырым текстом, закрытый слешем: `<iframe … />`. Браузер
+        # слеш не замечает, и содержимое тянется до `</iframe>`.
+        self._raw_open = ""
 
     # -- служебное ------------------------------------------------------------
 
@@ -1128,12 +1134,23 @@ class _Extractor(HTMLParser):
         a = {}
         for k, v in attrs:
             a.setdefault(k.lower(), v or "")
-        if tag == "script" and "ld+json" in a.get("type", "").lower():
+        if tag == "template":
+            shadow = (not self._skip_depth
+                      and a.get("shadowrootmode", "").strip().lower() in ("open", "closed"))
+            self._templates.append(shadow)
+            if not shadow:
+                self._skip_depth += 1
+                return
+        # JSON-LD внутри <template>, <noscript> или <svg> поисковик не читает.
+        if (tag == "script" and "ld+json" in a.get("type", "").lower()
+                and not self._skip_depth):
             self._in_ld = True
             self._ld_buf = ""
             self._skip_depth += 1
             return
-        if tag in SKIP_TAGS:
+        if tag in SKIP_TAGS and tag != "template":
+            if tag == "svg" and not self._skip_depth:
+                self._in_body = True       # <svg> в <head> закрывает его, как <img>
             self._skip_depth += 1
             if tag == "script":
                 self.blocks["script"] += 1
@@ -1312,6 +1329,7 @@ class _Extractor(HTMLParser):
             if "canonical" in rel:
                 href = a.get("href", "").strip()
                 if self._in_body:
+                    # canonical в <body> поисковик не читает, как и hreflang.
                     self.canonicals_in_body.append(href)
                 elif href:
                     self.canonicals.append(href)
@@ -1344,8 +1362,23 @@ class _Extractor(HTMLParser):
         # вышел раньше, чем дошёл до стека. Закрывать за него нечего — раньше
         # он закрывал <main>, и текст после иконки пропадал со страницы.
         skipping = bool(self._skip_depth)
+        if not skipping and tag in _RAW_TEXT_TAGS:
+            # `<script src=… />` вне SVG: слеш в HTML ничего не закрывает, и
+            # всё до `</script>` — текст скрипта, даже если это вся страница.
+            self.handle_starttag(tag, attrs)
+            if tag in ("iframe", "textarea", "xmp"):
+                self._raw_open = tag
+                self._skip_depth += 1
+            self.set_cdata_mode(tag)
+            return
         self.handle_starttag(tag, attrs)
-        if tag in SKIP_TAGS:
+        if tag == "template":
+            if self._templates and self._templates.pop():
+                if self._open:
+                    self._close_to(len(self._open) - 1)
+                return
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             if tag == "svg":
                 self._foreign = max(0, self._foreign - 1)
@@ -1359,7 +1392,20 @@ class _Extractor(HTMLParser):
                 self.jsonld.append(self._ld_buf.strip())
             self._skip_depth = max(0, self._skip_depth - 1)
             return
-        if tag in SKIP_TAGS:
+        if self._raw_open and tag == self._raw_open:
+            self._raw_open = ""
+            self._skip_depth = max(0, self._skip_depth - 1)
+            if self._open_count[tag]:
+                for index in range(len(self._open) - 1, -1, -1):
+                    if self._open[index] == tag:
+                        self._close_to(index)
+                        break
+            return
+        if tag == "template":
+            if not self._templates or not self._templates.pop():
+                self._skip_depth = max(0, self._skip_depth - 1)
+                return
+        elif tag in SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             if tag == "svg":
                 self._foreign = max(0, self._foreign - 1)
@@ -1401,6 +1447,14 @@ class _Extractor(HTMLParser):
             self._para_buf = []
         elif tag in ("p", "div", "section", "li", "td", "th", "dl") or tag in _OWN_BLOCKS:
             self._flush_paragraph()
+
+    def parse_html_declaration(self, i):
+        # `<![CDATA[` вне SVG и MathML — фиктивный комментарий до первого `>`,
+        # а не секция до `]]>`: мета-тег за ним живой.
+        if not self._foreign and self.rawdata.startswith("<![CDATA[", i):
+            j = self.rawdata.find(">", i + 9)
+            return -1 if j < 0 else j + 1
+        return super().parse_html_declaration(i)
 
     def handle_data(self, data):
         if self._in_ld:
@@ -1533,6 +1587,9 @@ _CHROME_ROLES = {"complementary", "contentinfo", "navigation"}
 _FRAME_TAGS = _CHROME_TAGS | {"header"}
 _FRAME_ROLES = _CHROME_ROLES | {"banner"}
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+# Элементы с сырым текстом: их содержимое — не разметка до закрывающего тега.
+_RAW_TEXT_TAGS = {"script", "style", "iframe", "textarea", "title", "xmp"}
+
 _BREAKOUT = {"b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
              "dl", "dt", "em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "head",
              "hr", "i", "img", "li", "listing", "menu", "meta", "nobr", "ol", "p",
@@ -1740,6 +1797,20 @@ NOT_LIVE = (("<!--", "-->"), ("<noscript", "</noscript>"), ("<pre", "</pre>"),
 # Мета-тег внутри скрипта (строка JavaScript) или инертного <template> браузер
 # не исполняет: для мета-переадресации это тоже не живая разметка.
 INERT = (("<script", "</script>"), ("<template", "</template>"))
+# Где <pre> и <code> — не примеры кода на странице: в комментарии, в строке
+# скрипта, в инертном шаблоне.
+NOT_SHOWN = (("<!--", "-->"),) + INERT
+# Значение атрибута с разметкой внутри — `srcdoc` у <iframe>, `data-*`: мета-тег
+# в нём принадлежит чужому документу или вовсе строка, а не живая разметка.
+_MARKUP_ATTRIBUTE = re.compile(
+    r"""\s[\w:.-]+\s*=\s*(?:"[^"<>]{0,2000}<[^"]{0,20000}"|'[^'<>]{0,2000}<[^']{0,20000}')""")
+
+
+def drop_markup_attributes(text: str) -> str:
+    """Стирает значения атрибутов, в которых есть `<`."""
+    if "=" not in text:
+        return text
+    return _MARKUP_ATTRIBUTE.sub(" x=''", text)
 EMPTY_MOUNT = re.compile(
     r"<div[^<>]{0,300}\bid\s*=\s*[\"']?(?:root|app|__next|__nuxt|svelte|q-app)[\"']?"
     r"[^<>]{0,300}>\s*</div>", re.I)
@@ -1886,7 +1957,8 @@ def essence(raw: str) -> str:
     if lowered_hint or "NEXT_REDIRECT" in raw:
         live = drop_spans(raw, NOT_LIVE)
         if lowered_hint:
-            parts += [m for m in _REFRESH_META.findall(drop_spans(live, INERT))
+            parts += [m for m in _REFRESH_META.findall(
+                drop_spans(drop_markup_attributes(live), INERT))
                       if "equiv" in m.lower()]
         parts += [f"<script>{m}</script>" for m in _NEXT_SCRIPT.findall(live)]
     # <time> тоже только живой: закомментированный, вырванный из комментария,
@@ -1901,7 +1973,8 @@ def essence(raw: str) -> str:
         parts += [marker for marker in BRIEF_MARKERS if marker in prose]
     # Есть ли на странице примеры кода: от этого зависит, шов `{FOLDER_NAME}`
     # или нотация автора.
-    if _CODE_TAG.search(raw, 0, 400_000):
+    if _CODE_TAG.search(raw, 0, 400_000) and _CODE_TAG.search(
+            drop_spans(raw[:400_000], NOT_SHOWN)):
         parts.append("<pre></pre>")
     return "\n".join(parts)
 
@@ -2153,6 +2226,38 @@ def _parse_frontmatter(block: str) -> dict:
 
 # ── страница ──────────────────────────────────────────────────────────────────
 
+_SAFE_PATH = re.compile(r"^/(?!/)[^\s:{}%?#<>\"']*$")
+
+
+def _source_url(path: str, root: str, base_url: str, meta: dict, as_index: bool) -> str:
+    """
+    Адрес исходника Markdown, если его задаёт не имя файла: `_index.md`
+    Hugo — страница раздела, `permalink:` (Jekyll, Eleventy) и `url:` (Hugo) —
+    адрес целиком, `slug:` (Hugo) — последний сегмент. Иначе пусто.
+    """
+    base = base_url.rstrip("/") + "/"
+    # Jekyll (`_config.yml`) адрес из `url:` шапки не берёт — только `permalink:`.
+    jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
+    for key in ("permalink",) if jekyll else ("permalink", "url"):
+        value = (meta.get(key) or "").strip()
+        if _SAFE_PATH.match(value):
+            return normalize_url(urljoin(base, quote(value.lstrip("/"), safe="/~-._")))
+    name = os.path.basename(path).lower()
+    url = ""
+    if name in ("_index.md", "_index.markdown"):
+        url = path_to_url(os.path.join(os.path.dirname(path), "index.md"), root, base_url)
+    slug = (meta.get("slug") or "").strip()
+    # В Jekyll `slug` меняет адрес только записей блога — их адрес строит
+    # `_jekyll_post_url`.
+    if (slug and not url and not as_index
+            and re.fullmatch(r"[^\s/:{}%?#<>\"']+", slug) and not jekyll):
+        own = path_to_url(path, root, base_url).rstrip("/")
+        if own + "/" != base:
+            url = normalize_url(own.rsplit("/", 1)[0] + "/" + quote(slug, safe="~-._"),
+                                directory=True)
+    return url
+
+
 def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Page:
     raw, encoding = read_text(path)
     notes = []
@@ -2215,6 +2320,9 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         # формой `![alt][ref]` и с сырым <img> без alt.
         shown = _strip_fences(body)
         raw_imgs = re.findall(r"<img\b[^>]*>", shown, re.I)
+        declared = _source_url(path, root, base_url, meta, as_index)
+        if declared:
+            url = declared
         page = Page(
             path=path, url=url,
             title=_clean(meta.get("title", "")),
@@ -2893,12 +3001,25 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         files[key] = os.path.basename(page.path or "")
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
+    # Сборку `.next/server` отдаёт сервер Next.js по маршрутам: `/pricing`,
+    # а `/pricing.html` — 404.
+    by_route = bool(re.search(r"/\.next/server/(app|pages)$",
+                              os.path.abspath(root).replace(os.sep, "/").rstrip("/")))
+    locale = _next_default_locale(root) if by_route else ""
     for page in flat:
         counted = {f: n for f, n in (votes.get(page.key) or {}).items() if f in usable}
-        form = (min(counted, key=lambda f: (-counted[f], order[f])) if counted else "file")
+        form = (min(counted, key=lambda f: (-counted[f], order[f])) if counted
+                else "bare" if by_route else "file")
         if form in ("slash", "index"):
             continue
         file_url = _file_url(page.path, root, base_url)
+        if locale:
+            rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+            if rel.lower() in (locale + ".html", locale + ".htm"):
+                page.url = base_url.rstrip("/") + "/"
+                continue
+            if rel.startswith(locale + "/"):
+                file_url = _file_url(os.path.join(root, rel[len(locale) + 1:]), root, base_url)
         if form == "bare":
             file_url = _EXT_RE.sub("", file_url)
         parts = urlsplit(file_url)
@@ -2931,6 +3052,107 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             page.__dict__["_wrong_forms"] = wrong
 
 
+def _read_jekyll_config(root: str) -> str:
+    try:
+        with open(os.path.join(root, "_config.yml"), encoding="utf-8", errors="replace") as fh:
+            return fh.read(200_000)
+    except OSError:
+        return ""
+
+
+def _jekyll_hidden(name: str, config: str) -> bool:
+    """
+    Каталог, который Jekyll не публикует: `_layouts`, `_includes`, `_drafts`,
+    `_data` и прочие `_`-каталоги. `_posts` публикуется под адресами по дате,
+    коллекция из `collections:` конфига — тоже; их не трогаем.
+    """
+    if not name.startswith("_") or name == "_posts":
+        return False
+    return not re.search(r"^[ \t]+-?[ \t]*" + re.escape(name[1:]) + r"[ \t]*:?[ \t]*$",
+                         config, re.M)
+
+
+_JEKYLL_POST = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-(.+)\.(?:md|markdown|html?)$", re.I)
+_JEKYLL_STYLES = {
+    "date": "/:categories/:year/:month/:day/:title:output_ext",
+    "pretty": "/:categories/:year/:month/:day/:title/",
+    "none": "/:categories/:title:output_ext",
+}
+
+
+def _jekyll_post_url(page, root: str, base_url: str, config: str) -> None:
+    """
+    `_posts/2024-01-05-hello.md` — запись блога Jekyll: адрес строится по
+    `permalink` конфига (по умолчанию `/2024/01/05/hello.html`), а не по пути.
+    """
+    rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+    parts = rel.split("/")
+    if "_posts" not in parts[:-1]:
+        return
+    found = _JEKYLL_POST.match(parts[-1])
+    meta = page.meta or {}
+    if not found or _SAFE_PATH.match((meta.get("permalink") or "").strip()):
+        return
+    style = re.search(r"^permalink[ \t]*:[ \t]*['\"]?([^'\"\s#]+)", config, re.M)
+    template = style.group(1) if style else "date"
+    template = _JEKYLL_STYLES.get(template, template)
+    if not template.startswith("/") or re.search(r":(?!categories|year|month|day|title"
+                                                 r"|output_ext|slug)\w", template):
+        return                             # стиль, который здесь не разобрать
+    categories = [p for p in parts[:parts.index("_posts")]]
+    head = FRONTMATTER.match(page.raw or "")
+    if head and head.group(1):
+        block = head.group(1)
+        line = re.search(r"^categor(?:y|ies)[ \t]*:(.*)$", block, re.M | re.I)
+        if line:
+            value = line.group(1).strip()
+            if value:
+                categories += [c for c in re.split(r"[\s,\[\]'\"]+", value) if c]
+            else:
+                rest = block[line.end():]
+                for item in re.finditer(r"^[ \t]*-[ \t]*['\"]?([^'\"\n]+?)['\"]?[ \t]*$|^\S",
+                                        rest, re.M):
+                    if not item.group(1):
+                        break
+                    categories.append(item.group(1).strip())
+    seen = []
+    for c in categories:
+        c = c.lower()
+        if c not in seen:
+            seen.append(c)
+    year, month, day, title = found.groups()
+    title = (meta.get("slug") or "").strip() or title
+    path = template
+    for key, value in (("categories", "/".join(seen)), ("output_ext", ".html"),
+                       ("year", year), ("month", month), ("day", day),
+                       ("title", title), ("slug", title)):
+        path = path.replace(":" + key, value)
+    path = re.sub(r"/{2,}", "/", path)
+    page.url = normalize_url(urljoin(base_url.rstrip("/") + "/",
+                                     quote(path.lstrip("/"), safe="/~-._")))
+
+
+def _next_default_locale(root: str) -> str:
+    """
+    Язык по умолчанию сборки `.next/server/pages` с i18n: его страницы
+    (`en.html`, `en/about.html`) Next.js отдаёт без префикса — `/`, `/about`.
+    Берётся из `.next/routes-manifest.json`.
+    """
+    if os.path.basename(os.path.abspath(root)) != "pages":
+        return ""
+    up = os.path.dirname(os.path.dirname(os.path.abspath(root)))
+    try:
+        with open(os.path.join(up, "routes-manifest.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return ""
+    i18n = data.get("i18n") if isinstance(data, dict) else None
+    locale = i18n.get("defaultLocale") if isinstance(i18n, dict) else None
+    if isinstance(locale, str) and re.fullmatch(r"[A-Za-z0-9-]{2,20}", locale):
+        return locale
+    return ""
+
+
 def _host_serves_any_form(root: str) -> tuple:
     """
     (сводит ли хостинг формы адресов сам, отдаёт ли он `/a` без редиректа
@@ -2951,6 +3173,8 @@ def _host_serves_any_form(root: str) -> tuple:
             or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
             or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS
                    if m not in _REPO_ONLY_MARKERS)):
+        # Один `.git` — не исходники: checkout ветки gh-pages и есть то, что
+        # отдаёт хостинг.
         return True, True
     near = [root, os.path.dirname(os.path.abspath(root))]
     for folder in near:
@@ -3083,6 +3307,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
     jekyll = os.path.isfile(os.path.join(root, "_config.yml"))
+    jekyll_config = _read_jekyll_config(root) if jekyll else ""
     def unreadable(exc):
         if not os.path.isdir(root):
             return                  # нет самого каталога — об этом скажут выше
@@ -3123,10 +3348,13 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
         # Порядок обхода — по имени: readdir отдаёт каталоги в порядке
         # файловой системы, и список «первых пяти» менялся от машины к машине.
         dirnames[:] = sorted(d for d in dirnames
-                             if not d.startswith(".") and d not in skip and d not in OWN_DIRS)
+                             if not d.startswith(".") and d not in skip and d not in OWN_DIRS
+                             and not (jekyll and _jekyll_hidden(d, jekyll_config)))
         for name in sorted(filenames):
             if name.startswith(".") or name.lower() in OWN_FILES:
                 continue
+            if jekyll and name.startswith("_"):
+                continue                   # Jekyll не публикует `_`-файлы
             if not name.lower().endswith(exts):
                 continue
             path = os.path.join(dirpath, name)
@@ -3134,17 +3362,26 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             # она короткая, и в sitemap ей не место. Её выдаёт почти любой
             # генератор, и каждая получала «сироту» и «тонкую».
             rel = os.path.relpath(path, root).replace(os.sep, "/")
-            if _ERROR_FILE.search(rel) or _TOP_ERROR.match(rel):
+            top_error = _TOP_ERROR.match(rel)
+            if (_ERROR_FILE.search(rel) or _DYNAMIC_ROUTE.search(rel)
+                    or (top_error and "/" not in rel[:top_error.start(1)])):
                 continue
-            if _ERROR_PAGE.search(rel) and not _numbered_sibling(path):
+            # `en/404.html` — служебная в корне языка, но `api/404/` — может
+            # быть и раздел: решают ссылки.
+            if top_error or (_ERROR_PAGE.search(rel) and not _numbered_sibling(path)):
                 # `status/404/index.html` в глубине сборки — это может быть
                 # статья про код ответа, а не страница ошибки. Её судьбу
                 # решают ссылки: на страницу ошибки сайт не ссылается.
                 maybe_error.add(path)
-            readme_home = (jekyll and name.lower() == "readme.md"
+            # GitHub Pages собирает Jekyll и без _config.yml; README.md —
+            # главная и у Docsify, MkDocs, GitBook. В проекте с исходниками
+            # другого генератора — нет.
+            readme_home = ((jekyll or not source_repo) and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
     for kind, path, value in _parse_all(todo, jobs):
+        if kind == "page" and jekyll:
+            _jekyll_post_url(value, root, base_url, jekyll_config)
         if kind == "error":
             problems.append(value)
         elif kind == "fragment":
@@ -3420,6 +3657,9 @@ _ERROR_PAGE = re.compile(
 _ERROR_FILE = re.compile(
     r"(^|/)(5xx|4xx|_not-found|_error|_global-error|offline-plugin-app-shell-fallback)"
     r"(\.html?|/index\.html?)$", re.I)
+# `[slug].html`, `[...path].html` — оболочка динамического маршрута Next.js
+# (fallback getStaticPaths), а не адрес: по `/blog/%5Bslug%5D.html` никто не ходит.
+_DYNAMIC_ROUTE = re.compile(r"(^|/)\[[^/\[\]]+\]\.html?$", re.I)
 # Коды и `200.html` (запасной вход SPA у Nuxt, SvelteKit, Surge) — служебные
 # только в корне сборки или в корне языка: `status/404/` в глубине — обычная
 # страница, если на неё ссылаются.
