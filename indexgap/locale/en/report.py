@@ -238,9 +238,9 @@ MESSAGES = {
         "a canonical here would hide the very pages they were built for. If the "
         "query is the same, keep one page and send the rest to it.",
     "Слишком много кликов от главной.": "Too many clicks from the home page.",
-    "Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots.":
+    "Страница закрыта от индексации. Если это ошибка шаблона — убери мета-тег robots или заголовок X-Robots-Tag.":
         "The page is closed to indexing. If that is a template mistake, remove the "
-        "robots meta tag.",
+        "robots meta tag or the X-Robots-Tag header.",
     "Текста меньше порога. Порог правится в indexgap.json — для карточки товара 250 слов абсурдны, для гайда нормальны.":
         "Less text than the threshold. The threshold lives in indexgap.json — 250 "
         "words is absurd for a product card and normal for a guide.",

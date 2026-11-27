@@ -34,6 +34,11 @@ MESSAGES = {
     "{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись":
         "{a0}: the directory could not be read ({a1}) — its pages were not checked",
     "canonical не разбирается как адрес: {a0}": "the canonical cannot be parsed as an address: {a0}",
+    "на странице {a0} разных canonical: {a1} — поисковик не учтёт ни один. Оставь один в <head>":
+        "the page has {a0} different canonicals: {a1} — the search engine will use none of "
+        "them. Keep one in <head>",
+    "canonical в <body> ({a0}) поисковик не читает — перенеси его в <head>":
+        "the search engine does not read a canonical in <body> ({a0}) — move it into <head>",
     "{a0}: шаблон {a1} не разобран — какие страницы закрывает его X-Robots-Tag: noindex, не проверялось":
         "{a0}: pattern {a1} could not be read — which pages its X-Robots-Tag: noindex "
         "closes was not checked",

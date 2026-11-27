@@ -22,8 +22,8 @@ MESSAGES = {
         "the mark is there, the page goes into neither the sitemap nor IndexNow.",
 
     # ── что делать: индексация ────────────────────────────────────────────────
-    "Убери мета-тег robots, если закрытие от индексации не было задумано. Если было — оставь и не трогай эту находку.":
-        "Remove the robots meta tag if closing this page off was not intended. If "
+    "Убери мета-тег robots или заголовок X-Robots-Tag, если закрытие от индексации не было задумано. Если было — оставь и не трогай эту находку.":
+        "Remove the robots meta tag or the X-Robots-Tag header if closing this page off was not intended. If "
         "it was, leave it and ignore this finding.",
     "Убери `nosnippet` или `max-snippet:0`: без права на сниппет страница не попадёт ни в расширенную выдачу, ни в ответы ИИ-поиска.":
         "Remove `nosnippet` or `max-snippet:0`: without the right to a snippet the "

@@ -1362,7 +1362,19 @@ def _a_variant_of(page, target) -> bool:
     prefix = home.rstrip("/") + "/"
     if path.startswith(prefix) and _VARIANT_TAIL.match(path[len(prefix):].strip("/")):
         return True
-    return _text_overlap(page, target) >= CONFIG["near_duplicate"]
+    # Шаблонная копия под другой запрос (`/rent/hamburg/` → `/rent/berlin/`)
+    # почти совпадает текстом, но у неё свои title и H1: это не вариант.
+    return (_text_overlap(page, target) >= CONFIG["near_duplicate"]
+            and not _another_subject(page, target))
+
+
+def _another_subject(page, target) -> bool:
+    """Разные и title, и H1 — страница о другом, а не вторая копия той же."""
+    def h1(p):
+        return next((t for lvl, t in p.headings if lvl == 1), "")
+    norm = lambda s: " ".join((s or "").lower().split())
+    return (bool(norm(page.title)) and norm(page.title) != norm(target.title)
+            and bool(norm(h1(page))) and norm(h1(page)) != norm(h1(target)))
 
 
 _VARIANT_TAIL = re.compile(
@@ -1471,11 +1483,16 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
             target = by_key.get(url_key(p.canonical))
             if p.url in wrong:
                 many = collected[wrong[p.url]]
+                clone = _text_overlap(p, target) >= cfg["near_duplicate"]
                 issues.append(("critical" if many > 1 else "warning", p.url, "canonical-elsewhere",
-                               tr("canonical указывает на {a0}, а это другая страница: другое имя "
+                               (tr("canonical указывает на {a0}, а это другая страница: текст "
+                                   "почти тот же, но другие имя, title и H1 — копия шаблона под "
+                                   "другой запрос. Страница просит убрать её из индекса",
+                                   a0=target.url) if clone else
+                                tr("canonical указывает на {a0}, а это другая страница: другое имя "
                                   "и почти нет общего текста. Так бывает, когда шаблон берёт "
                                   "адрес из чужой переменной; страница просит убрать её из "
-                                  "индекса", a0=target.url)
+                                  "индекса", a0=target.url))
                                + (tr(" (на эту же страницу ведут canonical ещё {a0} стр.)",
                                      a0=many - 1) if many > 1 else "")))
             elif target is not None and _consolidated(p, target):
@@ -1965,6 +1982,11 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
     for prefix in sections:
         if not any(prefix.startswith(c) for c in chosen):
             chosen.append(prefix)
+    # Каждый раздел меньше половины, а вместе — половина сайта и больше: это
+    # закрытый сайт, а не решение о разделе. Чем больше веток закрыто, тем
+    # зеленее был отчёт. Сведением остаются только разделы с именем версии.
+    if sum(total[c] for c in chosen) * 2 >= len(pages):
+        chosen = [c for c in chosen if _VERSION_BRANCH.match(c.strip("/").rsplit("/", 1)[-1])]
     if not chosen:
         return issues
     for prefix in chosen:
@@ -1986,8 +2008,11 @@ def _closed_sections(issues: list, notes: list, pages: list) -> list:
 CLOSED_GROUP_ENTITIES = 3
 
 # Имена веток, которые выдают версии документации: `/docs/1.2/`, `/v3/`, `/next/`.
+# Голое число из трёх цифр и больше (`/city/101/`) — номер в каталоге, а не
+# версия; год (`/2019/`) — архив.
 _VERSION_BRANCH = re.compile(
-    r"^(v?\d+(?:[._-]\d+)*(?:[._-]x)?|next|dev|nightly|canary|legacy|archive|old)$", re.I)
+    r"^(v\d+(?:[._-]\d+)*(?:[._-]x)?|\d+(?:[._-]\d+)+(?:[._-]x)?|\d{1,2}(?:[._-]x)?"
+    r"|(?:19|20)\d\d|next|dev|nightly|canary|legacy|archive|old)$", re.I)
 
 
 def _closed_groups(closed: set, pages: list) -> tuple:
@@ -2014,7 +2039,7 @@ def _closed_groups(closed: set, pages: list) -> tuple:
                 if size[e] >= 3 and shut[e] >= 0.9 * size[e]]
         pages_closed = sum(shut[e] for e in full)
         if (len(full) >= CLOSED_GROUP_ENTITIES and pages_closed >= CLOSED_SECTION_MIN
-                and len(full) * 2 < len(entities)):
+                and len(full) * 2 <= len(entities)):
             chosen[parent] = sorted(full)
     # Внешний раздел поглощает вложенный: одна находка на ветку дерева.
     for parent in sorted(chosen, key=len):
@@ -2029,7 +2054,7 @@ def _catalogue_branches(closed: set, pages: list) -> set:
     """
     Закрытые ветки, которые `noindex-group` должен увидеть, даже если каждая
     сама по себе — большой закрытый раздел: рядом стоят такие же открытые
-    ветки (не меньше трёх страниц, и их больше, чем закрытых), и ни одна
+    ветки (не меньше трёх страниц, и их не меньше, чем закрытых), и ни одна
     закрытая не названа как версия документации. Пути веток — `/visa/alpha/`.
     """
     chosen, by_parent, size, _ = _closed_groups(closed, pages)
@@ -2038,7 +2063,7 @@ def _catalogue_branches(closed: set, pages: list) -> set:
         if any(_VERSION_BRANCH.match(e[-1]) for e in full):
             continue
         shaped = sum(1 for e in by_parent[parent] if e not in full and size[e] >= 3)
-        if shaped > len(full):
+        if shaped >= len(full):
             out |= {"/" + "/".join(e) + "/" for e in full}
     return out
 
@@ -2052,7 +2077,7 @@ def collapse_closed_groups(issues: list, pages: list) -> list:
     подряд в «чинить в этом порядке». Ветка `/visa/alpha/` закрыта, если
     закрыто не меньше 90% её страниц (их не меньше трёх). Когда в одном
     разделе таких веток три и больше, закрытых страниц не меньше двадцати, а
-    открытых веток рядом больше, чем закрытых, — находка одна, критичная:
+    открытых веток рядом не меньше, чем закрытых, — находка одна, критичная:
     решение это или ошибка, без sitemap не видно. Страницы ветки понижаются
     до сведений. sitemap, из которого ветки убраны, понижает и саму находку.
     """
