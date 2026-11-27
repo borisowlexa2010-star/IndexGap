@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 from collections import Counter, defaultdict
 from urllib.parse import urlsplit
@@ -73,10 +74,16 @@ def apply_project_defaults(args) -> str:
     explicit = getattr(args, "config", None)
     if explicit and os.path.isfile(explicit):
         path = explicit
-    places = [os.getcwd(), os.path.dirname(os.getcwd())]
+    places = [os.getcwd()]
     root = getattr(args, "root", None)
-    if root and os.path.isdir(root):
-        places += [os.path.abspath(root), os.path.dirname(os.path.abspath(root))]
+    if root and os.path.isdir(root) and not path:
+        # Конфиг страниц (рядом, уровнем выше или глубокий с тем же `pages`)
+        # сильнее конфига над рабочим каталогом: тот может быть чужим, а
+        # глубокий indexgap.json иначе давал пороги, но терял site и dataset.
+        here = [os.path.join(os.getcwd(), name) for name in PROJECT_FILES]
+        if not any(os.path.isfile(p) for p in here):
+            path = settings.find_config(root)
+    places += [os.path.dirname(os.getcwd())]
     for directory in ([] if path else places):
         for name in PROJECT_FILES:
             candidate = os.path.join(directory, name)
@@ -117,6 +124,10 @@ def apply_project_defaults(args) -> str:
         args.dataset = os.path.join(base, data["dataset"])
     if hasattr(args, "profile") and not args.profile and data.get("profile"):
         args.profile = data["profile"]
+    # `home` проверялся как известный ключ, но не действовал: глубина и
+    # недостижимость молча не считались.
+    if hasattr(args, "home") and not args.home and data.get("home"):
+        args.home = data["home"]
     return path
 
 
@@ -282,7 +293,11 @@ def _describe_project(project: dict, rows: list) -> None:
     elif rows:
         parts.append(tr("единиц измерения в датасете нет — сверка идёт по всем числам"))
     if project.get("_path"):
-        parts.append(tr("конфиг: {a0}", a0=os.path.basename(project['_path'])))
+        # Одно имя не говорило, какой из indexgap.json взят: путь от рабочего каталога.
+        shown = os.path.relpath(project['_path'])
+        if shown.startswith(".." + os.sep + ".." + os.sep):
+            shown = os.path.abspath(project['_path'])
+        parts.append(tr("конфиг: {a0}", a0=shown))
     print(tr("Проект — ") + "; ".join(parts))
 
 
@@ -715,6 +730,7 @@ def _analyse(args, pages=None):
         analysis["issues"], project.get("ignore"), args.site)
     analysis["accepted"] = accepted
     if accepted:
+        _drop_accepted_lists(analysis, notes, accepted)
         print(tr("Принято намеренно (ignore в indexgap.json): {a0} — в счёт и в наряды не идут",
                  a0=len(accepted)))
     return {"pages": pages, "rows": rows, "project": project,
@@ -723,6 +739,32 @@ def _analyse(args, pages=None):
                                                    len(pages), pages=pages),
             "templates": checks.template_risk(analysis["issues"], pages),
             "content": content_result, "aeo": aeo_result}
+
+
+_DUP_CODES = ("near-duplicate", "similar", "duplicate-risk")
+
+
+def _drop_accepted_lists(analysis: dict, notes: list, accepted: list) -> None:
+    """
+    Принятое намеренно уходит и из списков сирот и пар, и из совета чинить
+    группы дублей: счётчики консоли его уже не считали, а JSON и заметка — да.
+    """
+    graph = analysis.get("graph") or {}
+    for code, key in (("orphan", "orphans"), ("unreachable", "unreachable")):
+        gone = {i[1] for i in accepted if i[2] == code}
+        left = {i[1] for i in analysis["issues"] if i[2] == code}
+        if gone and isinstance(graph.get(key), list):
+            graph[key] = [u for u in graph[key] if u not in gone or u in left]
+    gone = {i[1] for i in accepted if i[2] in _DUP_CODES}
+    if not gone:
+        return
+    left = {i[1] for i in analysis["issues"] if i[2] in _DUP_CODES}
+    analysis["duplicates"] = [
+        (a, b, j) for a, b, j in analysis.get("duplicates") or []
+        if not ((a.url in gone or b.url in gone) and a.url not in left and b.url not in left)]
+    note = analysis.get("duplicate_group_note")
+    if note and note in notes and not any(i[2] == "near-duplicate" for i in analysis["issues"]):
+        notes.remove(note)
 
 
 def _given_files_exist(args) -> None:
@@ -1769,8 +1811,10 @@ def cmd_init(args):
     print(tr("\nЧто установлено:"))
     for path in result["skills"]:
         print(f"  {path}")
+    written = result["config_written"]
     print(f"  {os.path.basename(result['config'])}"
-          + ("" if result["config_written"] else tr("   (уже был, не тронут)")))
+          + (tr("   (уже был, вписано из флагов: {a0})", a0=", ".join(written))
+             if isinstance(written, list) else "" if written else tr("   (уже был, не тронут)")))
     if result["gitignore"]:
         print(tr("  .gitignore — дописаны служебные файлы"))
     if result["agents"]:
@@ -1787,18 +1831,20 @@ def cmd_init(args):
         if not d["site"]:
             print(tr("\n! Адрес сайта определить не удалось."))
         print(tr("  Назови их сам:"))
-        print("  indexgap init --site " + (d["site"].rstrip("/") or "https://example.com")
-              + " --content " + (d["content"] or tr("<каталог со страницами>")) + " --force")
+        print("  indexgap init --site " + (shlex.quote(d["site"].rstrip("/")) or "https://example.com")
+              + " --content " + (shlex.quote(d["content"]) if d["content"]
+                                 else tr("<каталог со страницами>")) + " --force")
         return 1
 
     print(tr("\nСледующая команда:"))
-    dataset = f" --dataset {d['dataset']}" if d["dataset"] else ""
-    print(f"  indexgap check {d['content']} --site {d['site'].rstrip('/')}{dataset}")
+    # Каталог с пробелом (`./my pages`) без кавычек давал «unrecognized arguments».
+    dataset = f" --dataset {shlex.quote(d['dataset'])}" if d["dataset"] else ""
+    print(f"  indexgap check {shlex.quote(d['content'])} --site {shlex.quote(d['site'].rstrip('/'))}{dataset}")
     if args.key:
         key = install.new_indexnow_key()
         print(tr("\nНовый ключ IndexNow для ЭТОГО проекта: {a0}", a0=key))
         print(tr("  Он привязан к домену файлом в корне сайта. Ключ от другого проекта здесь не сработает — протокол ответит 403."))
-        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=d['content'], a1=d['site'].rstrip('/'), a2=key))
+        print(tr("  indexgap notify {a0} --site {a1} --key {a2} --write-key --key-dir <каталог публикации>", a0=shlex.quote(d['content']), a1=shlex.quote(d['site'].rstrip('/')), a2=key))
     return 0
 
 

@@ -172,7 +172,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             result["notes"].append(
                 tr("профиль «{a0}» рассчитан на страницы из датасета, но датасет не указан — сверка фактов не выполнялась", a0=result['profile']))
 
-        home = spec.get("home") or (spec["site"]
+        home = spec.get("home") or (own.get("home") if isinstance(own.get("home"), str) else "") or (spec["site"]
                                     if url_key(spec["site"]) in {p.key for p in pages}
                                     else None)
         # Тот же robots.txt и то же правило, что в `check`: файл сборки сайта,

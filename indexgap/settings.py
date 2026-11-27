@@ -340,6 +340,11 @@ def check_section(section: str, values) -> list:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise SourceError(tr("настройка «{a0}» должна быть числом, а в конфиге стоит {a1}",
                                  a0=name, a1=json.dumps(value, ensure_ascii=False)))
+        # NaN, бесконечность (`1e400`) и миллиард дней проходили проверку
+        # нижней границы и роняли прогон трассировкой из timedelta.
+        if not (abs(value) <= 10 ** 8):
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
+                                 a2=tr("нужно конечное число не больше 100000000")))
         if key in _SHARES:
             low_ok = _SHARES[key]
             if not ((0 <= value if low_ok else 0 < value) and value <= 1):
