@@ -95,11 +95,11 @@ font-size:.85rem;color:var(--ink3)}
   <span class="tag">template-change</span>
   <span class="tag acc">What a deploy breaks (indexgap diff)</span>
 </div>
-<p class="lede">Titles and H1s changed on hundreds of pages at once are a template edit. That can be the intended rewrite or a broken variable; either way it resets how the engine reads those pages, so it should be a decision, not an accident.</p>
+<p class="lede">Titles and H1s changed on hundreds of pages at once are a template edit. That can be the intended rewrite or a broken variable; either way it resets how the engine reads those pages, so it should be a decision, not an accident. A URL shape change (`/x/` to `/x.html`) is a warning, whatever its share, when the new build does not serve the old form and no redirect covers it: the old addresses will answer 404. With cleanUrls, trailingSlash or a redirect rule it stays info.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
-<pre><code>warning  template-change  titles, H1s, descriptions, canonicals or the URL form changed on most pages of one URL template at once</code></pre>
+<pre><code>warning  template-change  the URL changed on … of … pages, and the new build does not serve the old address form and has no redirect for it: … old address(es) will answer 404; for example “…” → “…”. Add redirects from the old addresses</code></pre>
 
 <h2>How to fix it</h2><p>The package does not yet ship an imperative fix for this finding, so <code>indexgap brief</code> reports it without one. The finding itself still tells you what was seen.</p>
 
@@ -121,8 +121,8 @@ with the thresholds the result has to satisfy and the command to check it.</p>
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-11-27">2026-11-27</time>,
-  for indexgap 1.29.0.</p>
-  <p>indexgap 1.29.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.30.0.</p>
+  <p>indexgap 1.30.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

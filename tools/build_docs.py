@@ -88,7 +88,11 @@ WHY = {
  "template-change":
    "Titles and H1s changed on hundreds of pages at once are a template edit. That "
    "can be the intended rewrite or a broken variable; either way it resets how "
-   "the engine reads those pages, so it should be a decision, not an accident.",
+   "the engine reads those pages, so it should be a decision, not an accident. "
+   "A URL shape change (`/x/` to `/x.html`) is a warning, whatever its share, "
+   "when the new build does not serve the old form and no redirect covers it: "
+   "the old addresses will answer 404. With cleanUrls, trailingSlash or a "
+   "redirect rule it stays info.",
  "text-shrunk":
    "A page that lost more than half of its words between builds usually lost a "
    "data block or a template section, not editorial text.",
@@ -186,7 +190,7 @@ WHY = {
  "heavy-html":
    "An HTML file over 2 MB. Googlebot reads the first 2 MB of a supported file and indexes what it has read — Google's own documentation, updated 2026-02-03. Hydration payloads embedded in the page are the usual cause on modern frameworks.",
  "heavy-images":
-   "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads.",
+   "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads. Pages whose inline `data:` images (in `<img src>`, `srcset`, `<picture><source>` or a `style` background) add up to more than 1 MB after decoding are named in the same finding with their size: that weight comes with every page view and is never cached on its own. Small inline icons and SVG sprites stay quiet.",
  "dataset-unbound":
    "The dataset was given, but fewer than half of the pages were bound to its rows \u2014 so the numbers on the rest were never checked against anything, and a clean fact check means nothing. A page is bound by `keyword:` in its front matter, by `<meta name=\"keyword\">`, by a `slug`/`url`/`path` column in the dataset matching its address, by its folder name, or by its title. The run also lists the dataset rows that have no page at all: a generation failure or a filter.",
  "wrong-link-form":
@@ -199,6 +203,18 @@ WHY = {
    "template linking to a data row that a filter kept out of generation — one "
    "line in the template, repeated on every page. Links to assets, feeds and "
    "sections not present in the checked directory are not judged.",
+ "broken-image":
+   "An image the page refers to — `<img src>`, a `srcset` candidate, `<picture><source srcset>`, "
+   "a `<video poster>` or a `<link rel=icon>` — that is not in the build. The address is resolved "
+   "the way links are: against `<base href>`, with percent-encoding decoded and the query string "
+   "dropped. One warning per page, naming the first few. Images on other hosts, `data:` and "
+   "`blob:` addresses, template placeholders and addresses without an image file extension "
+   "(`/api/og?title=…`) are not judged; for `/_next/image?url=…` and similar optimizer endpoints "
+   "the source in the parameter is checked. Builds that do not hold the site's images at all — "
+   "`.next/server/app`, an `indexgap fetch` mirror, a source repository — are skipped, as are "
+   "addresses outside the `--site` path and paths a redirect rule catches. A build that holds "
+   "no image file at all, while none of the referenced images resolve, gets one load note "
+   "instead of a warning per page: the HTML was most likely copied without its images.",
  "redirect-home":
    "A redirect stub (meta refresh, a one-line JavaScript redirect or a Next.js "
    "NEXT_REDIRECT page) whose target is the home page. Google treats a removed "
@@ -209,12 +225,16 @@ WHY = {
  "orphan":
    "A page nothing links to is discovered only through the sitemap, crawled "
    "rarely, and treated as unimportant — because in the site's own structure it "
-   "demonstrably is.",
+   "demonstrably is. A page whose only inbound links use a form the build does "
+   "not serve (`/a.html` for `a/index.html`, `/b/index.md`) is reported as a "
+   "warning: on GitHub Pages, S3 and nginx those links are 404s, unless the host "
+   "redirects them.",
  "unreachable":
    "Being in the sitemap is a request; being reachable by links is the answer. "
    "A page a crawler cannot walk to from the home page competes for budget it "
    "will not get. Links on pages that robots.txt closes do not count: the "
-   "crawler never reads those pages, so it never sees their links.",
+   "crawler never reads those pages, so it never sees their links. A page "
+   "reached only through links in a form the build does not serve is a warning.",
  "deep":
    "Every click of depth costs crawl frequency. Pages buried far from the home "
    "page get revisited slowly, so their updates reach the index late.",
@@ -238,7 +258,12 @@ WHY = {
    "each row's own data is both better reading and better evidence of effort. "
    "The share is measured across the site and within the group's own section: "
    "twenty stamped `/rent/` pages are reported even when seventy blog posts with "
-   "their own headings sit beside them.",
+   "their own headings sit beside them. Flat addresses form a section by a shared "
+   "start (`/rent-berlin/`) or a shared end (`/berlin-rent/`). Bare addresses "
+   "(`/berlin/`) count as a section only for one exact skeleton of three or more "
+   "headings shared by at least five pages that make up a clear majority of "
+   "their level, not counting pages that form their own slug section such as "
+   "`/post-1/` … `/post-20/`.",
  "same-opening":
    "The opening paragraph is what gets quoted, previewed and read first. When "
    "it is identical across pages, every one of them makes the same first "
@@ -249,7 +274,12 @@ WHY = {
    "twenty cannot be fixed alone. When the pages target different queries "
    "(one per city or model), the fix is each page's own data, not a canonical: "
    "a canonical would hide the pages the site was built for. When the query is "
-   "the same, keep one page and redirect the rest to it.",
+   "the same, keep one page and redirect the rest to it. In a group of thirty "
+   "or more near-duplicates a new page is compared with one page of the group "
+   "rather than with every member, so large clone groups cost linear time. "
+   "The finding then names the group: the JSON keeps its first ten addresses in "
+   "`subject` and the full count in `subject_total`, and lists the group once in "
+   "`duplicate_groups` (id, size, members) instead of every pair in `duplicates`.",
  "similar":
    "Weaker than a near-duplicate, but the same shape. Worth reading as a "
    "warning that two keywords with the same intent produced two competing "
@@ -365,7 +395,12 @@ WHY = {
    "or host, names a redirect, not the version, and is reported too.",
  "hreflang-bad-code":
    "An alternate with an empty or malformed href is a broken link inside the "
-   "signal that is supposed to hold the language versions together.",
+   "signal that is supposed to hold the language versions together. So is an "
+   "href in a form the build does not serve: `/de/a` for `de/a/index.html` is a "
+   "redirect, `/de/a/` for `de/a.html` is a 404 on GitHub Pages, S3 and nginx, "
+   "and `/de/a/index.html` next to a canonical `/de/a/` is a copy. Hosting "
+   "settings that serve the form (cleanUrls, trailingSlash, redirect rules) "
+   "keep it quiet.",
  "hreflang-unknown-target":
    "The cluster points at a URL that is not among the pages found. Either a "
    "version was removed and the template still declares it, or the addresses "
@@ -462,6 +497,12 @@ WHY = {
    "A dated event that has passed and is still open for indexing sends people "
    "to something that already happened. Search engines demote it; readers who "
    "arrive are worse off than if they had found nothing.",
+ "stale-event-part":
+   "A page that runs an open-ended series (an eventSchedule with no end date) "
+   "also marks up a one-off event that has passed. The page itself is current, "
+   "so it is not a stale event; the expired date still tells search engines and "
+   "readers about something that is over."
+   " The series keeps the page in the index; the past event is the part to remove or move to an archive.",
  "stale-closed":
    "The page describes something that has ended. Lower stakes than a stale "
    "event, and still a page whose usefulness expired."
@@ -498,7 +539,7 @@ FAMILIES = [
    "no-description", "description-length", "duplicate-description",
    "no-h1", "many-h1", "no-headings", "title-h1-mismatch", "no-structure", "img-no-alt",
    "img-alt-filler", "img-alt-language",
-   "vague-anchor", "no-og", "no-viewport", "heavy-images"]),
+   "vague-anchor", "no-og", "no-viewport", "heavy-images", "broken-image"]),
 
  ("hreflang", "hreflang and language versions",
   "hreflang is mutual, self-inclusive and per-page — three properties a "
@@ -524,7 +565,7 @@ FAMILIES = [
  ("freshness", "Freshness",
   "Pages whose usefulness has an expiry date, still open for indexing after it "
   "passed.",
-  ["stale-event", "stale-closed", "stale-year"]),
+  ["stale-event", "stale-event-part", "stale-closed", "stale-year"]),
  ("deploy", "What a deploy breaks (indexgap diff)",
   "Found by comparing two builds of the same site, before the new one goes "
   "live: pages that disappear, pages that close, templates whose titles changed "

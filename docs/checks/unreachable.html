@@ -91,11 +91,11 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>unreachable</h1>
 <div class="meta">
-  <span class="tag critical">critical</span>
+  <span class="tag critical">critical</span> <span class="tag warning">warning</span>
   <span class="tag">unreachable</span>
   <span class="tag acc">Indexing and reachability</span>
 </div>
-<p class="lede">Being in the sitemap is a request; being reachable by links is the answer. A page a crawler cannot walk to from the home page competes for budget it will not get. Links on pages that robots.txt closes do not count: the crawler never reads those pages, so it never sees their links.</p>
+<p class="lede">Being in the sitemap is a request; being reachable by links is the answer. A page a crawler cannot walk to from the home page competes for budget it will not get. Links on pages that robots.txt closes do not count: the crawler never reads those pages, so it never sees their links. A page reached only through links in a form the build does not serve is a warning.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
@@ -121,8 +121,8 @@ with the thresholds the result has to satisfy and the command to check it.</p>
 
 <footer>
   <p>By Alexey Borisov. Updated <time datetime="2026-11-27">2026-11-27</time>,
-  for indexgap 1.29.0.</p>
-  <p>indexgap 1.29.0 — quality control for programmatic SEO pipelines.
+  for indexgap 1.30.0.</p>
+  <p>indexgap 1.30.0 — quality control for programmatic SEO pipelines.
   Python 3.9+, standard library only. MIT.
   <a href="https://github.com/borisowlexa2010-star/IndexGap">Source on GitHub</a>.</p>
   <p>This site is generated from the package's own check registry by

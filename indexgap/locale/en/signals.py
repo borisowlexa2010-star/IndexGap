@@ -22,6 +22,9 @@ MESSAGES = {
         "only through the sitemap or stray links",
     " и ещё {a0}": " and {a0} more",
     "абсолютного адреса в og:image ({a0})": "an absolute address in og:image ({a0})",
+    "встроенных в HTML картинок (data:) больше 1 МБ на {a0} стр. — {a1}. Их браузер скачивает заново с каждой страницей; вынеси их в файлы":
+        "inline images (data:) heavier than 1 MB on {a0} page(s) — {a1}. The browser "
+        "downloads them again with every page; move them into files",
     "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; сожми их или отдай WebP/AVIF":
         "images heavier than 1 MB in the build: {a0} — {a1}. They slow the page down on a "
         "phone; compress them or serve WebP/AVIF",

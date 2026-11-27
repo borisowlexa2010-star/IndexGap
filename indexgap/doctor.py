@@ -963,7 +963,7 @@ def read_sources(specs: list, site: str = "") -> dict:
                 reasons = Counter(dropped.values()).most_common(3)
                 notes.append(tr(
                     "{a0}: {a1} адрес(ов) поисковик сам называет не проиндексированными "
-                    "({a2}) — в шаг «в индексе» они не засчитаны",
+                    "({a2}) — проиндексированными они не засчитаны",
                     a0=os.path.basename(path), a1=len(dropped),
                     a2="; ".join(f"{reason} — {n}" for reason, n in reasons)))
             if not urls:
@@ -1186,9 +1186,15 @@ def _has_impressions(header, path: str = "") -> bool:
 def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
            by_engine: dict = None, by_source: dict = None,
            cited: dict = None, impressions: list = None,
-           robots_blocked=None) -> dict:
+           robots_blocked=None, rejected: dict = None) -> dict:
     """
     Строит воронку и, главное, объясняет каждую потерю.
+
+    `rejected` — `{источник: {адрес: причина}}`: страницы, которые панель
+    вебмастера сама назвала не проиндексированными («Crawled - currently not
+    indexed»). Они потеряны на шаге индекса даже тогда, когда в выгрузке нет
+    ни одной проиндексированной строки. Про страницы, которых в такой
+    выгрузке нет, она не говорит ничего — их потерянными не считаем.
 
     `robots_blocked` — страницы, которые robots.txt не пускает обходить: к
     индексации они не открыты, как и закрытые noindex.
@@ -1241,12 +1247,29 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
             + [indexed_urls or ()]:
         for url in urls or ():
             exported.setdefault(url_key(url), url)
+    # Вердикт поисковика «не в индексе» — по каждому источнику, с причиной.
+    reasons, rejected_by = {}, {}
+    for name in sorted(rejected or {}):
+        keys = set()
+        for url, reason in sorted((rejected[name] or {}).items()):
+            for key in fold({url_key(url)}):
+                reasons.setdefault(key, str(reason or ""))
+                keys.add(key)
+        if keys:
+            rejected_by[name] = keys
+    # Выгрузка только из отказов: шаг индекса не исчезает, но знает лишь
+    # о названных страницах. Без этого прогон, где поисковик выкинул всё,
+    # выглядел зеленее прогона, где выкинул почти всё.
+    partial_index = False
     if engines_keys and indexed_urls is None:
         in_index = set().union(*engines_keys.values())
     elif indexed_urls is not None:
         in_index = fold(_keys(indexed_urls))
+    elif rejected_by:
+        in_index, partial_index = set(), True
     else:
         in_index = None
+    rejected_keys = set(reasons)
 
     missing_from_sitemap = show(publishable - in_sitemap) if in_sitemap is not None else []
     stale_in_sitemap = sorted(in_sitemap - generated) if in_sitemap is not None else []
@@ -1263,7 +1286,15 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
     closed_in_sitemap = show(in_sitemap & blocked) if in_sitemap is not None else []
 
     known = in_sitemap & publishable if in_sitemap is not None else publishable
-    not_indexed = show(known - in_index) if in_index is not None else []
+    if partial_index:
+        lost_keys = known & rejected_keys
+    else:
+        lost_keys = known - in_index if in_index is not None else set()
+    not_indexed = show(lost_keys)
+    # Причина — только для потерянных: страница, которую один поисковик
+    # отверг, а другой проиндексировал, в «не в индексе» не входит.
+    not_indexed_reasons = {display.get(k, k): reasons[k]
+                           for k in sorted(lost_keys & rejected_keys)}
     indexed_unknown = sorted(in_index - generated) if in_index is not None else []
 
     steps = [
@@ -1279,7 +1310,14 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
                       "count": len(in_sitemap & publishable),
                       "lost": len(publishable - in_sitemap),
                       "why": tr("страница есть на диске, но в sitemap не попала")})
-    if in_index is not None:
+    if partial_index:
+        steps.append({"id": "indexed", "name": tr("Не отклонено поисковиком"),
+                      "count": len(known - lost_keys), "lost": len(lost_keys),
+                      "why": tr("поисковик сам назвал страницу не проиндексированной"),
+                      # Счёт — верхняя граница: про страницы вне выгрузки
+                      # она не говорит, и с полным списком индекса не сравнивается.
+                      "partial": True})
+    elif in_index is not None:
         # Счёт и потери берутся от одного множества `known`, иначе воронка
         # росла: закрытая от индексации страница, ещё сидящая в индексе,
         # давала «в индексе 3» после «в sitemap 2».
@@ -1403,6 +1441,17 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
             "записан хост {a1}. Страницы на месте — в sitemap не тот адрес сайта "
             "(частая причина — он собран с адресом dev-сервера или превью).",
             a0=len(in_sitemap), a1=", ".join(hosts[:3])))
+    if partial_index:
+        unlisted = len(known - rejected_keys)
+        if generated and not (rejected_keys & generated):
+            foreign.append(tr(
+                "ни один из {a0} адресов выгрузки не совпал с адресами сайта. Скорее всего, это экспорт другого проекта или другой домен (проверь --site). Раздел индексации ниже смысла не имеет.", a0=len(rejected_keys)))
+        elif unlisted:
+            foreign.append(tr(
+                "в выгрузке ({a0}) только страницы, которые поисковик отказался "
+                "индексировать: они потеряны на шаге индекса. Про остальные {a1} "
+                "стр. выгрузка ничего не говорит, и потерянными они не считаются",
+                a0=", ".join(sorted(rejected_by)), a1=unlisted))
     if in_index is not None and generated and not (in_index & generated) and in_index:
         foreign.append(
             tr("ни один из {a0} адресов выгрузки не совпал с адресами сайта. Скорее всего, это экспорт другого проекта или другой домен (проверь --site). Раздел индексации ниже смысла не имеет.", a0=len(in_index)))
@@ -1416,7 +1465,8 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "panel_keys": {name: sorted(keys) for name, keys in panels.items()
                        if name not in shown},
         "impressions": sorted(shown),
-        "kinds": {name: sources.kind_of(name) for name in engines_keys},
+        "kinds": {name: sources.kind_of(name)
+                  for name in sorted(set(engines_keys) | set(rejected_by))},
         "proves": sources.describe(list(engines_keys)),
         "display": display,
         "blocked": show(blocked),
@@ -1425,6 +1475,9 @@ def funnel(pages: list, sitemap_urls: list = None, indexed_urls: list = None,
         "stale_in_sitemap": stale_in_sitemap,
         "stale_in_sitemap_urls": stale_listed,
         "not_indexed": not_indexed,
+        "not_indexed_reasons": not_indexed_reasons,
+        "rejected_by": {name: sorted(keys) for name, keys in rejected_by.items()},
+        "index_partial": partial_index,
         "indexed_unknown": indexed_unknown,
         "closed_in_sitemap": closed_in_sitemap,
         "exported": {k: exported[k] for k in indexed_unknown if k in exported},
@@ -1826,10 +1879,11 @@ def valid_run(data) -> bool:
         return False
     if not all(strs(f.get(k)) for k in ("not_indexed", "missing_from_sitemap", "blocked")):
         return False
-    for key in ("engine_keys", "kinds", "display"):
+    for key in ("engine_keys", "kinds", "display", "rejected_by"):
         if f.get(key) is not None and not isinstance(f[key], dict):
             return False
-    if not all(strs(v) for v in (f.get("engine_keys") or {}).values()):
+    if not all(strs(v) for key in ("engine_keys", "rejected_by")
+               for v in (f.get(key) or {}).values()):
         return False
     for key in ("segments", "ai_segments"):
         part = data.get(key)
@@ -1874,7 +1928,10 @@ def compare_runs(current: dict, previous: dict) -> dict:
     # Google) — не «страницы вернулись в индекс»: сравнивать шаг нечем.
     def sources_of(funnel):
         got = funnel.get("engine_keys")
-        return sorted(got) if isinstance(got, dict) and got else None
+        names = set(got) if isinstance(got, dict) else set()
+        # Выгрузка одних отказов — тот же источник индекса, что и его список.
+        names |= set(funnel.get("rejected_by") or ())
+        return sorted(names) if names else None
     src_now, src_was = sources_of(cur_f), sources_of(old_f)
     swapped = bool(src_now and src_was and src_now != src_was)
 
@@ -1885,6 +1942,10 @@ def compare_runs(current: dict, previous: dict) -> dict:
         if before is None:
             continue
         if swapped and step.get("id") in ("indexed", "with-impressions"):
+            continue
+        # «Не отклонено поисковиком» и «в индексе» считают разное: разница
+        # между ними — не движение страниц. Выпавшие видны списком ниже.
+        if bool(step.get("partial")) != bool(before.get("partial")):
             continue
         delta = (step.get("count") or 0) - (before.get("count") or 0)
         if delta:

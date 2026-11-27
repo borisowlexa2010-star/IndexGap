@@ -333,6 +333,11 @@ def _unpack_paragraphs(packed) -> list:
     return out
 
 
+# Хэш содержимого с версией: без префикса — версия 1 из манифестов до 1.30.
+HASH_PREFIX = "v2:"
+_INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
+
+
 @dataclass
 class Page:
     path: str                      # путь к файлу на диске
@@ -420,13 +425,31 @@ class Page:
         и подвалу: иначе правка одного пункта навигации помечает изменившимся
         весь сайт и отправляет его в IndexNow целиком.
         """
+        # Хэш держится на своём, простом разборе, а не на разборе для
+        # сравнения страниц: тот уточняется от версии к версии, и вместе
+        # с ним сдвигались бы `lastmod` и очередь IndexNow у всего сайта.
+        # Версия 2 считает и знаки: $900 → €900, -5 → +5 и 1,500 → 1.500 —
+        # другой факт, а версия 1 видела только слова. Невидимые символы
+        # (мягкий перенос, нулевой ширины) по-прежнему не в счёт.
+        text = _INVISIBLE.sub("", (self.text or "").lower())
         payload = "\x00".join([
             (self.title or "").strip(),
             (self.description or "").strip(),
-            # Хэш держится на прежнем, простом разборе слов. Разбор для
-            # сравнения страниц стал точнее, но менять вместе с ним хэш нельзя:
-            # обновление пакета сдвинуло бы `lastmod` у каждой страницы на
-            # хинди и китайском и отправило бы их в IndexNow заново.
+            " ".join(re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)),
+        ])
+        return HASH_PREFIX + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+    @property
+    def legacy_content_hash(self) -> str:
+        """
+        Хэш версии 1 (только слова) — для манифестов, записанных до версии 2.
+
+        Нужен только для сверки: совпал старый хэш — содержимое то же,
+        и запись тихо переходит на новый, не трогая `lastmod` и отправку.
+        """
+        payload = "\x00".join([
+            (self.title or "").strip(),
+            (self.description or "").strip(),
             " ".join(re.findall(r"\w+", (self.text or "").lower(), flags=re.UNICODE)),
         ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
@@ -494,16 +517,50 @@ def url_key(url: str) -> str:
     path = _EXT_RE.sub("", path)
     # `/resource/index` без расширения — та же страница: VitePress с
     # cleanUrls ссылается так на каждой странице, и вышло 307 «битых» ссылок.
+    slashed = path.endswith("/")
     if len(path) > 1:
         path = path.rstrip("/")
         # Каталог с именем файла — `c.html/index.html`: сервер отдаёт его и по
         # /c.html, а ключ страницы расходился с ключом ссылки.
         path = _EXT_RE.sub("", path)
+    unfolded = path
     path = _BARE_INDEX.sub(r"\1", path)
     if len(path) > 1:
         path = path.rstrip("/")
     if not path:
         path = "/"
+    host = _key_host(parts)
+    query = parts.query
+    if _INDEX_DIRS and path != unfolded:
+        # В сборке есть настоящий каталог `index/` со своей страницей.
+        # `/glossary/index/` со слешем — она; без слеша — по-старому, если
+        # у родителя своя страница есть.
+        parent = _INDEX_DIRS.get(urlunsplit(("", host, unfolded, "", "")))
+        if parent is not None and (slashed or not parent):
+            path = unfolded
+    return urlunsplit(("", host, path, query, ""))
+
+
+# Ключи `//host/a/index` настоящих каталогов `index/` со страницей внутри —
+# и есть ли страница у родителя `/a/`. Заполняет `load_pages`; только растёт:
+# ключи уже загруженных страниц (вторая сборка в diff) не должны сдвигаться.
+_INDEX_DIRS = {}
+
+
+def _register_index_dirs(found: dict) -> None:
+    changed = False
+    for key, parent in found.items():
+        # Хоть в одной сборке у родителя нет страницы — ссылке без слеша
+        # не мешаем дойти до каталога.
+        value = _INDEX_DIRS.get(key, True) and parent
+        if _INDEX_DIRS.get(key) is not value:
+            _INDEX_DIRS[key] = value
+            changed = True
+    if changed:
+        url_key.cache_clear()
+
+
+def _key_host(parts) -> str:
     host = (parts.netloc or "").lower()
     # Кириллический домен и его punycode — один хост: ссылка на
     # `xn--e1afmkfd.xn--p1ai` с сайта `пример.рф` считалась внешней.
@@ -520,8 +577,7 @@ def url_key(url: str) -> str:
             host = host[: -len(port)]
     if host.startswith("www."):
         host = host[4:]
-    query = parts.query
-    return urlunsplit(("", host, path, query, ""))
+    return host
 
 
 @functools.lru_cache(maxsize=1 << 18)
@@ -870,6 +926,12 @@ class _Extractor(HTMLParser):
         self.alternates_in_body = 0
         self._in_body = False
         self.alts = []
+        # Адреса картинок как написаны: src и srcset у <img> и <source>,
+        # poster у <video>, иконки <link rel=icon>. По ним ищутся пропавшие файлы.
+        self.images = []
+        # Размеры встроенных data:-картинок в байтах после декодирования: их
+        # браузер получает вместе с HTML, на диске их не видно.
+        self.inline_images = []
         self.microdata = []        # (поле, значение) цен микроданных и RDFa
         self._scope_stack = []     # глубины открытых itemscope / typeof / vocab
         # RDFa: открытые `vocab` и `prefix` — (глубина, словарь schema.org ли;
@@ -1160,6 +1222,35 @@ class _Extractor(HTMLParser):
             if name not in INLINE_TAGS and name not in ("a", "span"):
                 return
 
+    def _collect_images(self, tag: str, a: dict):
+        refs = []
+        if tag == "img":
+            refs.append(a.get("src", ""))
+            refs += _srcset_urls(a.get("srcset", ""))
+        elif tag == "source":
+            refs += _srcset_urls(a.get("srcset", ""))
+        elif tag == "video":
+            refs.append(a.get("poster", ""))
+        elif tag == "link" and any(r == "icon" or r.endswith("-icon")
+                                   for r in a.get("rel", "").lower().split()):
+            refs.append(a.get("href", ""))
+        style = a.get("style", "")
+        if "data:" in style:
+            for m in _STYLE_DATA_URL.finditer(style):
+                size = data_uri_bytes(m.group(1))
+                if size:
+                    self.inline_images.append(size)
+        for ref in refs:
+            ref = (ref or "").strip()
+            if not ref:
+                continue
+            if ref[:5].lower() == "data:":
+                size = data_uri_bytes(ref)
+                if size:
+                    self.inline_images.append(size)
+                continue
+            self.images.append(ref)
+
     # -- разбор ---------------------------------------------------------------
 
     def handle_starttag(self, tag, attrs):
@@ -1202,6 +1293,7 @@ class _Extractor(HTMLParser):
             return
         if tag == "body" or tag not in HEAD_TAGS:
             self._in_body = True
+        self._collect_images(tag, a)
 
         if tag not in INLINE_TAGS:
             self._glue = False
@@ -1651,6 +1743,51 @@ _IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
 # панель; `S:0`, `P:0` — потоковый рендер React: скрипт переносит блок на
 # место сразу после загрузки.
 _STYLE_HIDDEN = re.compile(r"(?<![\w-])(?:display\s*:\s*none|visibility\s*:\s*hidden)(?![\w-])", re.I)
+_STYLE_DATA_URL = re.compile(r"url\(\s*['\"]?(data:[^'\")\s]*)", re.I)
+
+
+def data_uri_bytes(uri: str) -> int:
+    """
+    Размер картинки из data:-адреса после декодирования; 0 — не картинка.
+    Base64 раздувает данные на треть: считается то, что браузер получит.
+    """
+    head, comma, body = uri[5:].partition(",")
+    if not comma or not head.strip().lower().startswith("image/"):
+        return 0
+    if ";base64" in head.lower():
+        body = re.sub(r"\s+|%0[aAdD]|%20", "", body)
+        return max(0, len(body) * 3 // 4 - min(2, len(body) - len(body.rstrip("="))))
+    return len(unquote(body).encode("utf-8", "surrogatepass"))
+
+
+def _srcset_urls(value: str) -> list:
+    """
+    Адреса из srcset по правилам HTML: адрес — всё до пробела, запятая в
+    нём не делит кандидатов (`data:image/png;base64,…`, `w_100,h_100`).
+    """
+    out, pos, n = [], 0, len(value or "")
+    while pos < n:
+        lead = _SRCSET_LEAD.match(value, pos)
+        pos = lead.end()
+        token = _SRCSET_URL.match(value, pos)
+        if not token:
+            break
+        url, pos = token.group(), token.end()
+        if url.endswith(","):
+            out.append(url.rstrip(","))
+            continue
+        out.append(url)
+        # Дескрипторы (`800w`, `2x`) — до запятой вне скобок.
+        tail = _SRCSET_DESCRIPTORS.match(value, pos)
+        pos = tail.end() if tail else n
+    return [u for u in out if u]
+
+
+_SRCSET_LEAD = re.compile(r"[\s,]*")
+_SRCSET_URL = re.compile(r"\S+")
+_SRCSET_DESCRIPTORS = re.compile(r"(?:[^,(]|\([^)]*\))*")
+
+
 _STYLE_NONE = re.compile(r"(?<![\w-])display\s*:\s*none(?![\w-])", re.I)
 _STYLE_VISIBLE = re.compile(r"(?<![\w-])visibility\s*:\s*visible(?![\w-])", re.I)
 _STREAMED_ID = re.compile(r"^[SP]:\d+$")
@@ -2344,6 +2481,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         md_anchors = [text.strip() for text, _ in matches]
         md_headings = [(len(h), _clean(t)) for h, t in MD_HEADING.findall(_strip_fences(body))]
         base_href = ""
+        images, inline = [], []
         text = _strip_markdown(body)
         # Без шапки заголовком страницы становится первый заголовок текста —
         # так делает GitHub Pages. При шапке без title это не действует:
@@ -2393,6 +2531,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         hrefs = ex.hrefs
         nofollow_hrefs = ex.nofollow_hrefs
         base_href = ex.base
+        images, inline = ex.images, ex.inline_images
         page = Page(
             path=path, url=url,
             title=_clean(ex.title),
@@ -2558,6 +2697,16 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             unfollowed.append(absolute)
     if unfollowed:
         page.__dict__["_nofollow_links"] = unfollowed
+    if inline:
+        page.__dict__["_inline_images"] = (sum(inline), max(inline), len(inline))
+    refs = []
+    for ref in dict.fromkeys(images):
+        target = _image_target(ref, base_for_links, host)
+        if target:
+            refs.append(target)
+    refs = list(dict.fromkeys(refs))
+    if refs:
+        page.__dict__["_image_refs"] = refs
     if foreign:
         page.__dict__["_foreign_links"] = foreign
 
@@ -3051,7 +3200,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
                 voted.add(key)
                 votes[key][form] += 1
     redirects, host_rewrites = host_redirect_rules(root)
-    kinds, flat, files = {}, [], {}
+    kinds, flat, files, folders = {}, [], {}, {}
     for page in pages:
         name = os.path.basename(page.path or "").lower()
         kind = None
@@ -3064,6 +3213,8 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         kinds[key] = kind if kinds.get(key, kind) == kind else None
         # Имя в NFC, как и адрес страницы: macOS пишет его в NFD.
         files[key] = unicodedata.normalize("NFC", os.path.basename(page.path or ""))
+        folders[key] = unicodedata.normalize(
+            "NFC", os.path.basename(os.path.dirname(page.path or "")))
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
     # Сборку `.next/server` отдаёт сервер Next.js по маршрутам: `/pricing`,
@@ -3093,9 +3244,15 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     if host_rewrites:
         return
     base = urlsplit(base_url).path.rstrip("/")
+    any_form, bare_ok = _host_serves_any_form(root)
+    if not any_form:
+        # Улики хостинга — для hreflang и diff: какую форму адреса он отдаёт.
+        host = (redirects, bare_ok, base)
+        for page in pages:
+            page.__dict__["_host_forms"] = host
     always = {("folder", "file"), ("flat", "slash"), ("flat", "index")}
     for page, forms in written:
-        wrong = []
+        wrong, fine = [], set()
         html = (page.path or "").lower().endswith((".html", ".htm"))
         for key, form, path in forms:
             # `/faq/?x=1` — та же форма адреса, что и `/faq/`.
@@ -3108,13 +3265,25 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             exact = (html and form in ("file", "index")
                      and (kind, form) in (("folder", "index"), ("flat", "file"))
                      and unicodedata.normalize("NFC", path.rsplit("/", 1)[-1]) != files.get(key))
-            if (kind, form) not in always and not exact:
+            # `/c.html` при каталоге `c.html/`: хостинг перенаправит на `/c.html/`.
+            folder_bare = (kind == "folder" and form == "file" and unicodedata.normalize(
+                "NFC", path.rstrip("/").rsplit("/", 1)[-1]) == folders.get(key))
+            if ((kind, form) not in always and not exact) or folder_bare:
+                fine.add(key)
                 continue
             local = path[len(base):] if base and path.startswith(base + "/") else path
             if not any(regex.match(local) for regex in redirects):
                 wrong.append((key, path))
+            else:
+                fine.add(key)
         if wrong:
             page.__dict__["_wrong_forms"] = wrong
+            # Страницы, на которые эта ведёт только формами, отдающими 404: для
+            # достижимости это битые ссылки. Ссылки из Markdown и раскладки,
+            # где хостинг сводит формы сам, — не в счёт.
+            only = {key for key, _ in wrong} - fine
+            if only and html and not any_form:
+                page.__dict__["_wrong_only"] = only
 
 
 def _read_jekyll_config(root: str) -> str:
@@ -3291,34 +3460,68 @@ def _mark_canonical_forms(pages: list, root: str, base_url: str,
         if local in ("", "/") or local == base:
             continue
         name = os.path.basename(page.path).lower()
-        last = local.rstrip("/").rsplit("/", 1)[-1].lower()
-        if name.startswith("index."):
-            # `a/index.html`: отдаётся по /a/ и /a/index.html — но не по
-            # /a/index.htm и не по /a/index.md.
-            if local.endswith("/") or last == name:
-                continue
-            if last.startswith("index.") and not _EXT_RE.search(last):
-                continue
-            form = "file" if _EXT_RE.search(last) else "bare"
-            if form == "bare" and bare_ok:
-                continue
-        else:
-            # `about.html`: отдаётся по /about.html и /about.
-            if local.endswith("/"):
-                form = "slash"
-            elif last.startswith("index.") and _EXT_RE.search(last):
-                form = "index"
-            elif _EXT_RE.search(last) and last != name:
-                form = "file"             # /about.htm при about.html
-            else:
-                continue
-        if any(regex.match(local) for regex in redirects):
+        form = _unserved_form(name, local, bare_ok)
+        if not form or any(regex.match(local) for regex in redirects):
             continue
-        # Форма, которую раскладка отдаёт: /a/ для папки, /about.html для файла.
-        served = urlsplit(_file_url(page.path, root, base_url)).path
-        if name.startswith("index."):
-            served = served.rsplit("/", 1)[0] + "/"
-        page.__dict__["_canonical_form"] = (form, served)
+        page.__dict__["_canonical_form"] = (form, served_path(page, root, base_url))
+
+
+def _unserved_form(name: str, local: str, bare_ok: bool) -> str:
+    """
+    Форма адреса `local`, которой файл `name` (имя в нижнем регистре) на
+    статическом хостинге не отдаётся: `bare` — редирект, остальное — 404.
+    Пусто — отдаётся. Правила хостинга здесь не учитываются.
+    """
+    last = local.rstrip("/").rsplit("/", 1)[-1].lower()
+    if name.startswith("index."):
+        # `a/index.html`: отдаётся по /a/ и /a/index.html — но не по
+        # /a/index.htm и не по /a/index.md.
+        if local.endswith("/") or last == name:
+            return ""
+        if last.startswith("index.") and not _EXT_RE.search(last):
+            return ""
+        form = "file" if _EXT_RE.search(last) else "bare"
+        return "" if form == "bare" and bare_ok else form
+    # `about.html`: отдаётся по /about.html и /about.
+    if local.endswith("/"):
+        return "slash"
+    if last.startswith("index.") and _EXT_RE.search(last):
+        return "index"
+    if _EXT_RE.search(last) and last != name:
+        return "file"                     # /about.htm при about.html
+    return ""
+
+
+def served_path(page, root: str, base_url: str) -> str:
+    """Форма, которую раскладка отдаёт: /a/ для папки, /about.html для файла."""
+    served = urlsplit(_file_url(page.path, root, base_url)).path
+    if os.path.basename(page.path).lower().startswith("index."):
+        served = served.rsplit("/", 1)[0] + "/"
+    return served
+
+
+def unserved_form(page, path: str) -> str:
+    """
+    Форма адреса `path` (путь сайта), которой хостинг страницу `page` не
+    отдаёт: `bare` — редирект на её адрес, `slash`, `index`, `file` — 404.
+    Пусто — отдаёт или узнать нельзя.
+
+    Судит по тем же уликам, что `canonical-form` и `wrong-link-form`: по
+    раскладке файлов, правилам перенаправления хостинга, `cleanUrls` и
+    `trailingSlash` (`_host_forms` страницы ставит разбор). Без улик — пусто.
+    """
+    host = page.__dict__.get("_host_forms")
+    if not host or not (page.path or "").lower().endswith((".html", ".htm")):
+        return ""
+    redirects, bare_ok, base = host
+    path = path or "/"
+    local = path[len(base):] if base and path.startswith(base + "/") else path
+    if local in ("", "/") or local == base:
+        return ""
+    form = _unserved_form(os.path.basename(page.path).lower(), local, bare_ok)
+    if not form or any(regex.match(local) for regex in redirects):
+        return ""
+    return form
 
 
 FETCH_MANIFEST = "fetch.json"
@@ -3363,6 +3566,182 @@ def _apply_fetch_manifest(pages: list, root: str, base_url: str) -> None:
 _INDEX_NAME = re.compile(r"index\.(?:html?|md|markdown)$", re.I)
 
 
+def _index_dir_key(url: str) -> str:
+    """Ключ страницы каталога `index/` без свёртки `/a/index` в `/a`."""
+    parts = urlsplit(url)
+    path = re.sub(r"/{2,}", "/", unicodedata.normalize("NFC", unquote(parts.path or "/")))
+    return urlunsplit(("", _key_host(parts), path.rstrip("/") or "/", "", ""))
+
+
+def _has_own_page(folder: str, root: str, exts) -> bool:
+    """У каталога своя страница: `a/index.html`, `a/_index.md` или `a.html`."""
+    for ext in exts:
+        if (os.path.isfile(os.path.join(folder, "index" + ext))
+                or os.path.isfile(os.path.join(folder, "_index" + ext))
+                or (os.path.abspath(folder) != os.path.abspath(root)
+                    and os.path.isfile(folder.rstrip(os.sep) + ext))):
+            return True
+    return False
+
+
+# Расширения файлов картинок и иконок. Адрес без такого расширения — чаще
+# всего обработчик (`/api/og?title=…`, `/avatar/42`), а не файл сборки.
+_IMAGE_FILE = re.compile(r"\.(?:jpe?g|png|gif|webp|avif|bmp|tiff?|svg|ico|jxl|heic)$", re.I)
+_TEMPLATE_MARK = re.compile(r"\{\{|\}\}|\{%|%\}|\$\{|%7B%7B|%7B%25", re.I)
+# Оптимизаторы картинок с исходником в параметре: Next.js, Vercel, Netlify, Astro.
+_OPTIMIZER_QUERY = ("/_next/image", "/_vercel/image", "/.netlify/images", "/_image")
+# Оптимизаторы с исходником в пути: `/_ipx/w_640/img/a.jpg` (Nuxt),
+# `/cdn-cgi/image/width=640/img/a.jpg` (Cloudflare).
+_OPTIMIZER_PATH = re.compile(r"(?:^|/)(?:_ipx|cdn-cgi/image)/[^/]*(/.*)$")
+
+
+def _image_target(ref: str, base: str, host: str):
+    """То же, что `_resolve_image`, с кешем: шапка и подвал у всех страниц одни."""
+    if ref.startswith("/") and not ref.startswith("//"):
+        # От корня: от страницы зависят только схема и хост.
+        cut = base.find("/", base.find("//") + 2)
+        base = base if cut < 0 else base[:cut + 1]
+    elif "://" in ref[:12]:
+        base = ""
+    return _resolve_image(ref, base, host)
+
+
+@functools.lru_cache(maxsize=65536)
+def _resolve_image(ref: str, base: str, host: str, depth: int = 0):
+    """
+    Абсолютный адрес картинки своего сайта, которую стоит искать в сборке, —
+    или None: чужой хост, blob:, шаблон, обработчик без расширения файла.
+    У оптимизатора (`/_next/image?url=/img/a.jpg`) ищется его исходник.
+    """
+    if not ref or _TEMPLATE_MARK.search(ref) or ref.lower().startswith(("data:", "blob:", "#")):
+        return None
+    try:
+        absolute = urldefrag(urljoin(base, ref))[0]
+        parts = urlsplit(absolute)
+        if parts.scheme not in ("http", "https") or urlsplit(url_key(absolute)).netloc != host:
+            return None
+    except ValueError:
+        return None
+    path = parts.path
+    if depth < 2:
+        if path.rstrip("/").endswith(_OPTIMIZER_QUERY):
+            from urllib.parse import parse_qs
+            query = parse_qs(parts.query)
+            source = (query.get("url") or query.get("href") or query.get("src") or [""])[0]
+            return _resolve_image(source, absolute, host, depth + 1) if source else None
+        inner = _OPTIMIZER_PATH.search(path)
+        if inner:
+            source = inner.group(1)
+            # `/_ipx/_/https://cdn.example/a.jpg` — исходник на другом хосте.
+            if re.match(r"/+https?:/", source):
+                return None
+            return _resolve_image(source, absolute, host, depth + 1)
+    if not _IMAGE_FILE.search(path):
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _without_static_assets(root: str, pages: list) -> bool:
+    """
+    Сборка, в которой картинок сайта нет и не должно быть: `.next/server/app`
+    (картинки из public/ и .next/static/ лежат вне её), каталог `indexgap
+    fetch` (скачан только HTML) и исходники генератора (картинки в static/,
+    public/, assets/ и выходят по другим путям).
+    """
+    real = os.path.abspath(root).replace(os.sep, "/").rstrip("/")
+    up = os.path.dirname(os.path.dirname(os.path.abspath(root)))
+    if (re.search(r"/\.next/server(?:/(?:app|pages))?$", real)
+            or os.path.isfile(os.path.join(up, "routes-manifest.json"))
+            or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
+            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS
+                   if m not in _REPO_ONLY_MARKERS)):
+        return True
+    # Скопированный куда-то `.next/server/app`: рядом со страницей её
+    # RSC-данные и метаданные маршрута.
+    for page in pages[:50]:
+        stem = os.path.splitext(page.path or "")[0]
+        if stem and any(os.path.isfile(stem + ext) for ext in (".rsc", ".meta")):
+            return True
+    return False
+
+
+def _twin_links(page) -> tuple:
+    """Исходящие пропущенного двойника: ссылки, nofollow-ссылки, редирект, nofollow страницы."""
+    from .checks import redirect_target
+    return (list(page.links), list(page.__dict__.get("_nofollow_links", ())),
+            redirect_target(page), page.nofollow)
+
+
+def _has_image_files(root: str, limit: int = 200_000) -> bool:
+    """Есть ли в сборке хоть один файл картинки; обход до первого."""
+    seen = 0
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP and not d.startswith(".")]
+        if any(_IMAGE_FILE.search(name) for name in files):
+            return True
+        seen += len(files)
+        if seen > limit:
+            return True            # не досчитали — считаем, что картинки есть
+    return False
+
+
+def _mark_missing_images(pages: list, root: str, base_url: str, problems: list):
+    """
+    Картинки, на которые ссылаются страницы, а файла в сборке нет: на живом
+    сайте это 404 и пустое место. Адрес вне пути `--site` не проверяется:
+    его отдаёт кто-то другой.
+    """
+    if not any(p.__dict__.get("_image_refs") for p in pages):
+        return
+    if _without_static_assets(root, pages):
+        for page in pages:
+            page.__dict__.pop("_image_refs", None)
+        return
+    rules = host_redirect_rules(root)[0]
+    prefix = urlsplit(base_url).path.rstrip("/") + "/"
+    known = {}
+
+    def exists(path: str) -> bool:
+        if path not in known:
+            rel = unquote(path[len(prefix):])
+            full = os.path.join(root, *[x for x in rel.split("/") if x])
+            try:
+                # Имя на диске в NFD (macOS), в ссылке — в NFC, и наоборот.
+                known[path] = any(os.path.isfile(v) for v in {
+                    full, unicodedata.normalize("NFC", full), unicodedata.normalize("NFD", full)})
+            except (ValueError, OSError):
+                known[path] = True
+        return known[path]
+
+    found = {}
+    for page in pages:
+        missing = []
+        for absolute in page.__dict__.pop("_image_refs", ()):
+            path = urlsplit(absolute).path
+            if not path.startswith(prefix) or any(r.match(path) for r in rules):
+                continue
+            if not exists(path):
+                missing.append(path)
+        if missing:
+            found[page.url] = missing
+    if not found:
+        return
+    # Ни одна картинка не нашлась, и файлов картинок в сборке нет вовсе: это
+    # не сотня пропавших файлов, а каталог без картинок — HTML скопирован
+    # отдельно, картинки отдаёт другое приложение. Говорится один раз.
+    if not any(known.values()) and not _has_image_files(root):
+        paths = sorted({unquote(p) for m in found.values() for p in m})
+        problems.append(tr(
+            "в сборке нет ни одного файла картинки, а страницы ссылаются на {a0}: {a1}. "
+            "Если картинки отдаёт другое приложение — всё в порядке; если они должны "
+            "лежать в сборке — они в неё не попали",
+            a0=len(paths), a1=", ".join(paths[:3]) + (" …" if len(paths) > 3 else "")))
+        return
+    for page in pages:
+        if page.url in found:
+            page.__dict__["_missing_images"] = found[page.url]
+
+
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
     """
     Возвращает (страницы, проблемы). Проблемы — это файлы, которые не прочитались,
@@ -3370,7 +3749,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
-    todo, maybe_error, hidden_dirs = [], set(), []
+    todo, maybe_error, hidden_dirs, index_dirs = [], set(), [], {}
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
@@ -3455,6 +3834,13 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             readme_home = ((jekyll or not source_repo) and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
+            if (dirpath != root and os.path.basename(dirpath).lower() == "index"
+                    and (_INDEX_NAME.match(name) or _HUGO_INDEX.match(name))):
+                index_dirs[_index_dir_key(path_to_url(path, root, base_url))] = \
+                    _has_own_page(os.path.dirname(dirpath), root, exts)
+    # До разбора: ссылки `/a/index/` в разобранных страницах должны вести
+    # на страницу каталога `index/`, а не на `/a/`.
+    _register_index_dirs(index_dirs)
     if hidden_dirs:
         problems.append(tr(
             "каталоги со служебными именами пропущены, страницы в них не проверялись: {a0}",
@@ -3510,6 +3896,9 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             a1=", ".join(os.path.relpath(p, root).replace(os.sep, "/") for p in fragments[:5])))
     position = {}
 
+    def twin_of(page):
+        return page.__dict__.setdefault("_twins", [])
+
     def served(a, b):
         """Тот из двух файлов, который отдаёт хост, — или None, если не ясно."""
         da, na = os.path.split(a.path)
@@ -3549,6 +3938,16 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                           (len(page.links), len(page.text)) >
                           (len(other.links), len(other.text)))
                       else (other, page))
+        # `about.html` и `about/index.html` хост отдаёт по разным адресам, и
+        # если сайт ссылается на оба (или форму не узнать), ссылки второго
+        # краулер тоже видит. Без них страница, на которую ссылается только
+        # он, становилась ложной сиротой. В граф они идут от ключа оставленной.
+        # Старый `index.htm` рядом с `index.html` по ссылкам не открывается.
+        if host is None and ((_INDEX_NAME.match(os.path.basename(page.path)) is None)
+                             != (_INDEX_NAME.match(os.path.basename(other.path)) is None)):
+            twin_of(keep).append(_twin_links(drop))
+        if drop.__dict__.get("_twins"):
+            twin_of(keep).extend(drop.__dict__.pop("_twins"))
         problems.append(
             tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
         if keep is page:
@@ -3573,6 +3972,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                            "хостинге без учёта регистра один файл затрёт другой",
                            a0=", ".join(group)))
     _settle_canonical_origins(pages, base_url, problems)
+    _mark_missing_images(pages, root, base_url, problems)
     pages.sort(key=lambda p: p.url)
     return pages, problems
 
@@ -3688,9 +4088,10 @@ def _parse_chunk(jobs):
     return [_parse_one(job) for job in jobs]
 
 
-def _init_worker(lang):
+def _init_worker(lang, index_dirs=None):
     from . import i18n
     i18n.set_lang(lang)
+    _register_index_dirs(index_dirs or {})
 
 
 PARALLEL_FROM = 2000
@@ -3712,7 +4113,7 @@ def _parse_all(todo: list, jobs: int = 1) -> list:
     chunks = [todo[i:i + size] for i in range(0, len(todo), size)]
     try:
         with ProcessPoolExecutor(jobs, initializer=_init_worker,
-                                 initargs=(i18n.get_lang(),)) as pool:
+                                 initargs=(i18n.get_lang(), dict(_INDEX_DIRS))) as pool:
             return [item for part in pool.map(_parse_chunk, chunks) for item in part]
     except (OSError, ImportError, NotImplementedError, RuntimeError):
         # Нет процессов (песочница, Lambda) — разбираем по-старому.

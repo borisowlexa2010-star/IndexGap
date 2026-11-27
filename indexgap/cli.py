@@ -222,6 +222,10 @@ def _serialize_issues(issues):
         if subject_of(m) is not None:
             # Полный предмет: в тексте он укорочен до трёх адресов.
             item["subject"] = list(subject_of(m))
+            # У находки большой группы дублей предмет укорочен и в JSON:
+            # рядом — сколько адресов в нём на самом деле.
+            if getattr(m, "total", 0) > len(item["subject"]):
+                item["subject_total"] = m.total
         out.append(item)
     return out
 
@@ -251,13 +255,16 @@ def resolve_keyword_field(args, fields: list, path: str) -> str:
         tr("Колонки с ключевым словом в {a0} не нашлось.\n    Есть: {a1}\n    Укажи нужную: --keyword <имя колонки>", a0=path, a1=', '.join(fields)))
 
 
-def _collect_indexed(args) -> tuple:
+def _collect_indexed(args, rejected: dict = None) -> tuple:
     """
     Собирает выгрузки из --indexed (можно несколько) и --gsc.
 
     Возвращает две части: панели вебмастера и всё остальное — Ahrefs, Semrush,
     краулеры, аналитику. Смешивать их в одну кучу нельзя: у них разный смысл,
     и отчёт обязан называть вещи своими именами.
+
+    В `rejected` (если передан) складываются страницы, которые панель сама
+    назвала не проиндексированными, — `{источник: {адрес: причина}}`.
     """
     specs = list(getattr(args, "indexed", None) or [])
     if getattr(args, "gsc", None):
@@ -266,6 +273,8 @@ def _collect_indexed(args) -> tuple:
         return {}, {}, {}, []
     result = doctor.read_sources(specs, site=getattr(args, "site", "") or "")
     by_engine, by_source = result["by_engine"], result["by_source"]
+    if rejected is not None:
+        rejected.update(result.get("excluded") or {})
     cited = result.get("cited") or {}
     impressions = result.get("impressions") or []
     for note in result["notes"]:
@@ -442,7 +451,7 @@ def load_baseline(path: str) -> list:
 # Находки, у которых на одной странице бывает разный предмет: какой бот
 # закрыт, куда ведёт битая ссылка, с какой страницей дубль. Без предмета
 # «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
-_SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-missing-links", "unfilled-slot",
+_SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "broken-image", "wrong-link-form", "hub-missing-links", "unfilled-slot",
                   "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
                   "duplicate-description", "translations-parked", "heavy-images"}
 # Предмет этих находок есть только в поле `subject`: из текста его не вынуть,
@@ -579,10 +588,26 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
                  for level, url, code, message in issues]
     had, has = subjects(old_items), subjects(new_items)
 
+    # Укороченный предмет (большая группа дублей: записаны первые адреса
+    # группы) — окно, а не список: убрали первую страницу группы, и окно
+    # сдвинулось у всех. Такая находка новая, только если окна не
+    # пересекаются вовсе.
+    partial = set()
+    for i in old:
+        total, given = i.get("subject_total"), i.get("subject")
+        if (isinstance(total, int) and not isinstance(total, bool)
+                and isinstance(given, list) and total > len(given)):
+            partial.add(key(i.get("level"), i.get("url"), i.get("code")))
+    for level, url, code, message in issues:
+        if getattr(message, "total", 0) > len(subject_of(message) or ()):
+            partial.add(key(level, url, code))
+
     def changed(item, other):
         level, url, code, message, given = item
         k = key(level, url, code)
         mine = set(subject(code, message, given))
+        if k in partial:
+            return k in other and bool(other[k]) and bool(mine) and not (mine & other[k])
         # Пустой предмет на той стороне — неизвестный, а не «никакой»: у дубля
         # из группы, сравненной с образцом, близнец — артефакт выборки.
         return k in other and bool(other[k]) and bool(mine - other[k])
@@ -893,6 +918,36 @@ def _drop_accepted_lists(analysis: dict, notes: list, accepted: list) -> None:
         notes.remove(note)
 
 
+def _duplicates_json(analysis: dict) -> dict:
+    """
+    Пары похожих страниц для JSON. Большая группа почти-дублей пишется
+    составом: двести клонов давали 19 900 строк пар и десятки мегабайт, а
+    читать в них нечего — все страницы группы совпадают друг с другом.
+    В `duplicates` остаются пары вне таких групп и пары между группой и
+    остальными страницами; `duplicate_pairs` — сколько пар найдено всего.
+    """
+    pairs = analysis.get("duplicates") or []
+    groups = checks.duplicate_groups(pairs, analysis.get("config"))
+    member_of = {u: n for n, g in enumerate(groups) for u in g}
+    inside = defaultdict(list)
+    listed = []
+    for a, b, j in pairs:
+        n = member_of.get(a.url)
+        if n is not None and n == member_of.get(b.url):
+            inside[n].append(j)
+            continue
+        listed.append({"a": a.url, "b": b.url, "jaccard": j})
+    return {
+        "duplicates": listed,
+        "duplicate_pairs": len(pairs),
+        "duplicate_groups": [
+            {"id": g[0], "size": len(g), "members": g,
+             "jaccard_min": min(inside[n]) if inside[n] else None,
+             "jaccard_max": max(inside[n]) if inside[n] else None}
+            for n, g in enumerate(groups)],
+    }
+
+
 def _given_files_exist(args) -> None:
     """
     Путь, названный явно, обязан существовать. Опечатка в `--sitemap` или
@@ -924,7 +979,8 @@ def cmd_check(args):
 
     funnel_result = causes = cross = segments = None
     sitemap_urls = None
-    by_engine, by_source, cited, impressions = _collect_indexed(args)
+    rejected = {}
+    by_engine, by_source, cited, impressions = _collect_indexed(args, rejected)
     if args.sitemap:
         sm = _sitemaps(args)
         if not sm["urls"] and sm["errors"]:
@@ -943,11 +999,12 @@ def cmd_check(args):
         else:
             print(tr("    Сверка с sitemap пропущена — это не значит, что страниц в нём нет."))
         _warn_undeclared(args.robots or _guess_robots(args), args.sitemap, args.root, args.site)
-    if sitemap_urls is not None or by_engine or by_source or cited:
+    if sitemap_urls is not None or by_engine or by_source or cited or rejected:
         funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                       by_engine=by_engine, by_source=by_source,
                                       cited=cited, impressions=impressions,
-                                      robots_blocked=analysis.get("robots_blocked"))
+                                      robots_blocked=analysis.get("robots_blocked"),
+                                      rejected=rejected)
         causes = doctor.explain(funnel_result, analysis)
         cross = doctor.cross_engine(funnel_result, pages)
         segments = doctor.segments(funnel_result, pages)
@@ -1013,8 +1070,7 @@ def cmd_check(args):
         "coverage": coverage,
         "orphans": analysis["graph"]["orphans"],
         "unreachable": analysis["graph"]["unreachable"],
-        "duplicates": [{"a": a.url, "b": b.url, "jaccard": j}
-                       for a, b, j in analysis["duplicates"]],
+        **_duplicates_json(analysis),
         "duplicate_method": analysis.get("duplicate_method"),
         "duplicate_method_label": analysis.get("duplicate_method_label"),
         "duplicates_sampled": bool(analysis.get("duplicates_sampled")),
@@ -1415,6 +1471,12 @@ def cmd_notify(args):
     _warn_open_criticals(urls)
     if not urls:
         print(tr("Отправлять нечего."))
+        if args.send:
+            # Записи пакета до 1.30 переходят на новый хэш здесь же: иначе
+            # сайт без команды sitemap сверялся бы по старому правилу вечно.
+            upgraded, count = publish.upgrade_hashes(manifest, pages)
+            if count:
+                save_manifest(manifest_path, upgraded)
         return 0
 
     # Пробный прогон в сеть не ходит: реестр участников нужен, только когда
@@ -1515,7 +1577,8 @@ def cmd_doctor(args):
         notes += _sitemap_notes(args, sm)
         sitemap_urls = sm["urls"]
         _warn_undeclared(_guess_robots(args), args.sitemap, args.root, args.site)
-    by_engine, by_source, cited, impressions = _collect_indexed(args)
+    rejected = {}
+    by_engine, by_source, cited, impressions = _collect_indexed(args, rejected)
     cited = dict(cited or {})
     for path in getattr(args, "cite", None) or ():
         measured = cite.read_result(path)
@@ -1531,14 +1594,16 @@ def cmd_doctor(args):
     if logs and getattr(args, "verify_bots", False):
         verdicts = crawlers.verify(logs)
         logs = crawlers.without_spoofed(logs, verdicts.pop("_spoofed"))
-    if sitemap_urls is None and not by_engine and not by_source and not cited and not logs:
+    if (sitemap_urls is None and not by_engine and not by_source and not cited
+            and not logs and not rejected):
         raise SourceError(
             tr("Нужен хотя бы --sitemap, --indexed или --logs, иначе сверять не с чем.\n    --sitemap ./public/sitemap.xml\n    --indexed google=gsc.csv --indexed bing=bing.csv\n    --logs /var/log/nginx/access.log"))
 
     funnel_result = doctor.funnel(pages, sitemap_urls, None,
                                   by_engine=by_engine, by_source=by_source,
                                   cited=cited, impressions=impressions,
-                                  robots_blocked=analysis.get("robots_blocked"))
+                                  robots_blocked=analysis.get("robots_blocked"),
+                                  rejected=rejected)
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
     segments = doctor.segments(funnel_result, pages)
@@ -1606,14 +1671,10 @@ def cmd_doctor(args):
     for note in notes:
         print(f"  ! {note}")
 
-    path = report.build(analysis, funnel_result, causes,
-                        out_path=check_out_path(report_pair(args.out)[0]),
-                        site=args.site, cross=cross, notes=notes,
-                        title=tr("Разбор потерь"), segments=segments,
-                        crawl=crawl, ai_segments=ai_seg)
-    json_path = report_pair(args.out)[1]
     run = {"site": args.site, "funnel": funnel_result, "segments": segments,
            "ai_crawlers": crawl or None, "ai_segments": ai_seg}
+    # Сравнение считается до отчёта: HTML — то, чем делятся, и выпавшие
+    # страницы должны быть в нём, а не только в консоли и JSON.
     try:
         trend = doctor.compare_runs(run, previous) if previous is not None else None
     except (TypeError, KeyError, AttributeError, ValueError):
@@ -1623,6 +1684,13 @@ def cmd_doctor(args):
         trend = None
     if trend is not None:
         _print_trend(trend, baseline_label)
+    path = report.build(analysis, funnel_result, causes,
+                        out_path=check_out_path(report_pair(args.out)[0]),
+                        site=args.site, cross=cross, notes=notes,
+                        title=tr("Разбор потерь"), segments=segments,
+                        crawl=crawl, ai_segments=ai_seg,
+                        trend=trend, baseline=baseline_label)
+    json_path = report_pair(args.out)[1]
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
                             "causes": causes, "cross_engine": cross,
                             "segments": segments,

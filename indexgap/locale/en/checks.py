@@ -85,6 +85,9 @@ MESSAGES = {
         "the canonical declares {a0}, but the page is laid out as {a1}: the build "
         "does not serve that form, and GitHub Pages, S3 and nginx answer {a0} with "
         "a 404. The same address goes into the sitemap and hreflang",
+    "картинок, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404: на месте картинки будет пусто":
+        "images that are not in the build: {a0} — {a1}{a2}. On the live site they are "
+        "404s, and the page shows an empty space",
     "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404, если сервер их не перенаправляет":
         "links to pages that are not in the build: {a0} — {a1}{a2}. On the live "
         "site they are 404s unless the server redirects them",
@@ -118,6 +121,13 @@ MESSAGES = {
     "ignore: кода «{a0}» нет": "ignore: there is no code “{a0}”",
     "ignore: у «{a0}» нужен список путей или true, а стоит {a1}":
         "ignore: “{a0}” needs a list of paths or true, and it is {a1}",
+    "все ссылки на страницу записаны в форме, которой сборка не отдаёт (см. wrong-link-form): GitHub Pages, S3 и nginx отвечают на них 404, и на живом сайте до неё не дойти по ссылкам":
+        "every link to this page uses a form the build does not serve (see "
+        "wrong-link-form): GitHub Pages, S3 and nginx answer them with a 404, so on the "
+        "live site no link reaches it",
+    "от главной до страницы доходят только через ссылки в форме, которой сборка не отдаёт (см. wrong-link-form): на живом сайте это 404":
+        "the page is reached from the home page only through links in a form the "
+        "build does not serve (see wrong-link-form): on the live site that is a 404",
     "ни одна внутренняя ссылка не ведёт на страницу":
         "no internal link points at this page",
     "объём текста ≈ {a0} — тонкая страница":

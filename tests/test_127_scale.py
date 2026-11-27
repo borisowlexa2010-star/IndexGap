@@ -196,13 +196,16 @@ class FlatSection(unittest.TestCase):
 
     def test_flat_slug_section_size(self):
         pages = [core.Page(path=u, url=SITE + u) for u in
-                 ("/rent-a/", "/rent-b/", "/rent-c/", "/buy-a/", "/rent/", "/blog/x/")]
+                 ("/rent-a/", "/rent-b/", "/rent-c/", "/buy-a/", "/buy-b/", "/rent/", "/blog/x/")]
         size, name = content._section_counter(pages)([SITE + "/rent-a/", SITE + "/rent-b/"])
         # Страница-хаб /rent/ входит в раздел, как /rent/ во вложенной раскладке.
         self.assertEqual((size, name), (4, "/rent-"))
-        # Разные начала у страниц верхнего уровня — раздела нет.
-        size, _ = content._section_counter(pages)([SITE + "/rent-a/", SITE + "/buy-a/"])
+        # Разные начала и концы у страниц верхнего уровня — раздела нет.
+        size, _ = content._section_counter(pages)([SITE + "/rent-a/", SITE + "/buy-b/"])
         self.assertEqual(size, 0)
+        # С 1.30 общий конец адреса — тоже раздел (`/alpha-rent/`).
+        size, name = content._section_counter(pages)([SITE + "/rent-a/", SITE + "/buy-a/"])
+        self.assertEqual((size, name), (2, "/*-a/"))
 
 
 class OpeningsScale(unittest.TestCase):

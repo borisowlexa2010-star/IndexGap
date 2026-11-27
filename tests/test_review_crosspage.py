@@ -127,8 +127,13 @@ class TestTokens(unittest.TestCase):
         for text in ("थाईलैंड का वीज़ा", "泰国签证 Form B14", "Виза в Таиланд"):
             page = core.Page(path="a.html", url=SITE + "/a/", text=text, title="T")
             old = "\x00".join(["T", "", " ".join(re.findall(r"\w+", text.lower(), flags=re.UNICODE))])
-            self.assertEqual(page.content_hash,
+            # 1.30: хэш версии 2 считает и знаки; версия 1 осталась для сверки
+            # старых манифестов и не должна сдвинуться ни на бит.
+            self.assertEqual(page.legacy_content_hash,
                              hashlib.sha256(old.encode("utf-8")).hexdigest()[:16], text)
+            new = "\x00".join(["T", "", " ".join(re.findall(r"\w+|[^\w\s]", text.lower()))])
+            self.assertEqual(page.content_hash,
+                             "v2:" + hashlib.sha256(new.encode("utf-8")).hexdigest()[:16], text)
 
 
 class TestCjkTwins(Fixture):

@@ -106,6 +106,7 @@ CODE_HELP = {
     "check-by-eye": N_("Числа со словами, которых нет в данных. Часть таких — обычная речь («3 шага», «5 звёзд»), часть — выдумка агента. Список для просмотра глазами, а не приговор."),
     "robots-unreadable": N_("robots.txt не прочитался — проверь путь в --robots."),
     "stale-event": N_("Дата на странице прошла, а страница открыта для индексации. Поисковик показывает людям то, чего уже нет: закрой noindex, поставь редирект на актуальное или перепиши в отчёт о прошедшем."),
+    "stale-event-part": N_("На странице идёт бессрочная серия событий, а рядом размечено прошедшее разовое событие: страница актуальна, но устаревшая дата вводит в заблуждение."),
     "stale-closed": N_("Дата прошла, и страница уже закрыта от индексации — так и надо. Строка справочная."),
     "still-draft": N_("В фронтматтере `status: draft`. Страница попадёт в сборку недописанной — допиши или исключи из публикации."),
     "unfilled-slot": N_("На странице осталось незаполненное место шаблона — `{{city}}`, `%CITY%`, `undefined`, `NaN`, пустое место в заголовке или lorem ipsum. Читатель и поисковик видят шов генератора. Чинится в данных или в шаблоне, а не на странице."),
@@ -129,6 +130,7 @@ CODE_HELP = {
     "heavy-images": N_("Картинки тяжелее 1 МБ замедляют загрузку на телефоне."),
     "dataset-unbound": N_("Сверка с датасетом покрыла меньше половины страниц: числа остальных не проверены, и «критичных 0» ничего о них не говорит."),
     "broken-link": N_("Ссылка ведёт на страницу, которой в сборке нет: на живом сайте это 404. Чаще всего шаблон ссылается на строку данных, которую фильтр не пропустил в генерацию. Убери ссылку из шаблона или верни страницу."),
+    "broken-image": N_("Картинка, на которую ссылается страница, не лежит в сборке: на живом сайте это 404 и пустое место на странице."),
     "redirect-home": N_("Заглушка-редирект ведёт на главную. Поисковик считает редирект удалённой страницы на главную мягким 404; заглушка с текстом статьи — обычно ошибка шаблона."),
     "wrong-link-form": N_("Ссылка ведёт на страницу сборки, но в форме, которую хостинг не отдаёт: другой регистр букв, /about.html при about/index.html, /faq/ при faq.html. url_key сводит формы в одну страницу, живой сервер — нет, и отвечает 404."),
     "canonical-form": N_("Canonical указывает на саму страницу, но в форме, которой раскладка файлов не отдаёт: /about/ при about.html, /a.html или /a при a/index.html. Живой сервер отвечает на этот адрес 404 или редиректом, а он же уходит в sitemap и hreflang."),
@@ -162,7 +164,7 @@ CODE_HELP = {
                                   "canonical другой странице."),
     "hreflang-canonical-conflict": N_("Canonical ведёт на другую языковую версию — "
                                       "это отменяет hreflang."),
-    "hreflang-bad-code": N_("Код языка в hreflang неверен — частая подмена языка страной."),
+    "hreflang-bad-code": N_("Код языка в hreflang неверен — частая подмена языка страной, — или адрес альтернативы в форме, которой сборка не отдаёт."),
     "hreflang-lang-mismatch": N_("Код в self-ссылке не совпадает с lang страницы."),
     "hreflang-conflict": N_("Версии кластера противоречат друг другу: один код у двух "
                             "адресов или разные коды у одного."),
@@ -295,6 +297,109 @@ def _funnel_html(f: dict) -> str:
     return '<div class="funnel">' + "".join(rows) + "</div>"
 
 
+def _rejected_html(f: dict, limit: int = 50) -> str:
+    """Страницы, которые поисковик сам назвал не проиндексированными, — с его причиной."""
+    reasons = f.get("not_indexed_reasons") or {}
+    if not isinstance(reasons, dict) or not reasons:
+        return ""
+    rows = sorted(reasons.items())
+    body = "".join(f'<tr><td class="mono">{_esc(url)}</td><td>{_esc(reason)}</td></tr>'
+                   for url, reason in rows[:limit])
+    more = (tr("<p class=\"note\">Показано адресов: {a0} из {a1}. Остальные — в JSON.</p>",
+               a0=limit, a1=len(rows)) if len(rows) > limit else "")
+    partial = (tr("<p class=\"note\">В выгрузке только страницы, которые поисковик "
+                  "отказался индексировать. Про остальные страницы она ничего не "
+                  "говорит, и потерянными на шаге индекса они не считаются.</p>")
+               if f.get("index_partial") else "")
+    return (tr("<h3>Поисковик сам называет не проиндексированными ({a0})</h3>", a0=len(rows))
+            + tr("<div class=\"scroll\"><table><thead><tr><th>страница</th>"
+                 "<th>причина от поисковика</th></tr></thead><tbody>")
+            + body + "</tbody></table></div>" + more + partial)
+
+
+def _url_list(title: str, urls: list, limit: int) -> str:
+    if not urls:
+        return ""
+    items = "".join(f'<li class="mono">{_esc(u)}</li>' for u in urls[:limit])
+    if len(urls) > limit:
+        items += f'<li>{_esc(tr("… и ещё {a0}", a0=len(urls) - limit))}</li>'
+    return f'<p style="margin:12px 0 0">{_esc(title)}</p><ul style="margin:4px 0 0">{items}</ul>'
+
+
+def _trend_html(trend: dict, path: str = "", limit: int = 20) -> str:
+    """
+    «С прошлого прогона» — то же, что doctor печатает в консоли.
+
+    Раньше сравнение было только в консоли и JSON, а делятся HTML-отчётом:
+    выпавшие из индекса и sitemap страницы до читателя не доходили.
+    """
+    if not isinstance(trend, dict):
+        return ""
+    notes, parts = [], []
+    if trend.get("site_changed"):
+        notes.append(tr("Прогоны для разных сайтов — сравнение почти ничего не значит."))
+    names = {"index": tr("индекс"), "sitemap": "sitemap",
+             "logs": tr("Открыто ИИ-поиском (по логам)")}
+    for step in trend.get("not_compared") or ():
+        notes.append(tr("Данные для шага «{a0}» есть только в одном из прогонов — этот "
+                        "шаг и разделы не сравниваются.", a0=names.get(step, step)))
+    swapped = trend.get("index_sources")
+    changed = trend.get("sources_changed") or {}
+    if swapped:
+        notes.append(tr("Индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг "
+                        "индекса и разделы не сравниваются.",
+                        a0=", ".join(swapped.get("before") or ()),
+                        a1=", ".join(swapped.get("after") or ())))
+    elif changed:
+        notes.append(tr("Источники индекса другие (добавлены: {a0}; убраны: {a1}) — шаг "
+                        "индекса и разделы не сравниваются.",
+                        a0=", ".join(changed.get("added") or ()) or "—",
+                        a1=", ".join(changed.get("removed") or ()) or "—"))
+    steps = [s for s in trend.get("steps") or () if isinstance(s, dict)]
+    if steps:
+        rows = "".join(
+            f'<tr><td>{_esc(str(s.get("name") or "").strip())}</td>'
+            f'<td class="n">{s.get("before", 0)}</td><td class="n">{s.get("after", 0)}</td>'
+            f'<td class="n">{s.get("delta", 0):+d}</td></tr>' for s in steps)
+        parts.append(tr("<div class=\"scroll\"><table><thead><tr><th>шаг воронки</th>"
+                        "<th class=\"n\">было</th><th class=\"n\">стало</th>"
+                        "<th class=\"n\">разница</th></tr></thead><tbody>")
+                     + rows + "</tbody></table></div>")
+    for key, title, closed in (
+            ("segments", tr("Новые разрывы по разделам: {a0}"), tr("Разрыв закрыт: {a0}")),
+            ("ai_segments", tr("Новые разрывы ИИ-поиска по разделам: {a0}"),
+             tr("Разрыв ИИ-поиска закрыт: {a0}"))):
+        part = trend.get(key) or {}
+        if part.get("new_gaps"):
+            notes.append(title.format(a0=", ".join(part["new_gaps"])))
+        grew = [r for r in (part.get("rows") or ()) if r.get("delta", 0) > 0][:limit]
+        if grew:
+            parts.append("<ul>" + "".join(
+                f'<li>{_esc(tr("{a0}: потеряно было {a1}, стало {a2} ({a3:+d})", a0=r["segment"], a1=r["before"], a2=r["after"], a3=r["delta"]))}</li>'
+                for r in grew) + "</ul>")
+        if part.get("closed_gaps"):
+            parts.append(f'<p class="note ok">{_esc(closed.format(a0=", ".join(part["closed_gaps"])))}</p>')
+    for field, title in (("newly_not_indexed", tr("Выпали из индекса ({a0}):")),
+                         ("newly_off_sitemap", tr("Выпали из sitemap ({a0}):")),
+                         ("recovered", tr("Вернулись в индекс ({a0}):")),
+                         ("back_in_sitemap", tr("Вернулись в sitemap ({a0}):"))):
+        urls = [u for u in trend.get(field) or () if isinstance(u, str)]
+        parts.append(_url_list(title.format(a0=len(urls)), urls, limit))
+    bots = trend.get("bots") or {}
+    if bots.get("gone"):
+        notes.append(tr("Боты пропали из логов: {a0} — проверь robots.txt и защиту CDN.",
+                        a0=", ".join(bots["gone"])))
+    if bots.get("appeared"):
+        parts.append(f'<p class="note">{_esc(tr("Боты появились в логах: {a0}", a0=", ".join(bots["appeared"])))}</p>')
+    body = "".join(f'<div class="warnbox">{_esc(n)}</div>' for n in notes) + "".join(parts)
+    if not body:
+        body = f'<div class="empty">{_esc(tr("Ничего не изменилось."))}</div>'
+    head = tr("<h2>С прошлого прогона</h2>")
+    if path:
+        head += f'<p class="note">{_esc(tr("Сравнение с {a0}", a0=path))}</p>'
+    return head + body
+
+
 def _first_things(issues: list, graph: dict, dupes: list) -> str:
     """Три числа и порядок действий — то, с чего начинают."""
     # Страницы, а не находки: одна страница с четырьмя односторонними
@@ -382,7 +487,9 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
           out_path: str = "indexgap-report.html", site: str = "",
           cross: list = None, notes: list = None, title: str = tr("Отчёт конвейера"),
           templates: list = None, segments: dict = None,
-          crawl: dict = None, ai_segments: dict = None) -> str:
+          crawl: dict = None, ai_segments: dict = None,
+          trend: dict = None, baseline: str = "") -> str:
+    """`trend` — сравнение с прошлым прогоном (`doctor.compare_runs`), `baseline` — его файл."""
     pages = analysis.get("pages") or []
     issues = analysis.get("issues") or []
     graph = analysis.get("graph") or {}
@@ -428,12 +535,13 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
 
     funnel_block = ""
     if funnel_result and funnel_result.get("steps"):
-        funnel_block = (tr("<h2>Воронка конвейера</h2>") + _funnel_html(funnel_result) +
+        funnel_block = (tr("<h2>Воронка конвейера</h2>") + _funnel_html(funnel_result)
+                        + _rejected_html(funnel_result) +
                         tr("<p class=\"note\">Каждый переход теряет страницы. Потери на разных переходах лечатся по-разному, поэтому важно видеть, где именно они происходят. Учти: экспорт «Страницы» из Search Console — это отчёт о показах, и страница в индексе без показов в него не попадает.</p>")
                         + _segments_html(segments)
                         + _crawlers_html(crawl, ai_segments))
 
-    doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=sum(1 for i in issues if len(i) >= 3 and i[2] == "orphan"), a12=len(dupes), a13=_first_things(issues, graph, dupes) + accepted_html + _templates_html(templates), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
+    doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=sum(1 for i in issues if len(i) >= 3 and i[2] == "orphan"), a12=len(dupes), a13=_first_things(issues, graph, dupes) + accepted_html + _templates_html(templates), a14=_trend_html(trend, baseline) + funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
 
     directory = os.path.dirname(os.path.abspath(out_path)) or "."
     os.makedirs(directory, exist_ok=True)

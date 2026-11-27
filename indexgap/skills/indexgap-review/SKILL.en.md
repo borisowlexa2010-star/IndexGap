@@ -153,6 +153,7 @@ Language versions:
 | `lang-text-mismatch` | warning | same script, other language: English under `lang="de"`, Indonesian under `lang="ms"`, Arabic under `lang="fa"` — the body was not translated; translate it or keep the page closed until it is |
 | `hreflang-target-blocked` | warning | the cluster points at a page closed to indexing |
 | `hreflang-unknown-target` | info | an address in the cluster is not among the pages |
+| `stale-event-part` | warning | the page runs an open-ended event series and also marks up a past one-off event — remove the past one from the markup, keep the page open |
 | `stale-closed` | info | the date has passed and the page is already closed to indexing — as it should be |
 
 ## About invented numbers

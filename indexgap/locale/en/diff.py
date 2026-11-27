@@ -2,6 +2,10 @@
 """diff — English. Что меняется между двумя сборками."""
 
 MESSAGES = {
+    "URL изменился на {a0} страницах из {a1}, а старую форму адреса новая сборка не отдаёт и редиректа на неё нет: {a2} старых адрес(ов) ответят 404; например «{a3}» → «{a4}». Нужны редиректы со старых адресов":
+        "the URL changed on {a0} of {a1} pages, and the new build does not serve the "
+        "old address form and has no redirect for it: {a2} old address(es) will "
+        "answer 404; for example “{a3}” → “{a4}”. Add redirects from the old addresses",
     "страница выпала из индексируемых": "the page dropped out of the indexable set",
     "появился noindex: meta robots «{a0}»": "noindex appeared: meta robots “{a0}”",
     "появился noindex: заголовок X-Robots-Tag ({a0})":

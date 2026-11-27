@@ -39,6 +39,8 @@ MESSAGES = {
         "Point the stub at the page that replaced the old one in meaning, not at "
         "the home page. If a template put the redirect to the home page on pages "
         "with text, find the meta refresh in the template and remove it.",
+    "Найди, откуда шаблон берёт адреса этих картинок: файл переименован, не скопирован в сборку или путь записан от другой папки. Положи файл в сборку или исправь путь.":
+        "Find where the template takes these image addresses from: the file was renamed, not copied into the build, or the path is written from another folder. Put the file into the build or fix the path.",
     "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
         "The links point at pages the build does not have. Find where the "
         "template takes these addresses from, and either remove the link or "
@@ -185,9 +187,10 @@ MESSAGES = {
         "another language and cancels hreflang.",
     "Добавь альтернативы для языковых версий этой страницы.":
         "Declare alternates for this page's language versions.",
-    "Поправь код языка: чаще всего вместо языка написана страна.":
+    "Поправь код языка: чаще всего вместо языка написана страна. Адрес альтернативы пиши так же, как canonical версии: /de/a/ для de/a/index.html, /de/a.html для de/a.html.":
         "Fix the language code: usually a country has been written where a "
-        "language belongs.",
+        "language belongs. Write the alternate address exactly as the version's "
+        "canonical: /de/a/ for de/a/index.html, /de/a.html for de/a.html.",
 
     # ── что делать: сайт целиком ──────────────────────────────────────────────
     "Убери `Disallow: /` — сейчас сайт закрыт от всех поисковиков.":
@@ -286,6 +289,8 @@ MESSAGES = {
         "Check whether these pages grew out of two keywords with one "
         "intent. If they did, merge them; if not, give each of them what "
         "the other one has not got.",
+    "Убери прошедшее разовое событие из JSON-LD и текста или перенеси его на страницу архива. Серию не трогай: она идёт, и страница нужна в индексе.":
+        "Remove the past one-off event from the JSON-LD and the text, or move it to an archive page. Leave the series alone: it is running, and the page belongs in the index.",
     "Реши, чем стала страница: архивом или невыполнимым обещанием. Архив пометь датой окончания прямо в тексте, обещание убери из индекса.":
         "Decide what the page has become: an archive or a promise it can no "
         "longer keep. Mark an archive with its end date in the text itself, "

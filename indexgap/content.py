@@ -747,12 +747,17 @@ def _without_cjk_dates(text: str) -> str:
     return _CJK_DATE.sub(blank, text)
 
 
+_ISO_DATETIME = re.compile(r"(?<![\w.])\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?"
+                           r"(?:Z|[+-]\d{2}:?\d{2})?(?![\w:])")
+
 def _generic_numbers_in(text: str) -> dict:
     """«Число + любое слово» — второй эшелон: слабее сигнал, но покрывает всё."""
     found = {}
     # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
     # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
     text = _without_cjk_dates(_SCALE.sub(r"\1 ", _cjk_compounds(_same_signs(text))))
+    # Дата со временем ISO 8601 — «2027-02-20T09:00» — не «20 T» и не «00 sharp».
+    text = _ISO_DATETIME.sub(" ", text)
     for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
@@ -1790,6 +1795,191 @@ def _descending_before(text: str, fact_pattern) -> dict:
     return found
 
 
+# ── годы и даты против колонок строки ────────────────────────────────────────
+#
+# Годы и даты числами в обычной сверке пропускаются: «© 2026», «обновлено в
+# 2026», «в 2026 году» — не факт строки. Но «основана в 1978» при `founded:
+# 1987` и «подать до 2027-03-28» при `deadline: 2027-02-28` — та же выдумка,
+# что неверная цена. Сверяется только год или дата, которые привязаны к
+# колонке даты строки одним из двух способов:
+#
+#   * рядом, не дальше трёх слов перед числом и без другой даты между ними,
+#     стоит слово из названия колонки («founded in 1978» — колонка `founded`);
+#   * перед числом те же слова, что на других страницах стоят перед верным
+#     значением этой колонки («Apply by {deadline}» на двух и больше страницах).
+#
+# Год или дату, совпадающие с любой датой строки, не трогаем: привязка могла
+# ошибиться колонкой. Голый текущий и следующий год не сверяются вовсе —
+# «прием на 2027 год» законно стоит рядом с любой датой. Уровень — «просмотри
+# глазами»: привязка по словам — догадка, а не разметка.
+_YEAR_COLUMN = re.compile(
+    r"year|founded|established|since|built|opened|launched|started|born|(?<![^\W\d_])est\b|"
+    r"год|основан|открыт|постро", re.I)
+# Слова, которыми страница называет колонку, кроме слов её названия.
+_DATE_SYNONYMS = {
+    "deadline": ("deadline", "due", "until", "expir", "close", "closing",
+                 "срок", "крайн", "締切", "締め切り", "期限", "截止", "마감"),
+    "founded": ("found", "establish", "основ", "創業", "設立", "成立", "설립"),
+    "established": ("found", "establish", "основ", "創業", "設立", "成立", "설립"),
+    "opened": ("open", "открыт", "開業", "开业", "开设"),
+    "expires": ("expir", "valid", "until"),
+}
+_PAGE_YEAR = re.compile(r"(?<![\w.,\-/:'’])(\d{4})(?![\w\-/'’]|[.,:]\d)")
+_ISO_DAY = re.compile(r"(?<![\w.,\-/])(\d{4})-(\d{1,2})-(\d{1,2})" + _TIME_TAIL + r"(?![\w\-/]|[.,:]\d)")
+_ISO_MONTH = re.compile(r"(?<![\w.,\-/])(\d{4})-(\d{1,2})(?![\w\-/]|[.,:]\d)")
+_CJK_DAY = re.compile(r"(?<![\d.,])(\d{4})" + _SP + r"?[年년]" + _SP + r"?(\d{1,2})" + _SP
+                      + r"?[月월]" + _SP + r"?(\d{1,2})" + _SP + r"?[日일]")
+_MONTH_YEAR = re.compile(r"(?<![\w.,])(" + _MONTH_NAME + r")\.?,?" + _SP + r"+(\d{4})(?![\w.,]?\d)", re.I)
+# Двоеточие фразу не обрывает: «Deadline: 2027-02-28» — подпись и её дата.
+_CLAUSE_END = re.compile(r"[.!?;\n。！？；|](?!\d)")
+_CONTEXT_WORD = re.compile(r"[^\W\d_]+")
+_COPYRIGHT = re.compile(r"©|\(c\)|copyright|все права", re.I)
+
+
+def _valid_parts(parts: tuple) -> bool:
+    year = int(parts[0])
+    if not 1900 <= year <= 2100:
+        return False
+    if len(parts) > 1 and not 1 <= int(parts[1]) <= 12:
+        return False
+    return len(parts) < 3 or 1 <= int(parts[2]) <= 31
+
+
+def _date_spans(text: str) -> list:
+    """[(начало, конец, (год[, месяц[, день]]))] — даты и годы, записанные без двусмысленности."""
+    out = []
+
+    def add(start, end, parts):
+        parts = tuple(str(int(p)) for p in parts)
+        if _valid_parts(parts) and not any(s < end and start < e for s, e, _ in out):
+            out.append((start, end, parts))
+
+    for m in _ISO_DAY.finditer(text):
+        add(m.start(), m.end(), m.groups())
+    for m in _CJK_DAY.finditer(text):
+        add(m.start(), m.end(), m.groups())
+    for m in _NAMED_DATE_IN_CELL.finditer(text):
+        month = _MONTH_NUMBER.get((m.group("nm") or m.group("mm"))[:3].lower(), "")
+        if month:
+            add(m.start(), m.end(), (m.group("ny") or m.group("my"), month,
+                                     m.group("nd") or m.group("md")))
+    for m in _MONTH_YEAR.finditer(text):
+        add(m.start(), m.end(), (m.group(2), _MONTH_NUMBER[m.group(1)[:3].lower()]))
+    for m in _ISO_MONTH.finditer(text):
+        add(m.start(), m.end(), m.groups())
+    # Голый год, который на деле цена или номер дома: «$2000», «2000 Main
+    # Street», «2000 €» — не год.
+    money = [(m.start(), m.end()) for pattern in (PREFIX_PRICE, SUFFIX_PRICE, PERCENT)
+             for m in pattern.finditer(text)]
+    for m in _PAGE_YEAR.finditer(text):
+        if any(s < m.end(1) and m.start(1) < e for s, e in money):
+            continue
+        after = _NAME_AFTER.match(text, m.end(1))
+        if after and not re.fullmatch(_MONTH_NAME, after.group(0).strip(), re.I):
+            continue
+        add(m.start(1), m.end(1), (m.group(1),))
+    return sorted(out)
+
+
+def _dated_columns(row: dict) -> dict:
+    """{колонка: (год[, месяц[, день]])} — колонки строки, значение которых — дата или год."""
+    out = {}
+    for column, value in (row or {}).items():
+        text = _same_signs(str(value or "")).strip()
+        spans = _date_spans(text)
+        if len(spans) != 1:
+            continue
+        start, end, parts = spans[0]
+        # Значение целиком — дата: «2026-11-18», «May 2010»; голый год — только
+        # в колонке, которая по названию про год: 2000 в колонке цены — не год.
+        if text[:start].strip(" ,") or text[end:].strip(" ,."):
+            continue
+        if len(parts) == 1 and not _YEAR_COLUMN.search(str(column)):
+            continue
+        out[str(column)] = parts
+    return out
+
+
+def _concepts(column: str) -> tuple:
+    """Основы слов, которыми страница называет колонку: `founded` → found, establish."""
+    words = [w.lower() for w in re.findall(r"[^\W\d_]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", column))]
+    stems = {w[:max(4, len(w) - 2)] for w in words if len(w) >= 4}
+    for word in words:
+        stems.update(_DATE_SYNONYMS.get(word, ()))
+    return tuple(sorted(stems))
+
+
+def _date_contexts(text: str) -> list:
+    """[(часть, (слова перед ней в той же фразе, не дальше прошлой даты), показ)]."""
+    text = _same_signs(text)
+    out, previous = [], 0
+    for start, end, parts in _date_spans(text):
+        window = text[previous:start]
+        previous = end
+        stops = list(_CLAUSE_END.finditer(window))
+        if stops:
+            window = window[stops[-1].end():]
+        if _COPYRIGHT.search(window[-20:]):
+            continue
+        words = tuple(w.lower() for w in _CONTEXT_WORD.findall(window))
+        out.append((parts, words, text[start:end].strip()))
+    return out
+
+
+def _agrees(parts: tuple, other: tuple) -> bool:
+    """Даты не противоречат друг другу в общих частях: `2027` и `2027-02-28` согласны."""
+    size = min(len(parts), len(other))
+    return parts[:size] == other[:size]
+
+
+def _date_shapes(pages: list, matched: dict) -> dict:
+    """{(слова перед датой): колонка} — шаблонные места, где страницы пишут верную дату колонки."""
+    seen = defaultdict(set)
+    for page in pages:
+        row = matched.get(page.url)
+        columns = _dated_columns(row) if row is not None else {}
+        if not columns:
+            continue
+        for parts, words, _ in _date_contexts(_with_head(page)):
+            context = words[-3:]
+            if not context:
+                continue
+            for column, value in columns.items():
+                if parts == value:
+                    seen[(context, column)].add(page.url)
+    shapes = defaultdict(set)
+    for (context, column), urls in seen.items():
+        if len(urls) >= 2:
+            shapes[context].add(column)
+    # Одни и те же слова перед двумя колонками — место не однозначно.
+    return {context: next(iter(cols)) for context, cols in shapes.items() if len(cols) == 1}
+
+
+def _wrong_dates(text: str, row: dict, shapes: dict, this_year: int) -> dict:
+    """{как написано: значение колонки} — годы и даты, которые противоречат колонке строки."""
+    columns = _dated_columns(row)
+    if not columns:
+        return {}
+    concepts = {column: _concepts(column) for column in columns}
+    out = {}
+    for parts, words, raw in _date_contexts(text):
+        if any(_agrees(parts, value) for value in columns.values()):
+            continue
+        # Голый текущий или следующий год — набор, сезон, «гид 2027»: не сверяется.
+        if len(parts) == 1 and int(parts[0]) in (this_year, this_year + 1):
+            continue
+        # Дата точнее колонки — другой факт: «Applications open on 2026-12-01»
+        # при `opened: May 2010` — не дата открытия офиса.
+        bound = [column for column in columns
+                 if (len(parts) == 1 or len(parts) == len(columns[column]))
+                 and any(w.startswith(stem) for w in words[-4:] for stem in concepts[column])]
+        if not bound and words[-3:] in shapes:
+            bound = [shapes[words[-3:]]]
+        if bound:
+            out.setdefault(raw, str((row or {}).get(bound[0])).strip())
+    return out
+
+
 def _with_head(page) -> str:
     """Текст страницы вместе с <title> и meta description, если их нет в тексте."""
     text = page.text or ""
@@ -1830,6 +2020,9 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
                 if number in numbers:
                     constant_measures[number] |= have
 
+    shapes = _date_shapes(pages, matched)
+    from datetime import date
+    this_year = date.today().year
     issues = []
     for page in sorted(pages, key=lambda p: p.url):
         row = matched.get(page.url)
@@ -1891,6 +2084,8 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             written[number] = phrase
 
         def shown(number, unit):
+            if number in wrong_dates:
+                return tr("{a0} (в строке {a1})", a0=number, a1=wrong_dates[number])
             if number not in written:
                 text = _shown(number, unit)
             else:
@@ -1911,6 +2106,9 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             weak.setdefault(number, unit)
         unknown_weak = {n: u for n, u in weak.items()
                         if not supported(n, u) and n not in unknown_strong}
+        wrong_dates = _wrong_dates(text, row, shapes, this_year)
+        for raw in wrong_dates:
+            unknown_weak.setdefault(raw, "")
 
         if unknown_strong:
             issues.append((
@@ -1928,7 +2126,8 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
             # Числа прописью — первыми: у них единица проекта, и за «и ещё N»
             # им не место.
             listed = sorted(unknown_weak.items(),
-                            key=lambda kv: (kv[0] not in written and kv[0] not in derived,
+                            key=lambda kv: (kv[0] not in written and kv[0] not in derived
+                                            and kv[0] not in wrong_dates,
                                            -len(kv[0]), kv[0]))[:8]
             issues.append((
                 "info", page.url, "check-by-eye",
@@ -2045,14 +2244,20 @@ _SLUG_TOKEN = re.compile(r"[-_.]+")
 _SLUG_DEPTH = 8
 
 
-def _section_counter(pages: list, counted=None):
+def _section_counter(pages: list, counted=None, bare: bool = False):
     """
     Сколько страниц под общим каталогом группы. Порог шаблонности, взятый от
     всего сайта, гас, стоило рядом появиться блогу: двадцать одинаковых
     городских страниц среди семидесяти статей — 22% сайта, но 100% раздела.
 
     У плоских адресов (`/rent-alpha/`, `/rent-beta/`) общего каталога нет:
-    раздел тогда — общее начало адреса (`rent-`) у страниц одного уровня.
+    раздел тогда — общее начало адреса (`rent-`) у страниц одного уровня,
+    а если начала нет — общий конец (`/alpha-rent/`, `/beta-rent/`).
+
+    `bare` — ещё и голые адреса (`/alpha/`, `/beta/`): раздел тогда — все
+    страницы этого уровня, кроме тех, что сами составляют раздел по началу
+    или концу адреса (`/post-1/` … `/post-20/`). Признак слабый, поэтому
+    его ищет только проверка скелета, и только для одного точного скелета.
 
     Счёт по готовым таблицам: раньше на каждую группу перебирался весь сайт,
     и на 30 000 страниц с разным началом текста это стоило две минуты.
@@ -2060,17 +2265,45 @@ def _section_counter(pages: list, counted=None):
     paths = {p.url: [x for x in urlsplit(p.url).path.split("/") if x] for p in pages}
     under = Counter()
     by_slug = Counter()
+    by_tail = Counter()
+    # Голые адреса считаются по всем страницам уровня, а не только по тем,
+    # что прошли `counted`: «большинство страниц уровня» — про весь уровень.
+    level = defaultdict(list)
+    first_all, last_all = Counter(), Counter()
+
+    def tokens_of(slug):
+        return [t for t in _SLUG_TOKEN.split(slug.lower()) if t]
+
     for p in pages:
+        x = paths[p.url]
+        if bare and x:
+            tokens = tokens_of(x[-1])
+            if tokens:
+                parent = tuple(x[:-1])
+                level[parent].append(tokens)
+                first_all[(parent, tokens[0])] += 1
+                last_all[(parent, tokens[-1])] += 1
         if counted is not None and not counted(p):
             continue
-        x = paths[p.url]
         for i in range(1, len(x) + 1):
             under[tuple(x[:i])] += 1
         if x:
             parent = tuple(x[:-1])
-            tokens = [t for t in _SLUG_TOKEN.split(x[-1].lower()) if t]
+            tokens = tokens_of(x[-1])
             for i in range(1, min(len(tokens), _SLUG_DEPTH) + 1):
                 by_slug[(parent, tuple(tokens[:i]))] += 1
+                by_tail[(parent, tuple(tokens[-i:]))] += 1
+
+    def shared(slugs, reverse):
+        common = []
+        for column in zip(*[(t[::-1] if reverse else t)[:_SLUG_DEPTH] for t in slugs]):
+            if len(set(column)) != 1:
+                break
+            common.append(column[0])
+        # Начало, равное целому адресу одной из страниц, — не раздел.
+        if not common or any(len(t) == len(common) for t in slugs):
+            return []
+        return common[::-1] if reverse else common
 
     def slug_section(parts):
         # Только страницы одного уровня с одним родителем: иначе общее
@@ -2079,17 +2312,26 @@ def _section_counter(pages: list, counted=None):
         if len(parents) != 1 or not all(parts):
             return 0, ""
         parent = parents.pop()
-        slugs = [[t for t in _SLUG_TOKEN.split(x[-1].lower()) if t] for x in parts]
-        common = []
-        for column in zip(*[t[:_SLUG_DEPTH] for t in slugs]):
-            if len(set(column)) != 1:
-                break
-            common.append(column[0])
-        # Начало, равное целому адресу одной из страниц, — не раздел.
-        if not common or any(len(t) == len(common) for t in slugs):
+        slugs = [tokens_of(x[-1]) for x in parts]
+        where = "/" + "".join(x + "/" for x in parent)
+        common = shared(slugs, False)
+        if common:
+            return by_slug[(parent, tuple(common))], where + "-".join(common) + "-"
+        # `/alpha-rent/`, `/beta-rent/`: тот же раздел, только метка в конце.
+        common = shared(slugs, True)
+        if common:
+            return by_tail[(parent, tuple(common))], where + "*-" + "-".join(common) + "/"
+        if not bare:
             return 0, ""
-        size = by_slug[(parent, tuple(common))]
-        return size, "/" + "".join(x + "/" for x in parent) + "-".join(common) + "-"
+        # Голые адреса: раздел — страницы уровня, не входящие в свой раздел
+        # по началу или концу адреса из SECTION_SEAM_MIN страниц и больше.
+        def alone(t):
+            return (first_all[(parent, t[0])] < SECTION_SEAM_MIN
+                    and last_all[(parent, t[-1])] < SECTION_SEAM_MIN)
+
+        if not all(alone(t) for t in slugs):
+            return 0, ""
+        return sum(1 for t in level[parent] if alone(t)), where + "*/"
 
     def section_size(urls):
         parts = [paths[u] for u in urls if u in paths]
@@ -2130,7 +2372,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     threshold = max(3, int(max(with_skeleton, 1) * cfg["template_share"]))
     stamped = set()
     in_section = _section_counter(
-        pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2)
+        pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2, bare=True)
 
     # Два шаблона в одном каталоге: тридцать страниц аренды и тридцать
     # услуг под /rent/ — у каждого скелета половина раздела, и порог в 70%
@@ -2143,7 +2385,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
         for skeleton, urls in groups:
             if len(skeleton) >= 3 and len(urls) >= SECTION_SEAM_MIN:
                 size, prefix = in_section(urls)
-                if size and len(urls) >= size * TEMPLATE_PART:
+                if size and len(urls) >= size * TEMPLATE_PART and not prefix.endswith("*/"):
                     covered[prefix] += len(urls)
 
     def stamped_here(urls, skeleton=()):
@@ -2154,6 +2396,10 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
         size, prefix = in_section(urls)
         if size < cfg["min_pages_for_seams"]:
             return False
+        if prefix.endswith("*/"):
+            # Голые адреса (`/alpha/`) — слабый признак раздела: нужен один
+            # точный скелет от трёх заголовков у явного большинства уровня.
+            return len(skeleton) >= 3 and len(urls) >= size * cfg["template_share"]
         return (len(urls) >= size * cfg["template_share"]
                 or (len(skeleton) >= 3 and len(urls) >= size * TEMPLATE_PART
                     and covered[prefix] >= size * cfg["template_share"]))

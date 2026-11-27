@@ -224,6 +224,53 @@ def _rekeyed(manifest: dict, pages: list) -> dict:
     return manifest
 
 
+def same_content(stored, page) -> bool:
+    """
+    Записанный в манифест хэш описывает нынешнее содержимое страницы.
+
+    Хэш без префикса версии записан пакетом до 1.30 и сверяется по старому
+    правилу: иначе обновление пакета пометило бы изменившимся весь сайт —
+    `lastmod` сегодня у каждой страницы и весь сайт в очереди IndexNow.
+    """
+    if not isinstance(stored, str) or not stored:
+        return False
+    if stored == page.content_hash:
+        return True
+    # Страница без старого хэша (своя обёртка над Page) — сверять не с чем.
+    legacy = getattr(page, "legacy_content_hash", None)
+    return ":" not in stored and legacy is not None and stored == legacy
+
+
+def _upgrade_entry(entry: dict, page) -> None:
+    """Старый хэш, который ещё совпадает, тихо заменяется новым — тем же содержимым."""
+    for field in ("hash", "notified"):
+        stored = entry.get(field)
+        if isinstance(stored, str) and stored != page.content_hash \
+                and same_content(stored, page):
+            entry[field] = page.content_hash
+
+
+def upgrade_hashes(manifest: dict, pages: list) -> tuple:
+    """
+    Копия манифеста, где совпадающие хэши версии 1 переведены на версию 2.
+
+    Не совпавший старый хэш остаётся как есть: страница действительно
+    изменилась, и это должны увидеть sitemap и notify. Возвращает манифест
+    и число обновлённых записей.
+    """
+    manifest = _rekeyed(manifest, pages)
+    count = 0
+    for p in pages:
+        entry = manifest.get(p.url)
+        if isinstance(entry, dict):
+            entry = dict(entry)
+            _upgrade_entry(entry, p)
+            if entry != manifest[p.url]:
+                manifest[p.url] = entry
+                count += 1
+    return manifest, count
+
+
 def _out_key(out_dir: str, base_dir: str = None) -> str:
     """
     Каталог вывода так, как он записывается в манифест: относительно каталога
@@ -320,12 +367,15 @@ def build_sitemap(pages: list, out_dir: str, base_url: str,
         h = p.content_hash
         prev = manifest.get(p.url)
         prev = prev if isinstance(prev, dict) else {}
-        lastmod = prev.get("lastmod") if prev.get("hash") == h else None
+        lastmod = prev.get("lastmod") if same_content(prev.get("hash"), p) else None
         # Дата из манифеста попадает в XML как есть — значит, это должна быть
         # дата, а не что угодно, что туда вписали.
         if not (isinstance(lastmod, str) and _LASTMOD.match(lastmod)):
             lastmod = today
         entry = dict(prev)
+        # Совпавшая по старому правилу отметка об отправке переходит на новый
+        # хэш: notify не должен считать страницу изменившейся из-за версии.
+        _upgrade_entry(entry, p)
         # Вернувшаяся страница забывает дату исчезновения. Раньше она её
         # хранила, и при следующем исчезновении запись удалялась сразу —
         # вместе с lastmod и отметкой об отправке.
@@ -452,7 +502,7 @@ def diff_changed(pages: list, manifest: dict) -> dict:
         prev = entry.get("notified") if isinstance(entry, dict) else None
         if prev is None:
             new.append(p.url)
-        elif prev != p.content_hash:
+        elif not same_content(prev, p):
             changed.append(p.url)
         else:
             unchanged.append(p.url)
@@ -464,7 +514,8 @@ def diff_changed(pages: list, manifest: dict) -> dict:
 
 def mark_notified(manifest: dict, pages: list, urls: list) -> dict:
     """Отмечает успешно отправленные URL. Вызывается только после реальной отправки."""
-    manifest = _rekeyed(manifest, pages)
+    # Раз манифест всё равно пишется, совпавшие старые хэши переходят на новые.
+    manifest, _count = upgrade_hashes(manifest, pages)
     by_url = {p.url: p for p in pages}
     for url in urls:
         page = by_url.get(url)
