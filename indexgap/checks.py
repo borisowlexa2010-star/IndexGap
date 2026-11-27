@@ -220,11 +220,17 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         # треть пропадала. Словарь у них почти один и тот же, поэтому
         # кандидатов дают и полосы по множеству слов — длинные, чтобы разные
         # тексты на одну тему кандидатами не становились. Проверка пары та же.
-        word_rows = min(perms, max(rows * 2, 1))
+        # Четырёх полос мало: у клона с тридцатью подстановками словарь
+        # совпадает на 0,85, и пара становилась кандидатом в трёх случаях из
+        # четырёх — пары и тройки клонов пропадали целиком. Подпись словаря
+        # считается за один проход, поэтому полос шестнадцать, а строк в
+        # полосе на две больше, чтобы случайных кандидатов прибавилось меньше.
+        word_rows = min(perms, max(rows * 2 + 2, 1))
+        word_perms = word_rows * 16
         for url in urls:
             own = words.get(url, [])
-            sig = _minhash(_shingles(own, 1), perms)
-            for b in range(perms // word_rows):
+            sig = _minhash(_shingles(own, 1), word_perms)
+            for b in range(word_perms // word_rows):
                 band = sig[b * word_rows:(b + 1) * word_rows]
                 key = ("w", b, hashlib.blake2b(repr(band).encode(), digest_size=8).digest())
                 buckets[key].append(url)
@@ -288,6 +294,7 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         candidates = sorted(candidate_set)
 
     by_url = {p.url: p for p in pages}
+    vocab = functools.lru_cache(maxsize=4096)(lambda url: frozenset(words.get(url, ())))
     out = []
     for a, b in candidates:
         sa, sb = get(a), get(b)
@@ -298,7 +305,11 @@ def find_near_duplicates(pages: list, cfg: dict = None, words: dict = None) -> d
         if not union:
             continue
         j = inter / union
-        if cfg["slot_floor"] <= j < cfg["near_duplicate"]:
+        # Дорвей, где город стоит через каждые пять слов, портит все шинглы:
+        # сходство 0,1, и худшие клоны не перепроверялись вовсе. Ниже порога
+        # пару перепроверяем, только если словарь почти тот же.
+        if (cfg["slot_floor"] <= j < cfg["near_duplicate"]
+                or j < cfg["slot_floor"] and _few_differ(vocab(a), vocab(b), cfg)):
             j = max(j, _without_slots(words.get(a, []), words.get(b, []), k, cfg,
                                       _anchor_words(by_url[a]), _anchor_words(by_url[b])))
         if j >= cfg["similar"]:
@@ -388,7 +399,7 @@ def _anchor_words(page) -> set:
     return {w.lower() for a in (getattr(page, "anchors", None) or ()) for w in tokenize(a)}
 
 
-def _short_runs(words: list, differing: set, longest: int = 3, linked: set = frozenset()) -> bool:
+def _short_runs(words: list, differing: set, longest: int = 6, linked: set = frozenset()) -> bool:
     run = 0
     for word in words:
         # Слово из текста ссылки не удлиняет кусок своего текста: список
@@ -397,6 +408,44 @@ def _short_runs(words: list, differing: set, longest: int = 3, linked: set = fro
         run = run + 1 if word in differing and word not in linked else 0
         if run > longest:
             return False
+    return True
+
+
+def _masked(words: list, slot: set) -> list:
+    """
+    Слова подстановки — меткой; несколько подряд — одной. Одно общее слово
+    между ними — часть того же значения: «Ростове-на-Дону» против «Уфе».
+    """
+    out = []
+    for i, w in enumerate(words):
+        if w in slot:
+            if out and out[-1] == "\x00":
+                continue
+            w = "\x00"
+        elif out and out[-1] == "\x00" and i + 1 < len(words) and words[i + 1] in slot:
+            continue
+        out.append(w)
+    return out
+
+
+def _few_differ(va: frozenset, vb: frozenset, cfg: dict) -> bool:
+    """
+    Различаются ли словари двух страниц лишь несколькими словами — при том,
+    что общих слов много: две страницы из одного заголовка различаются одним
+    словом, но общего текста, в котором стоит подстановка, у них нет.
+    """
+    limit = max(cfg["slot_words"], int(min(len(va), len(vb)) * cfg["slot_share"]))
+    if abs(len(va) - len(vb)) > limit or min(len(va), len(vb)) < 5 * limit:
+        return False
+    # Счёт с ранним выходом: у разных страниц лишнее слово находится сразу,
+    # а пар на четыреста страниц — восемьдесят тысяч.
+    for one, other in ((va, vb), (vb, va)):
+        extra = 0
+        for w in one:
+            if w not in other:
+                extra += 1
+                if extra > limit:
+                    return False
     return True
 
 
@@ -432,8 +481,10 @@ def _without_slots(a: list, b: list, k: int, cfg: dict,
     if not (few_words or rare):
         return 0.0
     k = k * 2 if is_dense(a) else k
-    sa = _shingles(["\x00" if w in only_a else w for w in a], k)
-    sb = _shingles(["\x00" if w in only_b else w for w in b], k)
+    # Подстановка разной длины — «Austin» и «St. Louis» — одна метка, а не
+    # одна и две: иначе каждый шингл через «St. Louis» не совпадал с парным.
+    sa = _shingles(_masked(a, only_a), k)
+    sb = _shingles(_masked(b, only_b), k)
     inter = len(sa & sb)
     union = len(sa) + len(sb) - inter
     return inter / union if union else 0.0
@@ -2687,8 +2738,11 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     # Две пустые оболочки совпадают на 100% — и это ничего не значит.
     # Пока они оставались в `duplicates`, счётчик «похожих пар» показывал
     # сотни находок там, где находка ровно одна: пустой HTML.
+    # Региональные версии — тоже: заметка говорит «не дубли», а счётчик и
+    # таблица «похожих пар» показывали их красным.
     pairs = [(a, b, j) for a, b, j in dupes["pairs"]
-             if a.url not in bare and b.url not in bare]
+             if a.url not in bare and b.url not in bare
+             and tuple(sorted((a.url, b.url))) not in regional]
 
     # Заглушка-редирект — не страница: человек и поисковик видят то, куда она
     # ведёт. На каталоге виз девять языковых `/connect` и корень давали 40
