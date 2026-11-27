@@ -294,7 +294,12 @@ def display_width(text: str) -> int:
     # бирманское письмо — обычной ширины, а их надстрочные гласные и тоны
     # (и любые комбинируемые знаки) места в строке не занимают: тайский
     # заголовок из 35 видимых знаков считался шириной 90.
-    wide = len(_WIDE_SCRIPT.findall(text))
+    # Плюс всё, что Unicode сам называет широким (East Asian Width W/F):
+    # полноширинные буквы и цифры, 【】｜、。, расширения CJK за BMP. Эмодзи
+    # (So) — как раньше, в один знак.
+    wide = sum(1 for ch in text if _WIDE_SCRIPT.match(ch) or (
+        ch > "\u2fff" and unicodedata.east_asian_width(ch) in ("W", "F")
+        and unicodedata.category(ch) != "So"))
     marks = sum(1 for ch in text if unicodedata.category(ch) in ("Mn", "Me", "Cf"))
     return len(text) + wide - marks
 

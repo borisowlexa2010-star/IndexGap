@@ -409,7 +409,7 @@ def load_baseline(path: str) -> list:
 # «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
 _SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-missing-links", "unfilled-slot",
                   "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
-                  "duplicate-description", "translations-parked"}
+                  "duplicate-description", "translations-parked", "heavy-images"}
 # Предмет этих находок есть только в поле `subject`: из текста его не вынуть,
 # и база без поля сравнивается, как раньше, без предмета.
 _GIVEN_ONLY = {"translations-parked"}

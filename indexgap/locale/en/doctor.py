@@ -310,6 +310,8 @@ MESSAGES = {
         'all {a0} image(s) have an empty alt="" — that marks decoration; if any of them is a photo about the page\'s subject, it needs an alt',
     'страница на lang=«{a0}», а alt изображений написан другим письмом ({a1}): похоже, шаблон alt не переведён':
         'the page is lang="{a0}", but its image alts are in another script ({a1}): the alt template looks untranslated',
+    'страница на lang=«{a0}», а alt изображений написан на другом языке ({a1}): похоже, шаблон alt не переведён':
+        'the page is lang="{a0}", but its image alts are in another language ({a1}): the alt template looks untranslated',
     'у {a0} из {a1} изображений alt ничего не говорит: {a2} — это заглушка или имя файла, а не описание':
         '{a0} of {a1} image alts say nothing: {a2} — a placeholder or a file name, not a description',
     '{a0}: не JSON прогона doctor ({a1})':
