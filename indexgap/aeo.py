@@ -32,6 +32,7 @@ import re
 from collections import Counter
 
 from .checks import is_shell
+from .settings import display_width, text_volume
 from .i18n import N_, tr
 
 CONFIG = {
@@ -87,7 +88,14 @@ _Q_START = (
     "como|o que|onde|quando|por que|quem|qual|quanto|"
     "cosa|dove|perché|chi|quale|quanto|"
     "apa|apakah|bagaimana|mengapa|kenapa|kapan|bila|bilakah|di mana|siapa|berapa|adakah|"
-    "nasıl|nerede|neden|hangi|"
+    "nasıl|nerede|neden|hangi|ne kadar|nedir|kaç|"
+    "скільки|як|що|де|коли|чому|навіщо|хто|який|яка|яке|які|чи|"
+    "czy|ile|jak|co|gdzie|kiedy|dlaczego|kto|jaki|jaka|jakie|"
+    "kolik|kde|kdy|proč|kdo|jaký|jaká|jaké|"
+    "hoe|wat|waar|wanneer|waarom|welke|hoeveel|"
+    "hur|vad|när|varför|vem|vilken|vilka|"
+    "πόσο|πόση|πόσα|πώς|τι|πού|πότε|γιατί|ποιος|ποια|ποιο|"
+    "combien|bao nhiêu|tại sao|làm sao|thế nào|ở đâu|khi nào|"
     "ما|ماذا|كيف|متى|أين|لماذا|كم|هل|"
     "کیا|چه|چگونه|چطور|کجا|چرا|آیا"
 )
@@ -96,7 +104,8 @@ _Q_INSIDE = (
     "क्या|कैसे|कब|कहाँ|कहां|क्यों|कौन|कितना|कितने|कितनी|"
     "কি|কী|কীভাবে|কিভাবে|কখন|কোথায়|কেন|কে|কত|"
     "کیسے|کب|کہاں|کیوں|کون|کتنا|کتنے|"
-    "چه|چگونه|کجا|چرا|چند"
+    "چه|چگونه|کجا|چرا|چند|"
+    "bao nhiêu|như thế nào|tại sao|ở đâu|khi nào|là gì"
 )
 _Q_CJK = "什么|甚麼|哪里|哪裡|哪儿|哪个|怎么|怎样|如何|为什么|為什麼|多少|几|是否|吗|嗎|呢|何|どう|なぜ|いつ|どこ|だれ|誰|ですか|무엇|어떻게|언제|어디|왜|누구|얼마|나요"
 # Тайский вопрос пишется без знака: вопросительное слово или частица внутри
@@ -104,12 +113,16 @@ _Q_CJK = "什么|甚麼|哪里|哪裡|哪儿|哪个|怎么|怎样|如何|为什�
 _Q_THAI = ("อะไร|เท่าไหร่|เท่าไร|ไหม|มั้ย|อย่างไร|ยังไง|แค่ไหน|ที่ไหน|เมื่อไหร่|เมื่อไร|"
            "ทำไม|ใคร|หรือไม่|หรือเปล่า")
 QUESTION = re.compile(
-    "^(?:" + _Q_START + ")(?![\\w" + _INDIC + "])"
+    # «How-to», «Что-то» — не вопрос: за словом не дефис.
+    "^(?:" + _Q_START + ")(?![\\w" + _INDIC + "-])"
     "|(?<![\\w" + _INDIC + "])(?:" + _Q_INSIDE + ")(?![\\w" + _INDIC + "])"
     "|(?:" + _Q_CJK + "|" + _Q_THAI + ")"
     # Греческий вопросительный знак — `;` (U+037E при нормализации становится
     # им же); армянский `՞` стоит над словом, эфиопский — `፧`.
     "|[\u0370-\u03ff\u1f00-\u1fff]\\s?[;\u037e]\\s*$|\u055e|\u1367"
+    # Турецкая частица в конце («iade edilir mi»), французская инверсия
+    # («Le dépôt est-il remboursable»).
+    "|(?<!\\w)(?:mı|mi|mu|mü)\\s*$|(?<=\\w)-(?:t-)?(?:il|elle|ils|elles|on)(?![\\w-])"
     "|[?？؟]\\s*$", re.I | re.U)
 
 # Кто ходит за содержимым для ИИ-ответов и что теряется при блокировке.
@@ -501,13 +514,22 @@ _DATE_ONLY = re.compile(
     r"^[\s\d.,/:\-–—·|]*(?:[A-Za-zА-Яа-яЁё]+[\s\d.,/:\-–—·|]*){0,4}$")
 
 
+_BY_MONTH = re.compile(r"\s*by\s+(?:january|february|march|april|may|june|july|august|"
+                       r"september|october|november|december)\b", re.I)
+
+
 def _is_dateline(text: str) -> bool:
     """Строка даты или подписи над статьёй: короткая и про время, а не про суть."""
     text = text.strip()
     if len(text) > 100:
         return False
     if _DATELINE.match(text):
-        return True
+        # «By September 2026, every landlord must register…» — фраза, а не
+        # подпись: «by» перед месяцем — срок, а не автор, а в подписи почти
+        # нет слов со строчной буквы.
+        if _BY_MONTH.match(text):
+            return False
+        return sum(1 for w in re.findall(r"[^\W\d_]+", text) if w[0].islower()) < 8
     return bool(re.search(r"\d{4}", text)) and bool(_DATE_ONLY.match(text)) and len(text) < 40
 
 
@@ -530,16 +552,22 @@ def check_answer(page, cfg: dict = None) -> list:
     first = paragraphs[0]
     issues = []
     # Типографский апостроф — тот же апостроф: «Let’s dive» не узнавалось.
-    lowered = first.lower().lstrip("«\"'— -").replace("’", "'").replace("‘", "'")
+    # Кавычки любого вида («“„‹) и эмодзи перед разгоном его не отменяют.
+    lowered = re.sub(r"^[\W_]+", "", first.lower()).replace("’", "'").replace("‘", "'")
+    # Иероглиф несёт столько же, сколько два-три латинских знака: пороги
+    # меряются шириной, а в сообщении стоят в знаках этого абзаца.
+    scale = min(1.0, len(first) / max(1, display_width(first)))
+    answer_min = round(cfg["answer_min"] * scale)
+    answer_max = round(cfg["answer_max"] * scale)
     if _is_preamble(lowered):
         issues.append(("warning", page.url, "answer-preamble",
                        tr("первый абзац начинается с разгона «{a0}…» — ИИ-поиск цитирует ответ, а не вступление", a0=first[:40])))
-    elif len(first) < cfg["answer_min"]:
+    elif len(first) < answer_min:
         issues.append(("info", page.url, "answer-short",
-                       tr("первый абзац короче {a0} символов — на самостоятельный ответ не тянет", a0=cfg['answer_min'])))
-    elif len(first) > cfg["answer_max"]:
+                       tr("первый абзац короче {a0} символов — на самостоятельный ответ не тянет", a0=answer_min)))
+    elif len(first) > answer_max:
         issues.append(("info", page.url, "answer-long",
-                       tr("первый абзац {a0} символов — для цитирования лучше уложить ответ в {a1}", a0=len(first), a1=cfg['answer_max'])))
+                       tr("первый абзац {a0} символов — для цитирования лучше уложить ответ в {a1}", a0=len(first), a1=answer_max)))
     return issues
 
 
@@ -551,11 +579,35 @@ _DECLARATIVE = re.compile(
     re.I | re.U)
 
 
+# Вспомогательный глагол в начале — вопрос, только если за ним подлежащее:
+# «Do your research first», «Do not sign», «Can opener», «Will Smith» — нет.
+_AUX = re.compile(r"^(do|can|will|is|are|does|should)\b(?:\s+(\S+))?", re.I)
+_SUBJECTS = {"i", "you", "we", "they", "he", "she", "it", "there", "the", "a", "an",
+             "my", "our", "this", "these", "that", "those", "your", "their"}
+
+
 def _is_question(heading: str) -> bool:
     text = heading.strip()
+    # «“Can I sublet?”», «1. How much is rent», «Q: …», «📌 …», «— Сколько…»:
+    # кавычки, номер, метка и значок вокруг вопроса его не отменяют.
+    text = re.sub(r"[\s\"'“”„«»‚‘’‹›)\]）」』】]+$", "", text)
+    text = re.sub(r"^(?:\d+[.)]|[^\w¿¡])+", "", text)
+    text = re.sub(r"^(?:q|в|вопрос|question|frage)\s*[:.]\s*", "", text, flags=re.I)
     if not QUESTION.search(text):
         return False
-    return bool(re.search(r"[?？؟]\s*$", text)) or not _DECLARATIVE.match(text)
+    if re.search(r"[?？؟]\s*$", text):
+        return True
+    aux = _AUX.match(text)
+    if aux:
+        word = (aux.group(2) or "").lower()
+        if not word or word in ("not", "n't"):
+            return False
+        verb = aux.group(1).lower()
+        if verb in ("do", "can", "will") and word not in _SUBJECTS - (
+                {"this", "these", "that", "those", "your", "their"} if verb == "do" else set()) \
+                and not (aux.group(2)[0].isupper() and len(text.split()) >= 3):
+            return False
+    return not _DECLARATIVE.match(text)
 
 
 def check_extractable(page, cfg: dict = None) -> list:
@@ -581,7 +633,12 @@ def check_extractable(page, cfg: dict = None) -> list:
         issues.append(("info", page.url, "long-paragraph",
                        tr("{a0} абзац(ев) длиннее {a1} символов — такой блок трудно процитировать целиком", a0=len(long_paragraphs), a1=cfg['long_paragraph'])))
     blocks = page.blocks or {}
-    if page.word_count > 400 and not blocks.get("li") and not blocks.get("table"):
+    # Объём — по письменности: тайский, кхмерский и лаосский текст без
+    # пробелов — это не «17 слов». Один пункт списка (кнопка «Поделиться») —
+    # не список.
+    if (page.word_count > 400 or (getattr(page, "text", None) and text_volume(page) > 400)) \
+            and blocks.get("li", 0) < 2 and not blocks.get("table") \
+            and not blocks.get("dl"):
         issues.append(("info", page.url, "no-structure",
                        tr("в тексте нет ни списков, ни таблиц — структурные элементы повышают шанс попасть в ответ")))
     if blocks.get("img") and blocks.get("img_no_alt"):
@@ -753,15 +810,25 @@ def check_jsonld(page) -> list:
             issues.append(("warning", page.url, "jsonld-mismatch", tr(
                 "в JSON-LD {a0}, а на странице таких чисел нет — разметка должна повторять "
                 "видимое, иначе это риск ручных санкций", a0=", ".join(mismatch[:3]))))
-        for item in _ld_items(data):
+        items = _ld_items(data)
+        if not isinstance(data, (dict, list)):
+            # `null`, `"hello"`, `42` — блок без единой сущности.
+            issues.append(("info", page.url, "jsonld-no-type",
+                           tr("в блоке JSON-LD нет @type")))
+        nodes = {}
+        for item in items:
             # Контейнер `@graph` сам по себе типа не имеет — это обёртка,
             # а не сущность. Раньше каждая страница с разметкой Yoast
             # получала за неё ложную находку. Но `@context` без `@type`
             # рядом с данными — как раз забытый тип, а не обёртка.
-            if "@type" not in item and "@graph" not in item \
+            # `"@type": ""` — переменная шаблона, отрисованная пустой.
+            if not _filled(item.get("@type")) and "@graph" not in item \
                     and not set(item) <= {"@context", "@id"}:
                 issues.append(("info", page.url, "jsonld-no-type",
                                tr("в блоке JSON-LD нет @type")))
+            node_id = item.get("@id")
+            if isinstance(node_id, str) and node_id and item.get("name"):
+                nodes.setdefault(node_id, item)
         for item in _faq_pages(data):
             # Вопрос ищется во всём видимом тексте и после приведения обеих
             # сторон к одному виду: вёрстка ставит «’» вместо «'», тире
@@ -770,21 +837,32 @@ def check_jsonld(page) -> list:
             # Сверяется весь вопрос, а не первые 40 символов: в программном
             # FAQ отличается как раз хвост — город или товар.
             haystack = _plain(_shown_text(page))
+            # `<a>Springfield</a>'s` и `<span>depo</span><span>sit</span>`
+            # извлекатель разделяет пробелом, а браузер — нет.
+            squeezed = haystack.replace(" ", "")
             missing = []
             entities = item.get("mainEntity") or []
-            if isinstance(entities, dict):
+            if not isinstance(entities, list):
                 entities = [entities]
             for entity in entities:
                 if not isinstance(entity, dict):
                     continue
+                if "name" not in entity:
+                    # Yoast: `mainEntity: [{"@id": "…#faq-question-1"}]`, сам
+                    # вопрос — отдельный узел `@graph`.
+                    entity = nodes.get(entity.get("@id")) if isinstance(
+                        entity.get("@id"), str) else None
+                    if entity is None:
+                        continue
                 question = str(entity.get("name") or "").strip()
                 key = _question_key(question)
-                if key and key not in haystack:
+                if key and key not in haystack and key.replace(" ", "") not in squeezed:
                     missing.append(question)
             if missing:
                 issues.append(("warning", page.url, "jsonld-faq-invisible",
                                tr("{a0} вопрос(ов) из FAQPage нет в видимом тексте — разметка, не совпадающая со страницей, это риск ручных санкций", a0=len(missing))))
-    return issues
+    # Тема и плагин выводят один и тот же блок дважды — находка одна.
+    return list(dict.fromkeys(issues))
 
 
 # Числа разметки, которые читатель обязан видеть: цена предложения, рейтинг и
@@ -798,7 +876,9 @@ _LD_NUMBERS = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice
 
 def _ld_numbers(node, depth=0, inside_rating=False):
     """(поле, число) из разметки, вглубь, но только предложения и общий рейтинг."""
-    if depth > 8:
+    # Список товаров категории кладёт цену на глубину 9:
+    # @graph > CollectionPage > ItemList > ListItem > Product > offers > priceSpecification.
+    if depth > 16:
         return
     if isinstance(node, list):
         for value in node:
@@ -806,12 +886,14 @@ def _ld_numbers(node, depth=0, inside_rating=False):
         return
     if not isinstance(node, dict):
         return
-    types = {str(t).lower() for t in (node.get("@type") if isinstance(node.get("@type"), list)
-                                      else [node.get("@type")]) if t}
+    types = _ld_types(node)
     for key, value in node.items():
         low = str(key).lower()
         if low in ("review", "reviews"):
             continue                       # оценки отдельных отзывов на странице не обязаны быть
+        if low in _LD_NUMBERS and isinstance(value, dict) and "@value" in value \
+                and not isinstance(value["@value"], (dict, list)):
+            value = value["@value"]        # `{"@value": "1600"}` — то же число
         if low in _LD_NUMBERS and not isinstance(value, (dict, list)):
             rating_field = low in ("ratingvalue", "reviewcount", "ratingcount")
             if rating_field and not (inside_rating or "aggregaterating" in types):
@@ -840,7 +922,15 @@ def _visible_numbers(text: str) -> tuple:
             values.add(round(float(_norm_number(raw)), 4))
         except (ValueError, OverflowError):
             pass
-    for raw in _LOOSE_GROUPS.findall(text):
+    for m in _LOOSE_GROUPS.finditer(text):
+        raw = m.group(0)
+        # «4.2» — дробная часть «2» не число; «19,99 €» — десятичная запятая,
+        # а не разряды: склеенные «1999» засчитывали цену в центах.
+        if re.search(r"\d[.,]$", text[max(0, m.start() - 2):m.start()]):
+            continue
+        tail = re.search(r"[,'’\u00a0\u202f ]+(\d+)$", raw)
+        if tail and len(tail.group(1)) <= 2 and "," in tail.group(0):
+            continue
         digits.add(re.sub(r"\D", "", raw).lstrip("0") or "0")
     for m in _THOUSANDS.finditer(text):
         try:
@@ -876,6 +966,10 @@ def _ld_value(value):
     if isinstance(value, float) and not math.isfinite(value):
         return None
     text = str(value).strip()
+    if re.fullmatch(r"[+-]?\d+\.\d+", text):
+        # Число schema.org: точка — всегда десятичная. «1.600» — это 1.6,
+        # как его и прочтёт Google, а не 1600 немецкой записи.
+        return round(float(text), 4)
     try:
         number = float(_norm_number(text.replace(" ", "")))
     except OverflowError:
@@ -905,13 +999,27 @@ def _shown_text(page) -> str:
     return (page.text or "") + " " + (getattr(page, "chrome", "") or "")
 
 
+# Шкала оценки — не оценка: «5» из «4.2 out of 5» не подтверждает ratingValue 5.
+_RATING_SCALE = re.compile(r"(?:\bout\s+of|\bиз|\bvon|\bsur|/)\s*(?:5|10|100)(?![\d.,])", re.I)
+
+
 def _ld_numbers_missing(data, page) -> list:
     text = _shown_text(page)
     values, digits, thousands = _visible_numbers(text)
+    scaled = None
     out = []
     for field, value in _ld_numbers(data):
         number = _ld_value(value)
-        if number is None or number <= 0 or _shown(number, values, digits, thousands, text):
+        if number is None or number <= 0:
+            continue
+        if field == "ratingValue":
+            if scaled is None:
+                bare = _RATING_SCALE.sub(" ", text)
+                scaled = (_visible_numbers(bare), bare)
+            (r_values, r_digits, r_thousands), bare = scaled
+            if _shown(number, r_values, r_digits, r_thousands, bare):
+                continue
+        elif _shown(number, values, digits, thousands, text):
             continue
         shown = f"{field} {value}"
         if shown not in out:
@@ -933,7 +1041,7 @@ def check_microdata(page) -> list:
     prices = getattr(page, "microdata", None) or ()
     if not prices:
         return []
-    text = (page.text or "") + " " + (getattr(page, "chrome", "") or "")
+    text = _shown_text(page)
     values, digits, thousands = _visible_numbers(text)
     in_ld = set()
     for raw in page.jsonld or ():
@@ -999,7 +1107,15 @@ def _ld_items(data) -> list:
 def _ld_types(item: dict) -> set:
     value = item.get("@type")
     values = value if isinstance(value, list) else [value]
-    return {str(v).lower() for v in values if v}
+    return {_type_name(v) for v in values if v}
+
+
+def _type_name(value) -> str:
+    """`https://schema.org/FAQPage` и `schema:FAQPage` — тот же тип, что `FAQPage`."""
+    name = str(value).strip().lower()
+    if "schema.org/" in name:
+        return name.rsplit("/", 1)[-1]
+    return name[7:] if name.startswith("schema:") else name
 
 
 DATE_KEYS = ("datepublished", "datemodified", "date", "updated", "published")

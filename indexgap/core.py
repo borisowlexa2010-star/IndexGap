@@ -848,6 +848,10 @@ class _Extractor(HTMLParser):
         # но сверка разметки с видимым ведётся без него. Стек — (глубина, id).
         self._hidden_stack = []
         self._hidden_ids = ()
+        # visibility:hidden наследуется, но потомок с visibility:visible снова
+        # виден. Глубины таких потомков и глубины скрытых только visibility.
+        self._reveal_stack = []
+        self._vis_only = set()
         self._any_hidden = False
         # Весь текст по порядку: (кусок, приклеивать ли, id скрытых предков).
         self._shown_chunks = []
@@ -906,8 +910,12 @@ class _Extractor(HTMLParser):
             self._code_stack.pop()
         if self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
             while self._hidden_stack and self._hidden_stack[-1][0] > self._depth:
-                self._hidden_stack.pop()
-            self._hidden_ids = tuple(i for _, i in self._hidden_stack)
+                self._vis_only.discard(self._hidden_stack.pop()[0])
+            self._update_hidden()
+        if self._reveal_stack and self._reveal_stack[-1] > self._depth:
+            while self._reveal_stack and self._reveal_stack[-1] > self._depth:
+                self._reveal_stack.pop()
+            self._update_hidden()
         while self._scope_stack and self._scope_stack[-1] > self._depth:
             self._scope_stack.pop()
         if self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -921,6 +929,10 @@ class _Extractor(HTMLParser):
                 self._flush_paragraph()
                 while self._data_stack and self._data_stack[-1] > self._depth:
                     self._data_stack.pop()
+
+    def _update_hidden(self):
+        top = self._reveal_stack[-1] if self._reveal_stack else 0
+        self._hidden_ids = tuple(i for d, i in self._hidden_stack if d > top)
 
     def _microdata_price(self, tag: str, a: dict):
         """
@@ -1030,7 +1042,14 @@ class _Extractor(HTMLParser):
             self._depth = len(self._open)
             if hides:
                 self._hidden_stack.append((self._depth, a.get("id", "").strip()))
-                self._hidden_ids = tuple(i for _, i in self._hidden_stack)
+                if "hidden" not in a and not _STYLE_NONE.search(a.get("style", "")):
+                    self._vis_only.add(self._depth)
+                self._update_hidden()
+            elif self._hidden_ids and _STYLE_VISIBLE.search(a.get("style", "")) and all(
+                    d in self._vis_only for d, _ in self._hidden_stack
+                    if d > (self._reveal_stack[-1] if self._reveal_stack else 0)):
+                self._reveal_stack.append(self._depth)
+                self._update_hidden()
         if tag not in VOID_TAGS and (tag in MAIN_TAGS
                                      or a.get("role", "").lower() == "main"):
             self._main_stack.append((tag, self._depth))
@@ -1089,8 +1108,12 @@ class _Extractor(HTMLParser):
             # Пункт меню до <main> — не список статьи.
             if tag == "li" and not self._chrome_stack and not self._aside_stack:
                 self.blocks["li"] += 1
-            elif tag == "table":
+            elif tag == "table" and a.get("role", "").lower() not in ("presentation", "none"):
+                # Таблица вёрстки — не таблица данных.
                 self.blocks["table"] += 1
+            elif tag == "dt" and not self._chrome_stack and not self._aside_stack:
+                # Список терминов — тоже список.
+                self.blocks["dl"] = self.blocks.get("dl", 0) + 1
             elif tag == "p":
                 self.blocks["p"] += 1
             elif tag == "img":
@@ -1380,6 +1403,8 @@ _IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
 # панель; `S:0`, `P:0` — потоковый рендер React: скрипт переносит блок на
 # место сразу после загрузки.
 _STYLE_HIDDEN = re.compile(r"(?<![\w-])(?:display\s*:\s*none|visibility\s*:\s*hidden)(?![\w-])", re.I)
+_STYLE_NONE = re.compile(r"(?<![\w-])display\s*:\s*none(?![\w-])", re.I)
+_STYLE_VISIBLE = re.compile(r"(?<![\w-])visibility\s*:\s*visible(?![\w-])", re.I)
 _STREAMED_ID = re.compile(r"^[SP]:\d+$")
 
 
@@ -1397,7 +1422,9 @@ def _hides(attrs: dict) -> bool:
 
 
 def _is_aside(tag: str, attrs: dict) -> bool:
-    if tag == "nav" or attrs.get("role", "").lower() == "navigation":
+    # Врезка <aside> — не ответ: «Related reading…» становилась первым
+    # абзацем и прятала разгон.
+    if tag in ("nav", "aside") or attrs.get("role", "").lower() == "navigation":
         return True
     if tag in _ASIDE_NEVER:
         return False
