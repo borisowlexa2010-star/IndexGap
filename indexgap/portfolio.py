@@ -41,6 +41,10 @@ from .core import SourceError, check_site_url, load_pages, read_text, url_key
 from .i18n import tr
 
 REQUIRED = ("name", "root", "site")
+# Поля проекта, которые портфель читает. Опечатка (`datset`) молча
+# отключала датасет — о ней теперь пишется заметка.
+KNOWN = REQUIRED + ("profile", "dataset", "sitemap", "robots", "config", "out", "home",
+                    "keyword", "indexed", "freshness")
 
 # Находки, которые целиком зависят от настраиваемого порога. Если такая
 # срабатывает почти везде, вопрос к порогу, а не к страницам.
@@ -93,6 +97,7 @@ def read_portfolio(path: str) -> list:
                                  "строк.", a0=path, a1=name))
         resolved = dict(spec)
         resolved["name"] = name
+        resolved["_unknown"] = sorted(str(k) for k in spec if k not in KNOWN)
         resolved["site"] = check_site_url(str(spec["site"]))
         for key in ("root", "dataset", "sitemap", "robots", "config", "out"):
             value = spec.get(key)
@@ -132,7 +137,22 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         if not pages:
             raise SourceError(tr("в {a0} нет ни одной страницы", a0=spec['root']))
         result["pages"] = len(pages)
+        import difflib
+        for key in spec.get("_unknown") or ():
+            close = difflib.get_close_matches(key, list(KNOWN), n=1, cutoff=0.7)
+            result["notes"].append(
+                tr("поле «{a0}» проекта мне не знакомо и не действует", a0=key)
+                + (tr(" — возможно, имелось в виду «{a0}»", a0=close[0]) if close else ""))
         result["notes"] += problems
+        # Названный файл обязан существовать, как в `check`: опечатка в пути
+        # к robots.txt давала «robots.txt нет» вместо его настоящих правил.
+        for key in ("sitemap", "robots"):
+            value = spec.get(key)
+            if value and "://" not in value and not os.path.isfile(value):
+                raise SourceError(tr("{a0} {a1}: такого файла нет.", a0=key, a1=value))
+        if spec.get("out"):
+            from .cli import check_out_path
+            check_out_path(spec["out"])
 
         # indexgap.json проекта действует и здесь, как в `check`: профиль и
         # датасет оттуда, если портфель их не назвал. Иначе один и тот же
@@ -147,13 +167,16 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             result["profile"] = own["profile"]
 
         rows = []
+        keyword = spec.get("keyword") or "keyword"
         if dataset:
             data = generate.read_dataset(dataset)
             rows = data["rows"]
             result["notes"] += data["problems"]
+            keyword = _keyword_field(keyword, bool(spec.get("keyword")),
+                                     list(data.get("fields") or ()), dataset, result["notes"])
 
         project = settings.resolve(spec["root"], pages, rows,
-                                   spec.get("keyword", "keyword"),
+                                   keyword,
                                    spec.get("config", ""))
         project = profiles.apply(project, result["profile"])
         result["notes"] += project.get("_config_notes") or []
@@ -172,6 +195,14 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
             result["notes"].append(
                 tr("профиль «{a0}» рассчитан на страницы из датасета, но датасет не указан — сверка фактов не выполнялась", a0=result['profile']))
 
+        sm = doctor.read_sitemap(spec["sitemap"]) if spec.get("sitemap") else None
+        if sm and not sm["error"]:
+            # hreflang из sitemap — до проверок, как в `check`: иначе пара
+            # региональных версий становилась критичным почти-дублем.
+            given = doctor.apply_sitemap_alternates(pages, sm.get("alternates"))
+            if given:
+                result["notes"].append(tr("hreflang взят из sitemap для {a0} страниц(ы): в "
+                                          "самих страницах его нет", a0=given))
         home = spec.get("home") or (spec["site"]
                                     if url_key(spec["site"]) in {p.key for p in pages}
                                     else None)
@@ -197,7 +228,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         if not project["_skip_facts"]:
             cfg = dict(project.get("content") or {})
             cfg["vague_anchors"] = project.get("vague_anchors", [])
-            text_result = content.run(pages, rows, spec.get("keyword", "keyword"),
+            text_result = content.run(pages, rows, keyword,
                                       spec["root"], cfg=cfg,
                                       fact_units=project.get("fact_units"))
             analysis["issues"] += text_result["issues"]
@@ -222,8 +253,7 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
         # Закрытые ветки и sitemap — тем же порядком, что в `check`: иначе
         # один проект получал в портфеле другой счёт критичных.
         analysis["issues"] = checks.collapse_closed_groups(analysis["issues"], pages)
-        if spec.get("sitemap"):
-            sm = doctor.read_sitemap(spec["sitemap"])
+        if sm is not None:
             if sm["error"]:
                 result["notes"].append(tr("sitemap не прочитан: {a0}", a0=sm['error']))
             else:
@@ -255,7 +285,28 @@ def run_one(spec: dict, quiet: bool = False) -> dict:
                 notes=result["notes"], title=tr("Проверка — {a0}", a0=name))
     except SourceError as exc:
         result["error"] = str(exc)
+    except OSError as exc:
+        # Отчёт одного проекта не записался — остальные проекты всё равно считаются.
+        result["error"] = tr("{a0}: не удалось записать или прочитать ({a1}).",
+                             a0=exc.filename or spec.get("out") or name, a1=exc.strerror or exc)
     return result
+
+
+def _keyword_field(field: str, explicit: bool, fields: list, path: str, notes: list) -> str:
+    """Колонка с ключом — так же, как в `check`: догадка по Ahrefs-«Keyword», явное имя строго."""
+    from . import sources
+    if field in fields or not fields:
+        return field
+    if explicit:
+        raise SourceError(tr("Колонки «{a0}» в {a1} нет.\n    Есть: {a2}\n    Укажи нужную: "
+                             "поле `keyword` проекта", a0=field, a1=path, a2=", ".join(fields)))
+    guess = sources.guess_column(fields, sources.KEYWORD_COLUMN_HINTS)
+    if guess >= 0:
+        notes.append(tr("колонка с ключом не названа `keyword` — взята «{a0}». Если это не "
+                        "она, укажи поле `keyword` проекта", a0=fields[guess]))
+        return fields[guess]
+    raise SourceError(tr("Колонки с ключевым словом в {a0} не нашлось.\n    Есть: {a1}\n    "
+                         "Укажи нужную: поле `keyword` проекта", a0=path, a1=", ".join(fields)))
 
 
 def build_file(folder: str, name: str) -> str:
@@ -344,7 +395,8 @@ def common_patterns(results: list, min_projects: int = 2) -> list:
                       and code in THRESHOLD_CODES)
         out.append({
             "code": code,
-            "level": sorted(v["level"] for v in by_project.values())[0],
+            "level": min((v["level"] for v in by_project.values()),
+                         key=lambda lv: {"critical": 0, "warning": 1, "info": 2}.get(lv, 3)),
             "scope": "site" if code in site_level else "page",
             "threshold_suspect": near_total,
             "projects": sorted(by_project),

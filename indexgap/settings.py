@@ -345,6 +345,10 @@ def check_section(section: str, values) -> list:
             if not ((0 <= value if low_ok else 0 < value) and value <= 1):
                 raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
                                      a2=tr("нужна доля от 0 до 1 — например 0.8, а не 80")))
+        elif key == "grace_days" and not value <= 36500:
+            # timedelta на миллиарды дней роняла прогон трассировкой.
+            raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
+                                 a2=tr("нужно число дней не больше 36500")))
         elif value < (0 if key in _ZERO_OK else 1):
             raise SourceError(tr("настройка «{a0}» = {a1}: {a2}", a0=name, a1=value,
                                  a2=tr("нужно целое число не меньше 1") if key not in _ZERO_OK

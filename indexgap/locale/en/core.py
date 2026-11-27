@@ -166,4 +166,16 @@ MESSAGES = {
         "{a0} of {a1} pages carry an event date",
     'canonical {a0} из {a1} страниц называют сайт адресом {a2}, а --site — {a3}. Страницы сверены с {a2}; адреса в sitemap и в отчёте строятся от --site — если сайт живёт по {a2}, укажи --site {a2}':
         'the canonical of {a0} of {a1} pages names the site {a2}, but --site is {a3}. Pages were compared against {a2}; addresses in the sitemap and in the report are built from --site, so if the site lives at {a2}, pass --site {a2}',
+    'поле «{a0}» проекта мне не знакомо и не действует':
+        'project field “{a0}” is not one I know and has no effect',
+    '{a0}: не удалось записать или прочитать ({a1}).':
+        '{a0}: could not write or read it ({a1}).',
+    'Колонки «{a0}» в {a1} нет.\n    Есть: {a2}\n    Укажи нужную: поле `keyword` проекта':
+        "There is no “{a0}” column in {a1}.\n    There is: {a2}\n    Name the right one: the project's `keyword` field",
+    'колонка с ключом не названа `keyword` — взята «{a0}». Если это не она, укажи поле `keyword` проекта':
+        "the keyword column is not called `keyword` — took “{a0}”. If that is not it, set the project's `keyword` field",
+    'Колонки с ключевым словом в {a0} не нашлось.\n    Есть: {a1}\n    Укажи нужную: поле `keyword` проекта':
+        "No keyword column was found in {a0}.\n    There is: {a1}\n    Name the right one: the project's `keyword` field",
+    'нужно число дней не больше 36500':
+        'a number of days no larger than 36500 is needed',
 }

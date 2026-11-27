@@ -643,4 +643,6 @@ MESSAGES = {
     "в sitemap стоят заглушки-редиректы ({a0}): {a1}. Поисковик отметит их как страницы с переадресацией — в sitemap нужен адрес, куда они ведут.":
         "the sitemap lists redirect stubs ({a0}): {a1}. Search engines will report them as pages with redirect — the sitemap needs the address they lead to.",
     " и ещё {a0}": " and {a0} more",
+    '  ! источники индекса другие (добавлены: {a0}; убраны: {a1}) — шаг индекса и разделы не сравниваются':
+        '  ! the index sources are different (added: {a0}; removed: {a1}) — the index step and the sections are not compared',
 }

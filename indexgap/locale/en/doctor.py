@@ -340,4 +340,6 @@ MESSAGES = {
         '{a0} is kept off {a1} of {a2} open pages (rule “Disallow: {a3}”): {a4}',
     'в {a0} запрос(ах) ботов к страницам не нашёлся код ответа — открыл ли бот эти страницы, по логу не понять, и в шаг «открыто» они не засчитаны. Проверь, в каком поле лог пишет статус':
         '{a0} bot request(s) to pages have no response status — the log does not show whether the bot got those pages, so they are not counted as opened. Check which field the log writes the status to',
+    '{a0}: данные прогона doctor повреждены или правлены руками — сравнивать с ними нельзя':
+        '{a0}: the doctor run data is damaged or was edited by hand — it cannot be compared against',
 }
