@@ -204,7 +204,10 @@ _BLOCK_ALL = {"/", "/*", "/*$"}
 def _blocks_everything(entry: dict) -> bool:
     disallow = {d.strip() for d in (entry.get("disallow") or [])}
     allow = {a.strip() for a in (entry.get("allow") or [])}
-    return bool(disallow & _BLOCK_ALL) and not (allow & _BLOCK_ALL)
+    # `Disallow: /` со списком `Allow: /a/` — белый список, а не полный
+    # запрет: открытые разделы читаются, и закрытое считается постранично.
+    # Одна главная (`Allow: /$`) сайт не открывает.
+    return bool(disallow & _BLOCK_ALL) and not (allow - {"", "/$"})
 
 
 def _search_bot_closed(entry: dict) -> bool:

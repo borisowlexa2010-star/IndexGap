@@ -165,9 +165,17 @@ def _home_url(args, pages):
     Прежний способ на каталоге раздела объявлял недостижимыми все страницы,
     кроме одной случайно выбранной.
     """
-    if getattr(args, "home", None):
-        return args.home
     keys = {p.key for p in pages}
+    if getattr(args, "home", None):
+        # `--home /en/` — путь от --site. Главная, которой нет среди страниц,
+        # молча выключала глубину и недостижимость, а виноватым называлось --site.
+        from urllib.parse import urljoin
+        home = urljoin(args.site.rstrip("/") + "/", args.home) if args.site else args.home
+        if pages and url_key(home) not in keys:
+            raise SourceError(tr("--home {a0}: такой страницы нет среди разобранных файлов. "
+                                 "Укажи адрес страницы сборки — полный или путь от --site.",
+                                 a0=args.home))
+        return home
     return args.site if url_key(args.site) in keys else None
 
 
@@ -714,6 +722,13 @@ def _analyse(args, pages=None):
     analysis["issues"], accepted = checks.apply_ignore(
         analysis["issues"], project.get("ignore"), args.site)
     analysis["accepted"] = accepted
+    # Карточка отчёта и JSON считают сирот по графу, консоль — по находкам.
+    # Закрытые копии и принятые намеренно убраны из находок — и из графа.
+    graph = analysis.get("graph") or {}
+    for field, code in (("orphans", "orphan"), ("unreachable", "unreachable")):
+        if field in graph:
+            kept = {i[1] for i in analysis["issues"] if i[2] == code}
+            graph[field] = [u for u in graph[field] if u in kept]
     if accepted:
         print(tr("Принято намеренно (ignore в indexgap.json): {a0} — в счёт и в наряды не идут",
                  a0=len(accepted)))

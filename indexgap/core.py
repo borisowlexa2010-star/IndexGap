@@ -334,6 +334,9 @@ class Page:
     # элемента: текст элемента и так виден. Только внутри `itemscope`,
     # `typeof` или `vocab`: вне элемента-сущности поисковик их не читает.
     microdata: list = field(default_factory=list)
+    # Служебные блоки основного текста: крошки, подпись автора, оглавление.
+    # Абзацами они не становятся, но в text остаются.
+    service: list = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -418,6 +421,9 @@ Page.paragraphs = property(_get_paragraphs, _set_paragraphs)
 _EXT_RE = re.compile(r"\.(html?|md|markdown)$", re.I)
 _BARE_INDEX = re.compile(r"(^|/)index$", re.I)
 _INDEX_RE = re.compile(r"(^|/)index\.(html?|md|markdown)$", re.I)
+# Hugo: `_index.md` — страница раздела (`content/posts/_index.md` — /posts/),
+# в корне — главная. Адреса `/_index/` на сайте нет.
+_HUGO_INDEX = re.compile(r"(^|/)_index\.(md|markdown)$", re.I)
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -505,6 +511,7 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
     # macOS пишет имена файлов в NFD, ссылки на сайте — в NFC. Адрес один.
     rel = unicodedata.normalize("NFC", rel)
     rel = _INDEX_RE.sub(r"\1", rel)
+    rel = _HUGO_INDEX.sub(r"\1", rel)
     rel = _EXT_RE.sub("", rel)
     if rel in (".", ""):
         rel = ""
@@ -549,7 +556,9 @@ def check_site_url(site: str) -> str:
                a0=site, a1=urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))))
     # Пробел и кириллица в пути базы шли в <loc> как есть, а пути страниц
     # уже кодируются. Готовые %-последовательности не трогаются.
-    path = quote(parts.path, safe="/%~-._!$&'()*+,;=:@")
+    # `--site https://x/docs/index.html` — адрес главной файлом: имя файла
+    # становилось каталогом, и страницы получали `/docs/index.html/a/`.
+    path = quote(_INDEX_RE.sub(r"\1", parts.path), safe="/%~-._!$&'()*+,;=:@")
     site = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
     return site.rstrip("/") + "/"
 
@@ -1273,6 +1282,14 @@ class _Extractor(HTMLParser):
         if self._saw_main and self._main_chunks:
             return ""
         return self._join(self._framed)
+
+    @property
+    def service_blocks(self) -> list:
+        self._flush_paragraph()
+        found = self._paragraphs
+        if self._saw_main and any(in_main for _, in_main, _ in found):
+            found = [p for p in found if p[1]]
+        return [text for text, _, kind in found if kind == _SERVICE]
 
     @property
     def paragraphs(self) -> list:
@@ -2003,6 +2020,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             alts=ex.alts,
             shown=ex.shown_text,
             microdata=ex.microdata,
+            service=ex.service_blocks,
         )
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что
