@@ -494,16 +494,50 @@ def url_key(url: str) -> str:
     path = _EXT_RE.sub("", path)
     # `/resource/index` без расширения — та же страница: VitePress с
     # cleanUrls ссылается так на каждой странице, и вышло 307 «битых» ссылок.
+    slashed = path.endswith("/")
     if len(path) > 1:
         path = path.rstrip("/")
         # Каталог с именем файла — `c.html/index.html`: сервер отдаёт его и по
         # /c.html, а ключ страницы расходился с ключом ссылки.
         path = _EXT_RE.sub("", path)
+    unfolded = path
     path = _BARE_INDEX.sub(r"\1", path)
     if len(path) > 1:
         path = path.rstrip("/")
     if not path:
         path = "/"
+    host = _key_host(parts)
+    query = parts.query
+    if _INDEX_DIRS and path != unfolded:
+        # В сборке есть настоящий каталог `index/` со своей страницей.
+        # `/glossary/index/` со слешем — она; без слеша — по-старому, если
+        # у родителя своя страница есть.
+        parent = _INDEX_DIRS.get(urlunsplit(("", host, unfolded, "", "")))
+        if parent is not None and (slashed or not parent):
+            path = unfolded
+    return urlunsplit(("", host, path, query, ""))
+
+
+# Ключи `//host/a/index` настоящих каталогов `index/` со страницей внутри —
+# и есть ли страница у родителя `/a/`. Заполняет `load_pages`; только растёт:
+# ключи уже загруженных страниц (вторая сборка в diff) не должны сдвигаться.
+_INDEX_DIRS = {}
+
+
+def _register_index_dirs(found: dict) -> None:
+    changed = False
+    for key, parent in found.items():
+        # Хоть в одной сборке у родителя нет страницы — ссылке без слеша
+        # не мешаем дойти до каталога.
+        value = _INDEX_DIRS.get(key, True) and parent
+        if _INDEX_DIRS.get(key) is not value:
+            _INDEX_DIRS[key] = value
+            changed = True
+    if changed:
+        url_key.cache_clear()
+
+
+def _key_host(parts) -> str:
     host = (parts.netloc or "").lower()
     # Кириллический домен и его punycode — один хост: ссылка на
     # `xn--e1afmkfd.xn--p1ai` с сайта `пример.рф` считалась внешней.
@@ -520,8 +554,7 @@ def url_key(url: str) -> str:
             host = host[: -len(port)]
     if host.startswith("www."):
         host = host[4:]
-    query = parts.query
-    return urlunsplit(("", host, path, query, ""))
+    return host
 
 
 @functools.lru_cache(maxsize=1 << 18)
@@ -3363,6 +3396,31 @@ def _apply_fetch_manifest(pages: list, root: str, base_url: str) -> None:
 _INDEX_NAME = re.compile(r"index\.(?:html?|md|markdown)$", re.I)
 
 
+def _index_dir_key(url: str) -> str:
+    """Ключ страницы каталога `index/` без свёртки `/a/index` в `/a`."""
+    parts = urlsplit(url)
+    path = re.sub(r"/{2,}", "/", unicodedata.normalize("NFC", unquote(parts.path or "/")))
+    return urlunsplit(("", _key_host(parts), path.rstrip("/") or "/", "", ""))
+
+
+def _has_own_page(folder: str, root: str, exts) -> bool:
+    """У каталога своя страница: `a/index.html`, `a/_index.md` или `a.html`."""
+    for ext in exts:
+        if (os.path.isfile(os.path.join(folder, "index" + ext))
+                or os.path.isfile(os.path.join(folder, "_index" + ext))
+                or (os.path.abspath(folder) != os.path.abspath(root)
+                    and os.path.isfile(folder.rstrip(os.sep) + ext))):
+            return True
+    return False
+
+
+def _twin_links(page) -> tuple:
+    """Исходящие пропущенного двойника: ссылки, nofollow-ссылки, редирект, nofollow страницы."""
+    from .checks import redirect_target
+    return (list(page.links), list(page.__dict__.get("_nofollow_links", ())),
+            redirect_target(page), page.nofollow)
+
+
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
     """
     Возвращает (страницы, проблемы). Проблемы — это файлы, которые не прочитались,
@@ -3370,7 +3428,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
     а два файла с одинаковым URL молча давали дубль в sitemap.
     """
     pages, problems, by_key, loaded, fragments = [], [], {}, [], []
-    todo, maybe_error, hidden_dirs = [], set(), []
+    todo, maybe_error, hidden_dirs, index_dirs = [], set(), [], {}
     source_repo = any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS)
     # Исходники для GitHub Pages: `.md` без шапки там собирается в страницу,
     # а README.md становится главной, если своей главной в каталоге нет.
@@ -3455,6 +3513,13 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             readme_home = ((jekyll or not source_repo) and name.lower() == "readme.md"
                            and not any(f.lower().startswith("index.") for f in filenames))
             todo.append((path, root, base_url, readme_home))
+            if (dirpath != root and os.path.basename(dirpath).lower() == "index"
+                    and (_INDEX_NAME.match(name) or _HUGO_INDEX.match(name))):
+                index_dirs[_index_dir_key(path_to_url(path, root, base_url))] = \
+                    _has_own_page(os.path.dirname(dirpath), root, exts)
+    # До разбора: ссылки `/a/index/` в разобранных страницах должны вести
+    # на страницу каталога `index/`, а не на `/a/`.
+    _register_index_dirs(index_dirs)
     if hidden_dirs:
         problems.append(tr(
             "каталоги со служебными именами пропущены, страницы в них не проверялись: {a0}",
@@ -3510,6 +3575,9 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             a1=", ".join(os.path.relpath(p, root).replace(os.sep, "/") for p in fragments[:5])))
     position = {}
 
+    def twin_of(page):
+        return page.__dict__.setdefault("_twins", [])
+
     def served(a, b):
         """Тот из двух файлов, который отдаёт хост, — или None, если не ясно."""
         da, na = os.path.split(a.path)
@@ -3549,6 +3617,16 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                           (len(page.links), len(page.text)) >
                           (len(other.links), len(other.text)))
                       else (other, page))
+        # `about.html` и `about/index.html` хост отдаёт по разным адресам, и
+        # если сайт ссылается на оба (или форму не узнать), ссылки второго
+        # краулер тоже видит. Без них страница, на которую ссылается только
+        # он, становилась ложной сиротой. В граф они идут от ключа оставленной.
+        # Старый `index.htm` рядом с `index.html` по ссылкам не открывается.
+        if host is None and ((_INDEX_NAME.match(os.path.basename(page.path)) is None)
+                             != (_INDEX_NAME.match(os.path.basename(other.path)) is None)):
+            twin_of(keep).append(_twin_links(drop))
+        if drop.__dict__.get("_twins"):
+            twin_of(keep).extend(drop.__dict__.pop("_twins"))
         problems.append(
             tr("{a0} и {a1} дают один URL {a2} — взят {a3}, второй пропущен", a0=os.path.relpath(drop.path, root), a1=os.path.relpath(keep.path, root), a2=keep.url, a3=os.path.relpath(keep.path, root)))
         if keep is page:
@@ -3688,9 +3766,10 @@ def _parse_chunk(jobs):
     return [_parse_one(job) for job in jobs]
 
 
-def _init_worker(lang):
+def _init_worker(lang, index_dirs=None):
     from . import i18n
     i18n.set_lang(lang)
+    _register_index_dirs(index_dirs or {})
 
 
 PARALLEL_FROM = 2000
@@ -3712,7 +3791,7 @@ def _parse_all(todo: list, jobs: int = 1) -> list:
     chunks = [todo[i:i + size] for i in range(0, len(todo), size)]
     try:
         with ProcessPoolExecutor(jobs, initializer=_init_worker,
-                                 initargs=(i18n.get_lang(),)) as pool:
+                                 initargs=(i18n.get_lang(), dict(_INDEX_DIRS))) as pool:
             return [item for part in pool.map(_parse_chunk, chunks) for item in part]
     except (OSError, ImportError, NotImplementedError, RuntimeError):
         # Нет процессов (песочница, Lambda) — разбираем по-старому.
