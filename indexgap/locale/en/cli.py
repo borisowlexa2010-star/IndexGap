@@ -636,6 +636,18 @@ MESSAGES = {
         '  ! the baseline was made with fact-checking against a dataset, this run without it: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Pass the same --dataset',
     '  ! база искала дубли методом «{a0}», этот прогон — «{a1}» (порог exact_below): из исчезнувших {a2} — находки о дублях, их сравнение приблизительно. Для точной сверки задай тот же метод через checks.exact_below':
         '  ! the baseline searched for duplicates with “{a0}”, this run with “{a1}” (the exact_below threshold): {a2} of the gone findings are about duplicates, and that comparison is approximate. For an exact comparison set the same method with checks.exact_below',
+    '  ! база снята со сверкой фактов по датасету, а в этом прогоне её выключил --no-content: {a0} находок сверки не проверены и в «исчезло» не входят, а новые числа не сверялись. Запусти без --no-content':
+        '  ! the baseline was made with fact-checking against a dataset, and in this run --no-content turned it off: {a0} fact findings were not checked and are not counted as gone, and new numbers were not checked. Run without --no-content',
+    '  ! база снята со сверкой фактов по датасету, а профиль «{a1}» фактов не сверяет: {a0} находок сверки не проверены и в «исчезло» не входят':
+        '  ! the baseline was made with fact-checking against a dataset, and the "{a1}" profile does not check facts: {a0} fact findings were not checked and are not counted as gone',
+    '  находок базы из проверок, выключенных в этом прогоне: {a0} — их не искали, и в «исчезло» они не входят':
+        '  baseline findings from checks turned off in this run: {a0} — they were not looked for and are not counted as gone',
+    '{a0}: находка базовой линии записана не так, как её пишет `indexgap check`: {a1}':
+        '{a0}: a baseline finding is not written the way `indexgap check` writes it: {a1}',
+    '  ! индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг индекса и разделы не сравниваются':
+        '  ! the runs took the index from different sources ({a0} → {a1}) — the index step and the sections are not compared',
+    '  ✓ разрыв ИИ-поиска закрыт: {a0}':
+        '  ✓ AI-search gap closed: {a0}',
     'индекс':
         'index',
     '  ! данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются':

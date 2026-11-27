@@ -2355,7 +2355,8 @@ def check_slots(pages: list, fields=(), cfg: dict = None) -> list:
         if critical or empty:
             shown = ", ".join(f"«{s}»" for s in (critical or empty)[:3])
             issues.append(("critical" if critical else "warning", page.url, "unfilled-slot",
-                           tr("незаполненные места шаблона: {a0}", a0=shown)))
+                           Said(tr("незаполненные места шаблона: {a0}", a0=shown),
+                                (f"«{s}»" for s in critical or empty))))
         if llm:
             issues.append(("warning", page.url, "llm-leftover",
                            tr("в тексте остался ответ модели, а не текст страницы: «{a0}»",
