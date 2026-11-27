@@ -219,10 +219,12 @@ def _segments_html(result: dict, limit: int = 30) -> str:
         f'<td class="n">{r["coverage"]:.0%}</td>'
         + (f'<td class="n">{r.get("cited", 0)}</td>' if cited else "") + '</tr>'
         for r in ordered[:limit])
+    more = (tr("<p class=\"note\">Показано разделов: {a0} из {a1}. Остальные — в JSON.</p>",
+               a0=limit, a1=len(ordered)) if len(ordered) > limit else "")
     return (tr("<h2>Разрывы по разделам</h2>")
             + tr("<div class=\"scroll\"><table><thead><tr><th>раздел</th><th class=\"n\">страниц</th><th class=\"n\">нет в sitemap</th><th class=\"n\">нет в индексе</th><th class=\"n\">дошло</th>")
             + (tr("<th class=\"n\">процитировано</th>") if cited else "") + "</tr></thead><tbody>"
-            + body + "</tbody></table></div>"
+            + body + "</tbody></table></div>" + more
             + tr("<p class=\"note\">По сайту до конца воронки дошло {a0:.0%}. Выделены разделы, которые теряют заметно больше остального сайта: причина там обычно одна на весь раздел — шаблон, перелинковка или sitemap раздела.</p>",
                  a0=result["site"]["coverage"]))
 
@@ -252,7 +254,9 @@ def _crawlers_html(crawl: dict, ai_seg: dict = None) -> str:
             for r in ordered[:30])
         out += (tr("<h3>Что ИИ-поиск не открывал, по разделам</h3>")
                 + tr("<div class=\"scroll\"><table><thead><tr><th>раздел</th><th class=\"n\">страниц</th><th class=\"n\">не открыто</th><th class=\"n\">по запросу человека</th><th class=\"n\">открыто</th></tr></thead><tbody>")
-                + body + "</tbody></table></div>")
+                + body + "</tbody></table></div>"
+                + (tr("<p class=\"note\">Показано разделов: {a0} из {a1}. Остальные — в JSON.</p>",
+                      a0=30, a1=len(ordered)) if len(ordered) > 30 else ""))
     notes = "".join(f'<p class="note">{_esc(n)}</p>' for n in crawl.get("notes") or ())
     return out + tr("<p class=\"note\">Обучающие боты (GPTBot, ClaudeBot, CCBot) на цитирование сегодня не влияют, поэтому в «открыто ИИ-поиском» не считаются. «По запросу человека» — ассистент открыл страницу, отвечая на чей-то вопрос.</p>") + notes
 
@@ -279,8 +283,10 @@ def _funnel_html(f: dict) -> str:
 
 def _first_things(issues: list, graph: dict, dupes: list) -> str:
     """Три числа и порядок действий — то, с чего начинают."""
-    counts = Counter(item[2] for item in issues
-                     if len(item) >= 3 and item[0] == "critical")
+    # Страницы, а не находки: одна страница с четырьмя односторонними
+    # hreflang — это одна страница, а не «4 стр.».
+    counts = Counter(code for code, _ in {(item[2], item[1]) for item in issues
+                                          if len(item) >= 3 and item[0] == "critical"})
     # Тот же порядок, что в консоли (`Чинить в этом порядке`): находка уровня
     # сайта — одна правка с самым большим радиусом, а по числу всегда единица.
     # robots.txt, закрывший весь сайт, уступал двум дублям и сюда не попадал.
@@ -368,9 +374,14 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
     graph = analysis.get("graph") or {}
     dupes = analysis.get("duplicates") or []
     counts = Counter(i[0] for i in issues if i)
+    accepted = analysis.get("accepted") or []
 
     warn_html = "".join(
         f'<div class="warnbox">{_esc(n)}</div>' for n in (notes or []))
+    # Принятые через ignore не пропадают молча и из отчёта, которым делятся.
+    accepted_html = (tr("<p class=\"note\">Принято намеренно (ignore в indexgap.json): {a0} — "
+                        "в счёт не идут; список — в JSON, в поле accepted.</p>",
+                        a0=len(accepted)) if accepted else "")
 
     dupe_rows = "".join(
         f'<tr><td class="mono">{_esc(a.url)}</td><td class="mono">{_esc(b.url)}</td>'
@@ -398,7 +409,7 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
         (tr("<h2>Почему у страниц нет показов</h2>")
          if (funnel_result or {}).get("impressions_only")
          else tr("<h2>Почему страницы не в индексе</h2>"))
-        + tr("<div class=\"scroll\"><table><thead><tr><th>причина</th><th class=\"n\">страниц</th><th>что делать</th></tr></thead><tbody>") + cause_rows + tr("</tbody></table></div><p class=\"note\">Разбор адресный: конкретные URL по каждой причине лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>")
+        + tr("<div class=\"scroll\"><table><thead><tr><th>причина</th><th class=\"n\">страниц</th><th>что делать</th></tr></thead><tbody>") + cause_rows + tr("</tbody></table></div><p class=\"note\">Разбор адресный: конкретные URL по каждой причине (до 50 на причину) лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>")
     ) if cause_rows else ""
 
     funnel_block = ""
@@ -408,7 +419,7 @@ def build(analysis: dict, funnel_result: dict = None, causes: list = None,
                         + _segments_html(segments)
                         + _crawlers_html(crawl, ai_segments))
 
-    doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=len(graph.get('orphans') or []), a12=len(dupes), a13=_first_things(issues, graph, dupes) + _templates_html(templates), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
+    doc = tr("<!doctype html><!-- indexgap-report --><html lang=\"ru\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{a0}{a1}</title>\n<style>{a2}</style></head><body><div class=\"wrap\">\n<h1>{a3}</h1>\n<p class=\"sub\">{a4} · {a5} страниц · {a6}</p>\n\n{a7}\n\n<div class=\"cards\">\n  <div class=\"card\"><div class=\"n\">{a8}</div><div class=\"l\">страниц разобрано</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a9}</div><div class=\"l\">критично</div></div>\n  <div class=\"card\"><div class=\"n warn\">{a10}</div><div class=\"l\">внимание</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a11}</div><div class=\"l\">сирот без входящих ссылок</div></div>\n  <div class=\"card\"><div class=\"n bad\">{a12}</div><div class=\"l\">пар похожих страниц</div></div>\n</div>\n\n{a13}\n\n{a14}\n{a15}\n{a16}\n\n<h2>Все находки по причинам</h2>\n{a17}\n\n<h2>Похожие страницы</h2>\n<div class=\"scroll\"><table><thead><tr><th>страница</th><th>похожа на</th>\n<th class=\"n\">совпадение</th></tr></thead><tbody>{a18}</tbody></table></div>\n{a19}\n<p class=\"note\">Совпадение выше порога означает, что поисковик, скорее всего, оставит\nв индексе одну страницу из пары. На конвейере это происходит, когда шаблон\nдаёт больше текста, чем подставляемые данные.</p>\n</div></body></html>", a0=_esc(title), a1=' — ' + _esc(site) if site else '', a2=CSS, a3=_esc(title), a4=_esc(site), a5=len(pages), a6=datetime.now().strftime('%d.%m.%Y %H:%M'), a7=warn_html, a8=len(pages), a9=counts.get('critical', 0), a10=counts.get('warning', 0), a11=sum(1 for i in issues if len(i) >= 3 and i[2] == "orphan"), a12=len(dupes), a13=_first_things(issues, graph, dupes) + accepted_html + _templates_html(templates), a14=funnel_block, a15=cross_block, a16=causes_block, a17=_groups_html(issues), a18=dupe_rows, a19=dupe_more)
 
     directory = os.path.dirname(os.path.abspath(out_path)) or "."
     os.makedirs(directory, exist_ok=True)
@@ -568,7 +579,7 @@ DIFF_HELP = {
     "nosnippet-added": N_("Появился запрет сниппета: страница останется в индексе, но пропадёт из ответов ИИ-поиска и расширенной выдачи."),
     "text-shrunk": N_("Текст сократился больше чем вдвое. Обычно это поломка генератора или данных, а не правка редактора."),
     "template-change": N_("title, H1 или description поменялись у многих страниц одного шаблона сразу — это правка шаблона. Убедись, что она намеренная: поисковик переоценит все эти страницы."),
-    "new-finding": N_("Критичная находка `check`, которой в старой сборке не было."),
+    "new-finding": N_("Находка `check`, которой в старой сборке не было."),
     "page-opened": N_("Страница была закрыта от индекса и открылась."),
     "pages-added": N_("Новые страницы по шаблонам адресов."),
 }

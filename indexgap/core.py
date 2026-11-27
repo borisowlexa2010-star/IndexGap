@@ -510,7 +510,9 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
         rel = ""
     # Пробелы и кириллица в имени файла обязаны уехать в URL закодированными,
     # иначе sitemap невалиден, а ссылка на страницу с ней не сойдётся.
-    rel = "/".join(quote(seg, safe="~-._") for seg in rel.split("/"))
+    # Байт не в UTF-8 в имени каталога (`caf\xe9`) приходит из os.walk
+    # суррогатом: строгий quote ронял весь прогон. Он уезжает в URL как %E9.
+    rel = "/".join(quote(seg, safe="~-._", errors="surrogateescape") for seg in rel.split("/"))
     url = urljoin(base_url.rstrip("/") + "/", rel)
     return normalize_url(url, directory=True)
 
@@ -518,7 +520,7 @@ def path_to_url(path: str, root: str, base_url: str) -> str:
 def _file_url(path: str, root: str, base_url: str) -> str:
     """Адрес самого файла, с именем и расширением: от него считаются ссылки."""
     rel = unicodedata.normalize("NFC", os.path.relpath(path, root).replace(os.sep, "/"))
-    rel = "/".join(quote(seg, safe="~-._") for seg in rel.split("/"))
+    rel = "/".join(quote(seg, safe="~-._", errors="surrogateescape") for seg in rel.split("/"))
     return urljoin(base_url.rstrip("/") + "/", rel)
 
 
@@ -632,6 +634,28 @@ def _mostly_utf8(data: bytes) -> bool:
     return good > 0 and (bad <= 8 or bad / len(data) < 0.001)
 
 
+def _utf8_majority(data: bytes) -> bool:
+    """
+    Объявлен UTF-8, и верных многобайтовых знаков больше, чем битых байтов:
+    подвал в cp1251 на UTF-8-странице. Браузер слушается объявления и
+    заменяет только битые байты; чтение всей страницы как cp1251 давало
+    мусор вместо каждой буквы. Страница целиком в cp1251 верных
+    последовательностей UTF-8 почти не содержит и сюда не попадает.
+    """
+    bad = len(data.decode("utf-8", errors="replace")) - len(data.decode("utf-8", errors="ignore"))
+    return len(_HIGH.findall(data)) - bad > 2 * bad
+
+
+def _few_replaced(data: bytes, encoding: str):
+    """Текст с заменой битых мест — если их считанные единицы, иначе None."""
+    try:
+        text = data.decode(encoding, errors="replace")
+    except LookupError:
+        return None
+    bad = text.count("\ufffd") - data.decode(encoding, errors="ignore").count("\ufffd")
+    return text if bad <= 8 or bad / max(len(text), 1) < 0.001 else None
+
+
 def _bomless_utf16(data: bytes) -> str:
     """UTF-16 без BOM: в начале файла каждый второй байт — ноль."""
     head = data[:512]
@@ -691,6 +715,14 @@ def read_text(path: str) -> tuple:
             try:
                 return data.decode(encoding), encoding
             except UnicodeDecodeError:
+                if encoding != "utf-8-sig":
+                    # Лишний последний байт (оборванная загрузка, LF от
+                    # редактора) — браузер покажет UTF-16 с одним знаком
+                    # замены. Раньше файл читался как cp1251 с нулями внутри
+                    # и выпадал из проверок как «кусок шаблона».
+                    text = _few_replaced(data, encoding)
+                    if text is not None:
+                        return text, encoding
                 break
 
     utf16 = _bomless_utf16(data)
@@ -698,7 +730,9 @@ def read_text(path: str) -> tuple:
         try:
             return data.decode(utf16), utf16
         except UnicodeDecodeError:
-            pass
+            text = _few_replaced(data, utf16)
+            if text is not None:
+                return text, utf16
 
     # Строгий UTF-8 с не-ASCII — это UTF-8, что бы ни было объявлено: текст в
     # cp1251 строгой проверки UTF-8 практически не проходит, а устаревший
@@ -712,7 +746,7 @@ def read_text(path: str) -> tuple:
     if declared and is_utf8(declared) or not declared and _mostly_utf8(data):
         # Один случайный байт — `\xa9` в подвале — не повод читать всю страницу
         # как cp1251: браузер покажет UTF-8 с одним знаком замены.
-        if _mostly_utf8(data):
+        if _mostly_utf8(data) or declared and _utf8_majority(data):
             return data.decode("utf-8", errors="replace"), "utf-8"
     if declared and not is_utf8(declared):
         for errors in ("strict", "replace"):
@@ -1573,8 +1607,24 @@ _WINDOWS_ENV = {"APPDATA", "LOCALAPPDATA", "USERPROFILE", "TEMP", "TMP", "PROGRA
 _LLM_HINTS = ("language model", "as an ai", "certainly!", "sure!", "hope this helps",
               "rewritten", "cannot fulfill", "языковая модель", "ии-модель", "конечно!",
               "надеюсь, это поможет")
+# Вторые байты UTF-8 0x80–0xBF в cp1251: «Аренда» → «РђСЂРµРЅРґР°». Пара
+# «Р/С + знак» встречается и в обычном тексте («ТАСС»), поэтому нужны две
+# подряд. Неразрывный пробел и мягкий перенос из набора убраны.
+_CP1251_TAIL = ("\u0402\u0403\u201a\u0453\u201e\u2026\u2020\u2021\u20ac\u2030\u0409\u2039"
+                "\u040a\u040c\u040b\u040f\u0452\u2018\u2019\u201c\u201d\u2022\u2013\u2014"
+                "\u2122\u0459\u203a\u045a\u045c\u045b\u045f\u040e\u045e\u0408\u00a4\u0490"
+                "\u00a6\u00a7\u0401\u00a9\u0404\u00ab\u00ac\u00ae\u0407\u00b0\u00b1\u0406"
+                "\u0456\u0491\u00b5\u00b6\u00b7\u0451\u2116\u0454\u00bb\u0458\u0405\u0455"
+                "\u0457")
 MOJIBAKE = re.compile(r"â€[\u0080-\u00bf\u2018-\u201e\u2122\u0153\u02dc]|Ã[\u0080-\u00bf]"
-                      r"|Ð[\u0080-\u00bf]Ð|Ñ[\u0080-\u008f]")
+                      # «Ã„rzte», «Ãœbersicht», «Ã‰tudiants»: cp1252 кладёт эти
+                      # вторые байты выше U+00FF. Кавычки и многоточие — только
+                      # перед буквой: «AMANHÃ”» — португальский текст в кавычках.
+                      r"|Ã[\u20ac\u201a\u0192\u201e\u2020\u2021\u02c6\u2030\u0160\u2039\u0152"
+                      r"\u017d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178]"
+                      r"|[ÃÅ][\u2018\u2019\u201c\u201d\u2026](?=[^\W\d_])"
+                      r"|Ð[\u0080-\u00bf]Ð|Ñ[\u0080-\u008f]"
+                      r"|(?:[РС][" + _CP1251_TAIL + r"]){2}")
 
 
 def visible_text(raw: str) -> str:
@@ -1596,7 +1646,8 @@ def find_slots(text: str, markdown: bool = False) -> list:
     kinds = [("leftover", SLOT_LEFTOVER, ("[object", "nan", "undefined")),
              ("lorem", SLOT_LOREM, ("lorem",)),
              ("llm", LLM_PHRASES, _LLM_HINTS),
-             ("mojibake", MOJIBAKE, ("ã", "â€", "ð", "ñ"))]
+             ("mojibake", MOJIBAKE, ("ã", "â€", "ð", "ñ", "å", "рѕ", "рµ", "р°", "рё",
+                                     "с‚", "сђ"))]
     if not markdown:
         kinds.insert(0, ("template", SLOT_TEMPLATE, ("{", "%")))
         kinds.append(("bracket", SLOT_BRACKET, ("[",)))
@@ -1902,9 +1953,23 @@ def _parse_frontmatter(block: str) -> dict:
 def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Page:
     raw, encoding = read_text(path)
     notes = []
-    if not is_utf8(encoding):
+    declared = _declared_charset(raw[:4096].encode("ascii", "ignore"))
+    if not is_utf8(encoding) and is_utf8(declared) and not encoding.startswith("utf-"):
+        # Объявлен UTF-8, а байты в другой кодировке: браузер и краулер
+        # слушаются объявления и вместо каждой буквы показывают «�».
+        notes.append(tr("в <meta charset> объявлен UTF-8, а файл в {a0}: браузер и поисковик "
+                        "покажут вместо букв знаки «�». Пересохрани файл в UTF-8",
+                        a0=encoding))
+    elif not is_utf8(encoding):
         notes.append(tr("файл прочитан как {a0}, а не UTF-8", a0=encoding))
-    elif "\ufffd" in raw:
+    elif (declared and not is_utf8(declared) and not encoding.startswith("utf-16")
+          and not raw.isascii()):
+        # Устаревший `<meta charset="windows-1251">` на UTF-8-файле: без
+        # charset в заголовке Content-Type браузер покажет «РђСЂРµРЅРґР°».
+        notes.append(tr("в <meta charset> объявлен {a0}, а файл в UTF-8: если сервер не "
+                        "присылает charset в Content-Type, браузер покажет кракозябры. "
+                        "Исправь объявление на utf-8", a0=declared))
+    if "\ufffd" in raw and is_utf8(encoding):
         notes.append(tr("в файле {a0} байт(а) не в UTF-8 — на их месте знак замены; "
                         "остальной текст прочитан как UTF-8", a0=raw.count("\ufffd")))
 
@@ -2780,7 +2845,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
             rel = os.path.relpath(path, root).replace(os.sep, "/")
             if _ERROR_FILE.search(rel) or _TOP_ERROR.match(rel):
                 continue
-            if _ERROR_PAGE.search(rel):
+            if _ERROR_PAGE.search(rel) and not _numbered_sibling(path):
                 # `status/404/index.html` в глубине сборки — это может быть
                 # статья про код ответа, а не страница ошибки. Её судьбу
                 # решают ссылки: на страницу ошибки сайт не ссылается.
@@ -2976,6 +3041,29 @@ def default_jobs() -> int:
     except ValueError:
         value = 0
     return value or min(8, os.cpu_count() or 1)
+
+def _numbered_sibling(path: str) -> bool:
+    """
+    `product/401/` рядом с `product/402/` — карточка каталога с номером, а не
+    страница ошибки: у соседей тоже номера, и не коды ответа. Без этого
+    непривязанная карточка выпадала молча и уносила с собой находку «сирота».
+    """
+    folder = os.path.dirname(path)
+    own = os.path.basename(path)
+    if own.lower().startswith("index."):
+        own, folder = os.path.basename(folder), os.path.dirname(folder)
+    own = own.split(".")[0]
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return False
+    for name in names:
+        stem = name.split(".")[0]
+        if (stem != own and stem.isdigit() and len(stem) == len(own)
+                and not _ERROR_PAGE.search(stem + ".html")):
+            return True
+    return False
+
 
 def _has_pages(path: str, exts) -> bool:
     for _dirpath, _dirnames, filenames in os.walk(path):

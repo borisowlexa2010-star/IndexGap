@@ -33,9 +33,9 @@ MESSAGES = {
         '</tbody></table></div><p class="note">Profiles use different thresholds on '
         'purpose: 250 words is normal for a guide and absurd for an event card, and '
         'fact-checking is meaningless where there is no dataset.</p>',
-    '</tbody></table></div><p class="note">Разбор адресный: конкретные URL по каждой причине лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>':
+    '</tbody></table></div><p class="note">Разбор адресный: конкретные URL по каждой причине (до 50 на причину) лежат в JSON. Страница может попасть сразу в несколько причин — так и бывает.</p>':
         '</tbody></table></div><p class="note">The breakdown is addressable: the '
-        'actual URLs behind each cause are in the JSON. A page can land in several '
+        'actual URLs behind each cause (up to 50 per cause) are in the JSON. A page can land in several '
         'causes at once — that is normal.</p>',
     '</tbody></table></div><p class="note">Страница, которой нет нигде, — почти всегда техническая проблема. Страница, которая есть в одном индексе и нет в другом, — уже вопрос оценки качества или скорости конкретного поисковика, и техническими правками обычно не лечится.</p>':
         '</tbody></table></div><p class="note">A page missing everywhere is almost '
@@ -96,6 +96,11 @@ MESSAGES = {
         'cured differently — which is why it matters where exactly they happen. Note '
         'that the Search Console “Pages” export is an impressions report: a page that '
         'is indexed but had no impressions will not appear in it.</p>',
+    '<p class="note">Показано разделов: {a0} из {a1}. Остальные — в JSON.</p>':
+        '<p class="note">Showing {a0} of {a1} sections. The rest are in the JSON.</p>',
+    '<p class="note">Принято намеренно (ignore в indexgap.json): {a0} — в счёт не идут; список — в JSON, в поле accepted.</p>':
+        '<p class="note">Accepted on purpose (ignore in indexgap.json): {a0} — not '
+        'counted; the list is in the JSON, field accepted.</p>',
     '<p class="note">Показано 60 пар из {a0}. Остальные — в JSON.</p>':
         '<p class="note">Showing 60 pairs of {a0}. The rest are in the JSON.</p>',
     '<p class="note">Показано {a0} из {a1}. Полный список — в JSON рядом с отчётом.</p>':
@@ -310,8 +315,8 @@ MESSAGES = {
         "title, H1 or description changed on many pages of one template at once — a "
         "template change. Make sure it is intended: the engine will re-evaluate all "
         "these pages.",
-    "Критичная находка `check`, которой в старой сборке не было.":
-        "A critical `check` finding that the old build did not have.",
+    "Находка `check`, которой в старой сборке не было.":
+        "A `check` finding that the old build did not have.",
     "Страница была закрыта от индекса и открылась.":
         "The page was closed to indexing and is now open.",
     "Новые страницы по шаблонам адресов.": "New pages by URL template.",

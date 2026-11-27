@@ -538,9 +538,20 @@ def zip_issue(path: str) -> str:
                 if archive.getinfo(name).file_size > 64 * 1024:
                     continue
                 try:
-                    text = archive.read(name).decode("utf-8-sig", "replace")
+                    raw = archive.read(name)
                 except Exception:
                     continue
+                # Как у Table.csv рядом: Metadata.csv, пересохранённый в Excel,
+                # бывает в UTF-16 или cp1251 — и тогда «не в индексе» терялось.
+                if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+                    text = raw.decode("utf-16", "replace")
+                else:
+                    for codec in ("utf-8-sig", "cp1251"):
+                        try:
+                            text = raw.decode(codec)
+                            break
+                        except UnicodeDecodeError:
+                            text = raw.decode("utf-8-sig", "replace")
                 for row in _rows_from_text(text):
                     if (len(row) >= 2 and str(row[0]).strip().lower() in _ISSUE_KEYS
                             and str(row[1]).strip()):
