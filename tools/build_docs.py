@@ -88,7 +88,11 @@ WHY = {
  "template-change":
    "Titles and H1s changed on hundreds of pages at once are a template edit. That "
    "can be the intended rewrite or a broken variable; either way it resets how "
-   "the engine reads those pages, so it should be a decision, not an accident.",
+   "the engine reads those pages, so it should be a decision, not an accident. "
+   "A URL shape change (`/x/` to `/x.html`) is a warning, whatever its share, "
+   "when the new build does not serve the old form and no redirect covers it: "
+   "the old addresses will answer 404. With cleanUrls, trailingSlash or a "
+   "redirect rule it stays info.",
  "text-shrunk":
    "A page that lost more than half of its words between builds usually lost a "
    "data block or a template section, not editorial text.",
@@ -209,12 +213,16 @@ WHY = {
  "orphan":
    "A page nothing links to is discovered only through the sitemap, crawled "
    "rarely, and treated as unimportant — because in the site's own structure it "
-   "demonstrably is.",
+   "demonstrably is. A page whose only inbound links use a form the build does "
+   "not serve (`/a.html` for `a/index.html`, `/b/index.md`) is reported as a "
+   "warning: on GitHub Pages, S3 and nginx those links are 404s, unless the host "
+   "redirects them.",
  "unreachable":
    "Being in the sitemap is a request; being reachable by links is the answer. "
    "A page a crawler cannot walk to from the home page competes for budget it "
    "will not get. Links on pages that robots.txt closes do not count: the "
-   "crawler never reads those pages, so it never sees their links.",
+   "crawler never reads those pages, so it never sees their links. A page "
+   "reached only through links in a form the build does not serve is a warning.",
  "deep":
    "Every click of depth costs crawl frequency. Pages buried far from the home "
    "page get revisited slowly, so their updates reach the index late.",
@@ -365,7 +373,12 @@ WHY = {
    "or host, names a redirect, not the version, and is reported too.",
  "hreflang-bad-code":
    "An alternate with an empty or malformed href is a broken link inside the "
-   "signal that is supposed to hold the language versions together.",
+   "signal that is supposed to hold the language versions together. So is an "
+   "href in a form the build does not serve: `/de/a` for `de/a/index.html` is a "
+   "redirect, `/de/a/` for `de/a.html` is a 404 on GitHub Pages, S3 and nginx, "
+   "and `/de/a/index.html` next to a canonical `/de/a/` is a copy. Hosting "
+   "settings that serve the form (cleanUrls, trailingSlash, redirect rules) "
+   "keep it quiet.",
  "hreflang-unknown-target":
    "The cluster points at a URL that is not among the pages found. Either a "
    "version was removed and the template still declares it, or the addresses "

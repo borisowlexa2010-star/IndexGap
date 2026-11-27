@@ -91,11 +91,11 @@ font-size:.85rem;color:var(--ink3)}
 
 <h1>orphan</h1>
 <div class="meta">
-  <span class="tag critical">critical</span>
+  <span class="tag critical">critical</span> <span class="tag warning">warning</span>
   <span class="tag">orphan</span>
   <span class="tag acc">Indexing and reachability</span>
 </div>
-<p class="lede">A page nothing links to is discovered only through the sitemap, crawled rarely, and treated as unimportant — because in the site's own structure it demonstrably is.</p>
+<p class="lede">A page nothing links to is discovered only through the sitemap, crawled rarely, and treated as unimportant — because in the site's own structure it demonstrably is. A page whose only inbound links use a form the build does not serve (`/a.html` for `a/index.html`, `/b/index.md`) is reported as a warning: on GitHub Pages, S3 and nginx those links are 404s, unless the host redirects them.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>

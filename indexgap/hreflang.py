@@ -36,7 +36,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 from collections import Counter, defaultdict
 from html.parser import HTMLParser
 
-from .core import HEAD_TAGS, url_key
+from .core import HEAD_TAGS, unserved_form, url_key
 from .i18n import N_, tr
 
 # ISO 639-1. Список нужен, чтобы отличить язык от страны: без него `en-uk`
@@ -291,6 +291,42 @@ def split_href(href):
         return None
 
 
+def _misformed(alternates: list, known: dict) -> list:
+    """
+    href альтернатив на страницы сборки в форме, которой хостинг их не отдаёт,
+    — по тем же уликам, что canonical-form: `/de/a` при `de/a/index.html` —
+    редирект, `/de/a/` при `de/a.html` — 404. Сюда же `/de/a/index.html`,
+    когда страница объявляет canonical `/de/a/`: это копия, а не версия.
+    Хост и схема не сверяются: другой хост названа своя находка.
+    """
+    found = []
+    for _code, href in alternates:
+        target = known.get(url_key(href)) if href else None
+        parts = split_href(href) if target else None
+        own = split_href(target.url) if target else None
+        if not parts or not own or _origin(parts) != _origin(own):
+            continue
+        path = unicodedata.normalize("NFC", unquote(parts.path or "/"))
+        aim = unicodedata.normalize("NFC", unquote(own.path or "/"))
+        # Адрес совпал с canonical страницы: если его форма неверна, это уже
+        # находка canonical-form у самой страницы.
+        if path == aim:
+            continue
+        form = unserved_form(target, parts.path)
+        if form == "bare":
+            text = tr("{a0} (редирект на {a1})", a0=path, a1=aim)
+        elif form:
+            text = tr("{a0} (404, страница — {a1})", a0=path, a1=aim)
+        elif (target.__dict__.get("_host_forms") and target.__dict__.get("_url_declared")
+              and re.search(r"(^|/)index\.html?$", path, re.I)):
+            text = tr("{a0} (копия, canonical страницы — {a1})", a0=path, a1=aim)
+        else:
+            continue
+        if text not in found:
+            found.append(text)
+    return found
+
+
 def _latin_not_cyrillic(text: str) -> bool:
     """Текст написан латиницей и в нём нет ни одной кириллической буквы."""
     latin = sum(1 for ch in text or "" if "a" <= ch.lower() <= "z")
@@ -380,6 +416,14 @@ def check(pages: list, cfg: dict = None) -> dict:
                     "код «{a0}» объявлен для нескольких адресов ({a1}) — у одного "
                     "кода может быть только одна версия, и противоречивую разметку "
                     "поисковик отбрасывает", a0=code, a1=", ".join(list(hrefs.values())[:3]))))
+        if indexable(page):
+            misformed = _misformed(alternates, known)
+            if misformed:
+                more = tr(" и ещё {a0}", a0=len(misformed) - 3) if len(misformed) > 3 else ""
+                issues.append(("warning", page.url, "hreflang-bad-code", tr(
+                    "адреса в hreflang записаны в форме, которой сборка не отдаёт: "
+                    "{a0}{a1}. Поисковик требует точный адрес версии — тот, что "
+                    "в её canonical, — а не редирект, 404 или копию", a0=", ".join(misformed[:3]), a1=more)))
         # Шаблон, печатающий только текущую версию: разметка есть, а связей
         # между переводами нет — то же, что её отсутствие.
         if lang_keys == {page.key} and indexable(page):

@@ -3051,7 +3051,7 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
                 voted.add(key)
                 votes[key][form] += 1
     redirects, host_rewrites = host_redirect_rules(root)
-    kinds, flat, files = {}, [], {}
+    kinds, flat, files, folders = {}, [], {}, {}
     for page in pages:
         name = os.path.basename(page.path or "").lower()
         kind = None
@@ -3064,6 +3064,8 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
         kinds[key] = kind if kinds.get(key, kind) == kind else None
         # Имя в NFC, как и адрес страницы: macOS пишет его в NFD.
         files[key] = unicodedata.normalize("NFC", os.path.basename(page.path or ""))
+        folders[key] = unicodedata.normalize(
+            "NFC", os.path.basename(os.path.dirname(page.path or "")))
     order = {"file": 0, "bare": 1, "slash": 2, "index": 3}
     usable = order if host_rewrites else {"file": 0, "bare": 1}
     # Сборку `.next/server` отдаёт сервер Next.js по маршрутам: `/pricing`,
@@ -3093,9 +3095,15 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
     if host_rewrites:
         return
     base = urlsplit(base_url).path.rstrip("/")
+    any_form, bare_ok = _host_serves_any_form(root)
+    if not any_form:
+        # Улики хостинга — для hreflang и diff: какую форму адреса он отдаёт.
+        host = (redirects, bare_ok, base)
+        for page in pages:
+            page.__dict__["_host_forms"] = host
     always = {("folder", "file"), ("flat", "slash"), ("flat", "index")}
     for page, forms in written:
-        wrong = []
+        wrong, fine = [], set()
         html = (page.path or "").lower().endswith((".html", ".htm"))
         for key, form, path in forms:
             # `/faq/?x=1` — та же форма адреса, что и `/faq/`.
@@ -3108,13 +3116,25 @@ def _settle_flat_urls(pages: list, root: str, base_url: str) -> None:
             exact = (html and form in ("file", "index")
                      and (kind, form) in (("folder", "index"), ("flat", "file"))
                      and unicodedata.normalize("NFC", path.rsplit("/", 1)[-1]) != files.get(key))
-            if (kind, form) not in always and not exact:
+            # `/c.html` при каталоге `c.html/`: хостинг перенаправит на `/c.html/`.
+            folder_bare = (kind == "folder" and form == "file" and unicodedata.normalize(
+                "NFC", path.rstrip("/").rsplit("/", 1)[-1]) == folders.get(key))
+            if ((kind, form) not in always and not exact) or folder_bare:
+                fine.add(key)
                 continue
             local = path[len(base):] if base and path.startswith(base + "/") else path
             if not any(regex.match(local) for regex in redirects):
                 wrong.append((key, path))
+            else:
+                fine.add(key)
         if wrong:
             page.__dict__["_wrong_forms"] = wrong
+            # Страницы, на которые эта ведёт только формами, отдающими 404: для
+            # достижимости это битые ссылки. Ссылки из Markdown и раскладки,
+            # где хостинг сводит формы сам, — не в счёт.
+            only = {key for key, _ in wrong} - fine
+            if only and html and not any_form:
+                page.__dict__["_wrong_only"] = only
 
 
 def _read_jekyll_config(root: str) -> str:
@@ -3291,34 +3311,68 @@ def _mark_canonical_forms(pages: list, root: str, base_url: str,
         if local in ("", "/") or local == base:
             continue
         name = os.path.basename(page.path).lower()
-        last = local.rstrip("/").rsplit("/", 1)[-1].lower()
-        if name.startswith("index."):
-            # `a/index.html`: отдаётся по /a/ и /a/index.html — но не по
-            # /a/index.htm и не по /a/index.md.
-            if local.endswith("/") or last == name:
-                continue
-            if last.startswith("index.") and not _EXT_RE.search(last):
-                continue
-            form = "file" if _EXT_RE.search(last) else "bare"
-            if form == "bare" and bare_ok:
-                continue
-        else:
-            # `about.html`: отдаётся по /about.html и /about.
-            if local.endswith("/"):
-                form = "slash"
-            elif last.startswith("index.") and _EXT_RE.search(last):
-                form = "index"
-            elif _EXT_RE.search(last) and last != name:
-                form = "file"             # /about.htm при about.html
-            else:
-                continue
-        if any(regex.match(local) for regex in redirects):
+        form = _unserved_form(name, local, bare_ok)
+        if not form or any(regex.match(local) for regex in redirects):
             continue
-        # Форма, которую раскладка отдаёт: /a/ для папки, /about.html для файла.
-        served = urlsplit(_file_url(page.path, root, base_url)).path
-        if name.startswith("index."):
-            served = served.rsplit("/", 1)[0] + "/"
-        page.__dict__["_canonical_form"] = (form, served)
+        page.__dict__["_canonical_form"] = (form, served_path(page, root, base_url))
+
+
+def _unserved_form(name: str, local: str, bare_ok: bool) -> str:
+    """
+    Форма адреса `local`, которой файл `name` (имя в нижнем регистре) на
+    статическом хостинге не отдаётся: `bare` — редирект, остальное — 404.
+    Пусто — отдаётся. Правила хостинга здесь не учитываются.
+    """
+    last = local.rstrip("/").rsplit("/", 1)[-1].lower()
+    if name.startswith("index."):
+        # `a/index.html`: отдаётся по /a/ и /a/index.html — но не по
+        # /a/index.htm и не по /a/index.md.
+        if local.endswith("/") or last == name:
+            return ""
+        if last.startswith("index.") and not _EXT_RE.search(last):
+            return ""
+        form = "file" if _EXT_RE.search(last) else "bare"
+        return "" if form == "bare" and bare_ok else form
+    # `about.html`: отдаётся по /about.html и /about.
+    if local.endswith("/"):
+        return "slash"
+    if last.startswith("index.") and _EXT_RE.search(last):
+        return "index"
+    if _EXT_RE.search(last) and last != name:
+        return "file"                     # /about.htm при about.html
+    return ""
+
+
+def served_path(page, root: str, base_url: str) -> str:
+    """Форма, которую раскладка отдаёт: /a/ для папки, /about.html для файла."""
+    served = urlsplit(_file_url(page.path, root, base_url)).path
+    if os.path.basename(page.path).lower().startswith("index."):
+        served = served.rsplit("/", 1)[0] + "/"
+    return served
+
+
+def unserved_form(page, path: str) -> str:
+    """
+    Форма адреса `path` (путь сайта), которой хостинг страницу `page` не
+    отдаёт: `bare` — редирект на её адрес, `slash`, `index`, `file` — 404.
+    Пусто — отдаёт или узнать нельзя.
+
+    Судит по тем же уликам, что `canonical-form` и `wrong-link-form`: по
+    раскладке файлов, правилам перенаправления хостинга, `cleanUrls` и
+    `trailingSlash` (`_host_forms` страницы ставит разбор). Без улик — пусто.
+    """
+    host = page.__dict__.get("_host_forms")
+    if not host or not (page.path or "").lower().endswith((".html", ".htm")):
+        return ""
+    redirects, bare_ok, base = host
+    path = path or "/"
+    local = path[len(base):] if base and path.startswith(base + "/") else path
+    if local in ("", "/") or local == base:
+        return ""
+    form = _unserved_form(os.path.basename(page.path).lower(), local, bare_ok)
+    if not form or any(regex.match(local) for regex in redirects):
+        return ""
+    return form
 
 
 FETCH_MANIFEST = "fetch.json"
