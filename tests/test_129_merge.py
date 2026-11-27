@@ -81,5 +81,13 @@ class OtherDrive(unittest.TestCase):
         self.assertIn("indexgap.json", buf.getvalue())
 
 
+
+class IsoDateTime(unittest.TestCase):
+    def test_iso_datetime_is_not_a_quantity(self):
+        self.assertEqual(content._generic_numbers_in("Doors open 2027-02-20T09:00 sharp."), {})
+        self.assertEqual(content._generic_numbers_in("Starts 2027-02-20T09:00:00Z online"), {})
+        self.assertEqual(content._generic_numbers_in("Deposit 3 months"), {"3": "months"})
+
+
 if __name__ == "__main__":
     unittest.main()

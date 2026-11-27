@@ -747,12 +747,17 @@ def _without_cjk_dates(text: str) -> str:
     return _CJK_DATE.sub(blank, text)
 
 
+_ISO_DATETIME = re.compile(r"(?<![\w.])\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?"
+                           r"(?:Z|[+-]\d{2}:?\d{2})?(?![\w:])")
+
 def _generic_numbers_in(text: str) -> dict:
     """«Число + любое слово» — второй эшелон: слабее сигнал, но покрывает всё."""
     found = {}
     # Верх шкалы — «4.6 out of 5», «4,6 из 5», «4.6/5» — постоянная, а не
     # факт строки: на каталоге это давало `check-by-eye` на 164 страницах из 202.
     text = _without_cjk_dates(_SCALE.sub(r"\1 ", _cjk_compounds(_same_signs(text))))
+    # Дата со временем ISO 8601 — «2027-02-20T09:00» — не «20 T» и не «00 sharp».
+    text = _ISO_DATETIME.sub(" ", text)
     for match in GENERIC_FACT.finditer(text):
         unit = match.group(2).strip().lower()
         if unit in NON_UNITS or unit.isdigit():
