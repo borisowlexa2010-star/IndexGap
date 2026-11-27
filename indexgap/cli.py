@@ -1151,7 +1151,7 @@ def _warn_sitemap_shape(args, pages) -> None:
     listed = [p for p in pages if publish.indexable(p)]
     rules, _found = diffs.read_redirects(args.root, urlsplit(args.site or "").netloc)
     if rules:
-        keys = {p.key for p in pages}
+        keys = {p.key: p for p in pages}
         shadowed = sorted(p.url for p in listed if diffs._shadowed(rules, p, keys))
         if shadowed:
             print(tr("  ! {a0} адрес(ов) в sitemap перехватывает правило хостинга "
@@ -2250,14 +2250,21 @@ def cmd_diff(args):
             _serialize_issues(before), result, new_pages))
         said = {i[1] for i in items if i[2] in ("page-closed", "nosnippet-added")}
         shown = 0
+        raised = set()
         for item in delta["new"]:
             if item["level"] != "critical":
                 continue
             if item["code"] in _DIFF_SAID and item["url"] in said:
+                # Строка diff уже названа, но уровень берётся у check: новый
+                # запрет сниппета там критичен, и --strict должен его видеть.
+                if item["code"] == "nosnippet":
+                    raised.add(item["url"])
                 continue
             items.append(("critical", item["url"], "new-finding",
                           f"{item['code']} — {item['message']}"))
             shown += 1
+        items = [("critical",) + tuple(i[1:]) if i[2] == "nosnippet-added" and i[1] in raised
+                 else i for i in items]
         findings = {
             "new": delta["new"], "fixed": delta["fixed"],
             # Без тех, что уже названы как закрывшиеся страницы: счёт сходится

@@ -22,6 +22,12 @@ MESSAGES = {
     "{a0} изменился на {a1} страницах из {a2}; например {a3}: «{a4}» → «{a5}»":
         "{a0} changed on {a1} of {a2} pages; for example {a3}: “{a4}” → “{a5}”",
     "страница стала открытой для индекса": "the page became open to indexing",
+    "редирект на главную поиск считает мягким 404: страница выпадет из индекса":
+        "search engines treat a redirect to the home page as a soft 404: the page drops out "
+        "of the index",
+    "а цепочка редиректов приводит к странице, закрытой от индекса: {a0}":
+        "and the redirect chain ends on a page closed from indexing: {a0}",
+    "а дальше редиректы идут по кругу": "and from there the redirects go round in a loop",
     "новых страниц: {a0}": "new pages: {a0}",
     "страницы нет, редирект ведёт на {a0} — а этой страницы в новой сборке тоже нет":
         "the page is gone and redirects to {a0} — which is not in the new build either",
