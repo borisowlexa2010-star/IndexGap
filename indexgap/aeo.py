@@ -1034,8 +1034,9 @@ def check_microdata(page) -> list:
     рядом с видимыми «$1,600» Google читает так же, как JSON-LD, и так же
     считает расхождением со страницей.
 
-    Сверяются только значения из атрибутов (`content`, `value`): цена, стоящая
-    текстом элемента, видна по определению. Число, которое уже есть в JSON-LD
+    Сверяются значения из атрибутов (`content`, `value`) и текст скрытых
+    элементов: цена текстом видимого элемента видна по определению. Сверка — с
+    видимым текстом, как у JSON-LD: скрытая копия цены её не прячет. Число, которое уже есть в JSON-LD
     страницы, сверяет `jsonld-mismatch` — второй находки о нём не будет.
     """
     prices = getattr(page, "microdata", None) or ()
@@ -1081,7 +1082,7 @@ def _plain(text: str) -> str:
     return " ".join(text.translate(_TYPOGRAPHY).split()).lower()
 
 
-def _ld_items(data) -> list:
+def _ld_items(data, follow=()) -> list:
     """
     Разворачивает разметку в плоский список объектов.
 
@@ -1089,6 +1090,9 @@ def _ld_items(data) -> list:
     она не разворачивалась, и один и тот же блок давал сразу три ложные
     находки: «нет @type», «нет даты», «нет автора» — плюс не находился
     FAQ, которого нет на странице.
+
+    `follow` — ключи вложенных сущностей, в которые спускаться тоже:
+    `("mainentity",)` достаёт статью или событие из `WebPage.mainEntity`.
     """
     out = []
     stack = [data]
@@ -1101,6 +1105,9 @@ def _ld_items(data) -> list:
             graph = node.get("@graph")
             if isinstance(graph, (list, dict)):
                 stack.append(graph)
+            for key, value in node.items() if follow else ():
+                if str(key).lower() in follow and isinstance(value, (list, dict)):
+                    stack.append(value)
     return out
 
 
@@ -1118,27 +1125,23 @@ def _type_name(value) -> str:
     return name[7:] if name.startswith("schema:") else name
 
 
-DATE_KEYS = ("datepublished", "datemodified", "date", "updated", "published")
+DATE_KEYS = ("datepublished", "datemodified", "date", "updated", "published",
+             "datecreated", "uploaddate")
+# Кто стоит за страницей: у события это организатор.
+AUTHOR_KEYS = ("author", "publisher", "creator", "organizer", "provider",
+               "sourceorganization")
+# Заглушки вместо имени: `"author": "N/A"` — не автор.
+_PLACEHOLDERS = {"n/a", "na", "null", "none", "undefined", "nan", "-", "—", "#"}
 
 
 # В значении даты есть год: `<time datetime="09:00">` в часах работы — не дата.
 _HAS_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
-_COMMENT = re.compile(r"<!--.*?-->", re.S)
-# Микроданные и RDFa на обычных элементах: `<span itemprop="author">`,
-# `<span property="datePublished" content="…">`. Читаются Google так же, как
-# JSON-LD, а извлекатель берёт itemprop только с <meta>.
-_INLINE_AUTHOR = re.compile(
-    r"<[a-z][^<>]*\b(?:itemprop|property)\s*=\s*[\"']?(?:[^\"'<>]*\s)?(?:schema:)?"
-    r"(?:author|creator|publisher)(?![\w:-])", re.I)
-_INLINE_DATE = re.compile(
-    r"<[a-z][^<>]*\b(?:itemprop|property)\s*=\s*[\"']?(?:[^\"'<>]*\s)?(?:schema:)?"
-    r"(?:datePublished|dateModified|dateCreated)(?![\w:-])", re.I)
 
 
 def _filled(value) -> bool:
     """Поле заполнено: `"author": ""` и `"datePublished": null` — не автор и не дата."""
     if isinstance(value, str):
-        return bool(value.strip())
+        return value.strip().lower() not in _PLACEHOLDERS and bool(value.strip())
     if isinstance(value, (list, tuple)):
         return any(_filled(v) for v in value)
     if isinstance(value, dict):
@@ -1148,7 +1151,8 @@ def _filled(value) -> bool:
         if _filled(value.get("@id")):
             return True
         return any(_filled(v) for k, v in value.items() if not str(k).startswith("@"))
-    return value is not None and value is not False
+    # `"author": true` и `"datePublished": 0` — не имя и не дата.
+    return False
 
 
 def check_provenance(page) -> list:
@@ -1156,28 +1160,27 @@ def check_provenance(page) -> list:
     issues = []
     meta = {str(k).lower(): v for k, v in (page.meta or {}).items()}
     has_date = any(_HAS_YEAR.search(str(meta.get(k) or "")) for k in DATE_KEYS)
-    has_author = _filled(meta.get("author"))
+    has_author = any(_filled(meta.get(k)) for k in ("author", "creator", "publisher"))
     for raw in page.jsonld or ():
         try:
             data = _load_ld(raw)
         except (ValueError, RecursionError):
             continue
-        for item in _ld_items(data):
+        for item in _ld_items(data, ("mainentity", "haspart")):
             values = {str(k).lower(): v for k, v in item.items()}
-            has_date = has_date or any(_filled(values.get(k)) for k in DATE_KEYS)
+            # Дата — строка с годом: `"0000-00-00"` и `true` датой не бывают.
+            has_date = has_date or any(isinstance(values.get(k), str)
+                                       and _HAS_YEAR.search(values[k]) for k in DATE_KEYS)
             # Издатель — тоже «кто за этим стоит»; находка так и называется:
             # «автор или организация».
-            has_author = has_author or any(_filled(values.get(k))
-                                           for k in ("author", "publisher", "creator"))
-    if not has_date or not has_author:
-        # Закомментированная разметка не разметка.
-        raw = _COMMENT.sub(" ", page.raw or "")
-        if not has_date:
-            has_date = any(_HAS_YEAR.search(m) for m in re.findall(
-                r"<time\b[^<>]{0,500}?datetime\s*=\s*[\"']?([^\"'<>]*)", raw, re.I))
-            has_date = has_date or bool(_INLINE_DATE.search(raw))
-        if not has_author:
-            has_author = bool(_INLINE_AUTHOR.search(raw))
+            has_author = has_author or any(_filled(values.get(k)) for k in AUTHOR_KEYS)
+    if not has_date:
+        # Закомментированная, инертная и показанная кодом разметка — не
+        # разметка. Микроданные и RDFa на элементах разбор уже положил в meta.
+        from .core import INERT, NOT_LIVE, drop_spans
+        raw = drop_spans(page.raw or "", NOT_LIVE + INERT)
+        has_date = any(_HAS_YEAR.search(m) for m in re.findall(
+            r"<time\b[^<>]{0,500}?datetime\s*=\s*[\"']?([^\"'<>]*)", raw, re.I))
     if not has_date:
         issues.append(("info", page.url, "no-date",
                        tr("нет машиночитаемой даты публикации или обновления")))
