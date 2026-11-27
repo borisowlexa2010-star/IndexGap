@@ -2,6 +2,13 @@
 """hreflang и всё, что про многоязычность, — English."""
 
 MESSAGES = {
+    "адреса в hreflang записаны в форме, которой сборка не отдаёт: {a0}{a1}. Поисковик требует точный адрес версии — тот, что в её canonical, — а не редирект, 404 или копию":
+        "hreflang addresses are written in a form the build does not serve: {a0}{a1}. "
+        "Search engines require the exact address of the version (the one in its "
+        "canonical), not a redirect, a 404 or a copy",
+    "{a0} (редирект на {a1})": "{a0} (redirects to {a1})",
+    "{a0} (404, страница — {a1})": "{a0} (404, the page is {a1})",
+    "{a0} (копия, canonical страницы — {a1})": "{a0} (a copy, the page's canonical is {a1})",
     "hreflang взят из sitemap для {a0} страниц(ы): в самих страницах его нет или он неполный":
         "hreflang was taken from the sitemap for {a0} page(s): the pages "
         "themselves carry none or only part of it",
@@ -106,9 +113,9 @@ MESSAGES = {
         "The alternate is closed to indexing, or its canonical points elsewhere.",
     "Canonical ведёт на другую языковую версию — это отменяет hreflang.":
         "The canonical points at another language version — that cancels hreflang.",
-    "Код языка в hreflang неверен — частая подмена языка страной.":
+    "Код языка в hreflang неверен — частая подмена языка страной, — или адрес альтернативы в форме, которой сборка не отдаёт.":
         "The hreflang language code is wrong — usually a country code where a "
-        "language belongs.",
+        "language belongs — or an alternate address is in a form the build does not serve.",
     "Код в self-ссылке не совпадает с lang страницы.":
         "The code in the self-reference does not match the page's lang.",
     "Версии кластера противоречат друг другу: один код у двух адресов или разные коды у одного.":

@@ -861,13 +861,19 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     landing_of = {}
     file_pages = {q.url for q in pages
                   if q.path and not re.match(r"index\.", os.path.basename(q.path), re.I)}
+    # Рёбра (откуда, куда), которые есть только в форме адреса, отдающей 404
+    # (`_wrong_only` ставит разбор по тем же уликам, что wrong-link-form).
+    misformed = defaultdict(set)
     for p in pages:
         targets = set()
+        wrong_only = p.__dict__.get("_wrong_only") or ()
         for link in p.links:
             key = url_key(link)
             # `/a/?utm_source=nav` — ссылка на `/a/`: если страницы с такими
             # параметрами нет, это та же страница с меткой в адресе.
             target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
+            if target and key.split("?", 1)[0] in wrong_only and target != p.url:
+                misformed[p.url].add(target)
             # `/faq.html/` на файл `faq.html`: ключ тот же, что у страницы, но
             # хостинг по такому адресу файла не отдаёт. Каталог `c.html/` с
             # `index.html` внутри — отдаёт.
@@ -1031,6 +1037,23 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
     for source, twins in by_hreflang.items():
         for twin in twins:
             hreflang_inbound[twin].add(source)
+    # Страница, на которую ведут только ссылки в форме, отдающей 404, на живом
+    # сайте не связана ни с чем. Сиротой она не считается — хостинг мог бы
+    # отдать и эту форму, — а называется отдельно, уровнем ниже.
+    wrong_form_orphans, behind_wrong_form = [], []
+    if misformed:
+        for u in urls:
+            sources = inbound.get(u)
+            if (sources and all(u in misformed.get(s, ()) for s in sources)
+                    and u != home and u != redirected_from and not hreflang_inbound.get(u)
+                    and u not in soft_inbound):
+                wrong_form_orphans.append(u)
+        if home:
+            strict = walk(lambda u: set() if u in blocked
+                          else (set(followed.get(u, ())) - misformed.get(u, set()))
+                          | by_hreflang.get(u, set()))
+            lonely = set(wrong_form_orphans)
+            behind_wrong_form = sorted(u for u in depth if u not in strict and u not in lonely)
 
     return {
         "home": home,
@@ -1054,6 +1077,8 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
                               and u != redirected_from) if home else [],
         "behind_robots": behind_robots,
         "behind_nofollow": behind_nofollow,
+        "wrong_form_orphans": wrong_form_orphans,
+        "behind_wrong_form": behind_wrong_form,
     }
 
 
@@ -2853,6 +2878,15 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
     for url in graph["orphans"]:
         issues.append(("critical", url, "orphan",
                        tr("ни одна внутренняя ссылка не ведёт на страницу")))
+    # Ссылки есть, но только в форме, которой сборка не отдаёт: на живом сайте
+    # это 404. Уровень — внимание: хостинг мог перенаправлять эту форму сам.
+    lonely = [u for u in graph.pop("wrong_form_orphans", None) or () if u not in spared]
+    for url in lonely:
+        issues.append(("warning", url, "orphan", tr(
+            "все ссылки на страницу записаны в форме, которой сборка не отдаёт "
+            "(см. wrong-link-form): GitHub Pages, S3 и nginx отвечают на них 404, и на "
+            "живом сайте до неё не дойти по ссылкам")))
+    graph["orphans"] = sorted(set(graph["orphans"]) | set(lonely))
     # Закрытую в robots.txt страницу назовёт robots-blocks-page; дойти до неё
     # можно, прочитать — нет.
     behind = set(graph.get("behind_robots") or ())
@@ -2867,6 +2901,14 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                           "robots nofollow или с rel=\"nofollow\", — а по ним краулер "
                           "не идёт") if url in unfollowed else
                        tr("до страницы нельзя дойти от главной по ссылкам")))
+    behind_form = [u for u in graph.pop("behind_wrong_form", None) or ()
+                   if u not in spared and u not in orphaned and u not in lonely
+                   and u not in graph["unreachable"]]
+    for url in behind_form:
+        issues.append(("warning", url, "unreachable", tr(
+            "от главной до страницы доходят только через ссылки в форме, которой сборка "
+            "не отдаёт (см. wrong-link-form): на живом сайте это 404")))
+    graph["unreachable"] = sorted(set(graph["unreachable"]) | set(behind_form))
     for url, d in sorted(graph["depth"].items()):
         if url in shells or url in closed:
             continue

@@ -118,6 +118,13 @@ MESSAGES = {
     "ignore: кода «{a0}» нет": "ignore: there is no code “{a0}”",
     "ignore: у «{a0}» нужен список путей или true, а стоит {a1}":
         "ignore: “{a0}” needs a list of paths or true, and it is {a1}",
+    "все ссылки на страницу записаны в форме, которой сборка не отдаёт (см. wrong-link-form): GitHub Pages, S3 и nginx отвечают на них 404, и на живом сайте до неё не дойти по ссылкам":
+        "every link to this page uses a form the build does not serve (see "
+        "wrong-link-form): GitHub Pages, S3 and nginx answer them with a 404, so on the "
+        "live site no link reaches it",
+    "от главной до страницы доходят только через ссылки в форме, которой сборка не отдаёт (см. wrong-link-form): на живом сайте это 404":
+        "the page is reached from the home page only through links in a form the "
+        "build does not serve (see wrong-link-form): on the live site that is a 404",
     "ни одна внутренняя ссылка не ведёт на страницу":
         "no internal link points at this page",
     "объём текста ≈ {a0} — тонкая страница":

@@ -21,7 +21,7 @@ from collections import Counter, defaultdict, namedtuple
 from urllib.parse import unquote, urljoin, urlsplit
 
 from .checks import _url_pattern, redirect_chain, redirect_target
-from .core import read_text, url_key
+from .core import read_text, unserved_form, url_key
 from .i18n import tr
 from .publish import indexable, is_draft
 
@@ -753,6 +753,10 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
     pattern_of = _patterns(new[k].url for k in both)
     totals = Counter(pattern_of.values())
     changed = defaultdict(list)
+    # Старая форма адреса, которой новая сборка не отдаёт (те же улики, что у
+    # canonical-form: раскладка, cleanUrls, trailingSlash, правила хостинга), и
+    # редиректа на неё нет: старые адреса ответят 404.
+    gone = defaultdict(list)
     for key in both:
         a, b = old[key], new[key]
         for name in FIELDS:
@@ -761,6 +765,9 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
                 continue
             if before != after:
                 changed[(pattern_of[b.url], name)].append((b.url, before, after))
+                if (name == "url" and indexable(a) and unserved_form(b, before) not in ("", "bare")
+                        and not redirect_for(rules, a.url)):
+                    gone[pattern_of[b.url]].append((before, after))
     changes = []
     for (pattern, name), items in sorted(changed.items()):
         total = totals[pattern]
@@ -770,6 +777,9 @@ def compare(old_pages: list, new_pages: list, rules: list = None) -> dict:
             "share": round(share, 3),
             "template": len(items) >= TEMPLATE_MIN and share >= TEMPLATE_SHARE,
             "examples": [{"url": u, "old": x, "new": y} for u, x, y in items[:5]],
+            **({"unserved": len(gone[pattern]),
+                "unserved_examples": [{"old": x, "new": y} for x, y in gone[pattern][:5]]}
+               if name == "url" and gone.get(pattern) else {}),
         })
     changes.sort(key=lambda c: (not c["template"], -c["changed"], c["pattern"], c["field"]))
 
@@ -888,6 +898,15 @@ def items(result: dict) -> list:
             a0=s["drop"], a1=s["old_words"], a2=s["new_words"])))
     for c in result["template_changes"]:
         example = c["examples"][0]
+        if c.get("unserved"):
+            lost = c["unserved_examples"][0]
+            out.append(("warning", c["pattern"], "template-change", tr(
+                "URL изменился на {a0} страницах из {a1}, а старую форму адреса новая "
+                "сборка не отдаёт и редиректа на неё нет: {a2} старых адрес(ов) ответят "
+                "404; например «{a3}» → «{a4}». Нужны редиректы со старых адресов",
+                a0=c["changed"], a1=c["pages"], a2=c["unserved"],
+                a3=lost["old"][:80], a4=lost["new"][:80])))
+            continue
         out.append(("warning" if c["template"] else "info", c["pattern"], "template-change", tr(
             "{a0} изменился на {a1} страницах из {a2}; например {a3}: «{a4}» → «{a5}»",
             a0=FIELD_LABEL[c["field"]], a1=c["changed"], a2=c["pages"], a3=example["url"],

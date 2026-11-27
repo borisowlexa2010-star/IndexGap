@@ -95,13 +95,13 @@ font-size:.85rem;color:var(--ink3)}
   <span class="tag">hreflang-bad-code</span>
   <span class="tag acc">hreflang and language versions</span>
 </div>
-<p class="lede">An alternate with an empty or malformed href is a broken link inside the signal that is supposed to hold the language versions together.</p>
+<p class="lede">An alternate with an empty or malformed href is a broken link inside the signal that is supposed to hold the language versions together. So is an href in a form the build does not serve: `/de/a` for `de/a/index.html` is a redirect, `/de/a/` for `de/a.html` is a 404 on GitHub Pages, S3 and nginx, and `/de/a/index.html` next to a canonical `/de/a/` is a copy. Hosting settings that serve the form (cleanUrls, trailingSlash, redirect rules) keep it quiet.</p>
 
 <h2>What indexgap reports</h2>
 <p>The finding reads:</p>
 <pre><code>warning  hreflang-bad-code  the “…” alternate has an empty href</code></pre>
 
-<h2>How to fix it</h2><div class="fix"><p>Fix the language code: usually a country has been written where a language belongs.</p></div>
+<h2>How to fix it</h2><div class="fix"><p>Fix the language code: usually a country has been written where a language belongs. Write the alternate address exactly as the version's canonical: /de/a/ for de/a/index.html, /de/a.html for de/a.html.</p></div>
 
 <h2>How it behaves at scale</h2>
 <p>Collapsed when it fires <b>template-wide</b>. If it appears on 90% or more of the pages — or of one language version — of a site with at least 20 pages, it is a property of the template and is reported once, with the count, instead of once per page.</p>

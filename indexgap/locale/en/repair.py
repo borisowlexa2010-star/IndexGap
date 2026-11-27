@@ -185,9 +185,10 @@ MESSAGES = {
         "another language and cancels hreflang.",
     "Добавь альтернативы для языковых версий этой страницы.":
         "Declare alternates for this page's language versions.",
-    "Поправь код языка: чаще всего вместо языка написана страна.":
+    "Поправь код языка: чаще всего вместо языка написана страна. Адрес альтернативы пиши так же, как canonical версии: /de/a/ для de/a/index.html, /de/a.html для de/a.html.":
         "Fix the language code: usually a country has been written where a "
-        "language belongs.",
+        "language belongs. Write the alternate address exactly as the version's "
+        "canonical: /de/a/ for de/a/index.html, /de/a.html for de/a.html.",
 
     # ── что делать: сайт целиком ──────────────────────────────────────────────
     "Убери `Disallow: /` — сейчас сайт закрыт от всех поисковиков.":
