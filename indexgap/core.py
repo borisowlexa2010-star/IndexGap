@@ -744,6 +744,11 @@ def open_text(path: str):
 # стоят текстом элемента (`<span itemprop="ratingValue">4.8</span>`), а не
 # атрибутом; цена атрибутом — норма WooCommerce и тем Shopify.
 _MICRODATA_PRICES = {"price": "price", "lowprice": "lowPrice", "highprice": "highPrice"}
+# Автор и даты в микроданных и RDFa на обычных элементах: `<span
+# itemprop="author">`, `<time itemprop="startDate" datetime="…">`. Значение
+# ложится в meta под тем же ключом, что дал бы `<meta itemprop>`.
+_MICRODATA_META = {"author", "creator", "publisher", "datepublished", "datemodified",
+                   "datecreated", "startdate", "enddate"}
 
 
 class _Extractor(HTMLParser):
@@ -785,6 +790,13 @@ class _Extractor(HTMLParser):
         self.alts = []
         self.microdata = []        # (поле, значение) цен микроданных и RDFa
         self._scope_stack = []     # глубины открытых itemscope / typeof / vocab
+        # RDFa: открытые `vocab` и `prefix` — (глубина, словарь schema.org ли;
+        # префикс → schema.org ли).
+        self._vocab_stack = []
+        self._prefix_stack = []
+        # Свойства, значение которых — текст элемента: [глубина, ключ, куски, id скрытых].
+        self._props = []
+        self._hidden_prices = []   # (поле, текст, id скрытых) — цена текстом скрытого элемента
         self.blocks = {"li": 0, "table": 0, "img": 0, "img_no_alt": 0, "img_empty_alt": 0,
                        "script": 0, "p": 0}
         self.meta = {}             # author, datePublished и прочее из <meta>
@@ -896,6 +908,12 @@ class _Extractor(HTMLParser):
             self._hidden_ids = tuple(i for _, i in self._hidden_stack)
         while self._scope_stack and self._scope_stack[-1] > self._depth:
             self._scope_stack.pop()
+        while self._vocab_stack and self._vocab_stack[-1][0] > self._depth:
+            self._vocab_stack.pop()
+        while self._prefix_stack and self._prefix_stack[-1][0] > self._depth:
+            self._prefix_stack.pop()
+        while self._props and self._props[-1][0] > self._depth:
+            self._end_prop(self._props.pop())
         if self._aside_stack and self._aside_stack[-1] > self._depth:
             self._flush_paragraph()
             while self._aside_stack and self._aside_stack[-1] > self._depth:
@@ -908,41 +926,121 @@ class _Extractor(HTMLParser):
                 while self._data_stack and self._data_stack[-1] > self._depth:
                     self._data_stack.pop()
 
+    def _schema_names(self, a: dict) -> list:
+        """
+        Имена свойств schema.org из `itemprop` и `property`, в нижнем регистре.
+        RDFa-имя без префикса принадлежит словарю ближайшего `vocab`: под
+        `vocab="http://purl.org/goodrelations/v1#"` `price` — не schema.org.
+        Префикс разрешается через `prefix="s: https://schema.org/"`.
+        """
+        out = []
+        for attr in ("itemprop", "property"):
+            for name in a.get(attr, "").split():
+                key = name.lower()
+                if "/" in key:
+                    # Полное имя свойства — только словаря schema.org.
+                    if "schema.org/" not in key:
+                        continue
+                    key = key.rsplit("/", 1)[-1]
+                elif ":" in key:
+                    # `schema:price` — да, `og:price:amount` и `product:price` — нет.
+                    prefix, _, key = key.partition(":")
+                    if prefix != "schema":
+                        declared = next((m[prefix] for _, m in reversed(self._prefix_stack)
+                                         if prefix in m), False)
+                        if attr != "property" or not declared:
+                            continue
+                elif attr == "property" and self._vocab_stack and not self._vocab_stack[-1][1]:
+                    continue
+                out.append(key)
+        return out
+
     def _microdata_price(self, tag: str, a: dict):
         """
         Цена предложения в микроданных или RDFa, если её значение задано
         атрибутом: `<meta itemprop="price" content="999">`,
         `<span property="schema:price" content="16.99">`. Значение атрибута
-        видно только поисковику — его и есть смысл сверять с текстом.
+        видно только поисковику — его и есть смысл сверять с текстом. Цена
+        текстом элемента сверяется, только если сам элемент скрыт: её тоже
+        видит один поисковик.
         """
         if "itemscope" in a:
             return                 # `itemprop` на сущности — ссылка на объект, не число
+        names = self._schema_names(a)
         if "content" in a:
             value = a["content"]
         elif tag in ("data", "meter") and "value" in a:
             value = a["value"]
         else:
+            if self._hidden_ids and tag not in VOID_TAGS:
+                for key in names:
+                    field_name = _MICRODATA_PRICES.get(key)
+                    if field_name:
+                        self._props.append([self._depth, field_name, [], self._hidden_ids])
+                        return
             return
         value = (value or "").strip()
         if not value:
             return
-        names = (a.get("itemprop", "") + " " + a.get("property", "")).split()
-        for name in names:
-            key = name.lower()
-            if "/" in key:
-                # Полное имя свойства — только словаря schema.org.
-                if "schema.org/" not in key:
-                    continue
-                key = key.rsplit("/", 1)[-1]
-            elif ":" in key:
-                # `schema:price` — да, `og:price:amount` и `product:price` — нет.
-                prefix, _, key = key.partition(":")
-                if prefix != "schema":
-                    continue
+        for key in names:
             field_name = _MICRODATA_PRICES.get(key)
             if field_name:
                 self.microdata.append((field_name, value))
                 return
+
+    def _microdata_meta(self, tag: str, a: dict):
+        """Автор и даты микроданных и RDFa на обычных элементах — в meta."""
+        # Свойство сущности, заданное атрибутом: `<div itemprop="publisher"
+        # itemscope><meta itemprop="name" content="…">` — у издателя есть имя.
+        content = (a.get("content") or "").strip()
+        for prop in self._props:
+            if content and isinstance(prop[1], tuple) and len(prop[2]) < 20:
+                prop[2].append(content)
+        if tag == "meta":
+            return                 # `<meta itemprop>` читает разбор мета-тегов
+        keys = [k for k in self._schema_names(a) if k in _MICRODATA_META]
+        if not keys:
+            return
+        if "content" in a:
+            value = a["content"]
+        elif tag == "time" and "datetime" in a:
+            value = a["datetime"]
+        elif tag in ("link", "a") and a.get("href") and "itemscope" not in a:
+            value = a["href"]
+        elif tag not in VOID_TAGS:
+            # Значение — текст элемента; у сущности (`itemscope`) — текст её
+            # свойств, `<span itemprop="name">`.
+            self._props.append([self._depth, tuple(keys), [], ()])
+            return
+        else:
+            return
+        value = (value or "").strip()
+        if value:
+            for key in keys:
+                self.meta.setdefault(key, value)
+
+    def _end_prop(self, prop):
+        depth, key, chunks, ids = prop
+        text = _clean(" ".join(chunks))[:200]
+        if not text:
+            return
+        if isinstance(key, tuple):
+            for name in key:
+                self.meta.setdefault(name, text)
+        else:
+            self._hidden_prices.append((key, text, ids))
+
+    def close(self):
+        super().close()
+        while self._props:
+            self._end_prop(self._props.pop())
+
+    @property
+    def hidden_prices(self) -> list:
+        """Цены текстом скрытых элементов, кроме вкладок и раскрывашек."""
+        controls = self._controls
+        return [(key, text) for key, text, ids in self._hidden_prices
+                if not all(i and i in controls for i in ids)]
 
     def _imply_end(self, tag: str):
         """
@@ -1029,8 +1127,16 @@ class _Extractor(HTMLParser):
         if tag not in VOID_TAGS and (tag in _CHROME_TAGS
                                      or a.get("role", "").lower() in _CHROME_ROLES):
             self._chrome_stack.append(self._depth)
+        if tag not in VOID_TAGS and "vocab" in a:
+            self._vocab_stack.append((self._depth, "schema.org" in a["vocab"].lower()))
+        if tag not in VOID_TAGS and a.get("prefix"):
+            parts = a["prefix"].split()
+            self._prefix_stack.append((self._depth, {
+                p[:-1].lower(): "schema.org" in u.lower()
+                for p, u in zip(parts[::2], parts[1::2]) if p.endswith(":")}))
         if self._scope_stack and ("itemprop" in a or "property" in a):
             self._microdata_price(tag, a)
+            self._microdata_meta(tag, a)
         if tag not in VOID_TAGS and ("itemscope" in a or "typeof" in a or "vocab" in a):
             self._scope_stack.append(self._depth)
         if tag not in VOID_TAGS and (tag in _FRAME_TAGS
@@ -1228,6 +1334,9 @@ class _Extractor(HTMLParser):
         if lead:
             self._glue = False
         self._emit(text)
+        for prop in self._props:
+            if len(prop[2]) < 20:
+                prop[2].append(text)
         if data[-1:].isspace():
             self._glue = False
 
@@ -1650,7 +1759,10 @@ def essence(raw: str) -> str:
             parts += [m for m in _REFRESH_META.findall(drop_spans(live, INERT))
                       if "equiv" in m.lower()]
         parts += [f"<script>{m}</script>" for m in _NEXT_SCRIPT.findall(live)]
-    parts += _TIME_TAG.findall(raw)
+    # <time> тоже только живой: закомментированный, вырванный из комментария,
+    # выглядел бы настоящей датой.
+    if _TIME_TAG.search(raw):
+        parts += _TIME_TAG.findall(drop_spans(raw, NOT_LIVE + INERT))
     mount = EMPTY_MOUNT.search(raw)
     if mount:
         parts.append(mount.group(0))
@@ -2002,7 +2114,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             blocks=ex.blocks,
             alts=ex.alts,
             shown=ex.shown_text,
-            microdata=ex.microdata,
+            microdata=ex.microdata + ex.hidden_prices,
         )
 
     # Canonical приводится к абсолютному виду тем же базовым адресом, что

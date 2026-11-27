@@ -12,6 +12,7 @@ SEO-приёмов можно было закрыть без сети и без 
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import re
 from collections import Counter, defaultdict
@@ -64,8 +65,23 @@ def _page_years(page) -> set:
         found = re.match(r"\s*(\d{4})", str(meta.get(key) or ""))
         if found:
             years.add(int(found.group(1)))
+    from .aeo import _ld_items, _ld_types
     for block in getattr(page, "jsonld", None) or ():
-        years.update(int(y) for y in _LD_DATE.findall(block))
+        try:
+            nodes = _ld_items(json.loads(block), ("mainentity",))
+        except (ValueError, RecursionError):
+            years.update(int(y) for y in _LD_DATE.findall(block))
+            continue
+        # Дата самой страницы, а не вложенного отзыва или комментария: отзыв
+        # 2024 года не делает «2024» в заголовке датой страницы.
+        for node in nodes:
+            if _ld_types(node) & {"review", "comment"}:
+                continue
+            for key, value in node.items():
+                if str(key).lower() in ("datepublished", "datecreated"):
+                    found = re.match(r"\s*(\d{4})", str(value or ""))
+                    if found:
+                        years.add(int(found.group(1)))
     return years
 
 
