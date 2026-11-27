@@ -333,6 +333,11 @@ def _unpack_paragraphs(packed) -> list:
     return out
 
 
+# Хэш содержимого с версией: без префикса — версия 1 из манифестов до 1.30.
+HASH_PREFIX = "v2:"
+_INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
+
+
 @dataclass
 class Page:
     path: str                      # путь к файлу на диске
@@ -420,13 +425,31 @@ class Page:
         и подвалу: иначе правка одного пункта навигации помечает изменившимся
         весь сайт и отправляет его в IndexNow целиком.
         """
+        # Хэш держится на своём, простом разборе, а не на разборе для
+        # сравнения страниц: тот уточняется от версии к версии, и вместе
+        # с ним сдвигались бы `lastmod` и очередь IndexNow у всего сайта.
+        # Версия 2 считает и знаки: $900 → €900, -5 → +5 и 1,500 → 1.500 —
+        # другой факт, а версия 1 видела только слова. Невидимые символы
+        # (мягкий перенос, нулевой ширины) по-прежнему не в счёт.
+        text = _INVISIBLE.sub("", (self.text or "").lower())
         payload = "\x00".join([
             (self.title or "").strip(),
             (self.description or "").strip(),
-            # Хэш держится на прежнем, простом разборе слов. Разбор для
-            # сравнения страниц стал точнее, но менять вместе с ним хэш нельзя:
-            # обновление пакета сдвинуло бы `lastmod` у каждой страницы на
-            # хинди и китайском и отправило бы их в IndexNow заново.
+            " ".join(re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)),
+        ])
+        return HASH_PREFIX + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+    @property
+    def legacy_content_hash(self) -> str:
+        """
+        Хэш версии 1 (только слова) — для манифестов, записанных до версии 2.
+
+        Нужен только для сверки: совпал старый хэш — содержимое то же,
+        и запись тихо переходит на новый, не трогая `lastmod` и отправку.
+        """
+        payload = "\x00".join([
+            (self.title or "").strip(),
+            (self.description or "").strip(),
             " ".join(re.findall(r"\w+", (self.text or "").lower(), flags=re.UNICODE)),
         ])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

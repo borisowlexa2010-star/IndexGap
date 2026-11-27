@@ -390,4 +390,39 @@ MESSAGES = {
         '<h3>AI search bots got an error on pages in the build ({a0})</h3>',
     '<div class="scroll"><table><thead><tr><th>бот</th><th>страница</th><th>ответ</th></tr></thead><tbody>':
         '<div class="scroll"><table><thead><tr><th>bot</th><th>page</th><th>response</th></tr></thead><tbody>',
+    '<p class="note">Показано адресов: {a0} из {a1}. Остальные — в JSON.</p>':
+        '<p class="note">Addresses shown: {a0} of {a1}. The rest are in the JSON.</p>',
+    '<p class="note">В выгрузке только страницы, которые поисковик отказался индексировать. Про остальные страницы она ничего не говорит, и потерянными на шаге индекса они не считаются.</p>':
+        '<p class="note">The export lists only pages the search engine declined to '
+        'index. It says nothing about the other pages, so they are not counted as '
+        'lost at the index step.</p>',
+    '<h3>Поисковик сам называет не проиндексированными ({a0})</h3>':
+        '<h3>Reported as not indexed by the search engine itself ({a0})</h3>',
+    '<div class="scroll"><table><thead><tr><th>страница</th><th>причина от поисковика</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>page</th><th>reason given by the search engine</th></tr></thead><tbody>',
+    '… и ещё {a0}': '… and {a0} more',
+    'Прогоны для разных сайтов — сравнение почти ничего не значит.':
+        'The runs are for different sites — the comparison means little.',
+    'Данные для шага «{a0}» есть только в одном из прогонов — этот шаг и разделы не сравниваются.':
+        'Data for the “{a0}” step is in only one of the runs — that step and the '
+        'sections are not compared.',
+    'Индекс в прогонах взят из разных источников ({a0} → {a1}) — шаг индекса и разделы не сравниваются.':
+        'The runs take the index from different sources ({a0} → {a1}) — the index '
+        'step and the sections are not compared.',
+    'Источники индекса другие (добавлены: {a0}; убраны: {a1}) — шаг индекса и разделы не сравниваются.':
+        'The index sources differ (added: {a0}; removed: {a1}) — the index step and '
+        'the sections are not compared.',
+    '<div class="scroll"><table><thead><tr><th>шаг воронки</th><th class="n">было</th><th class="n">стало</th><th class="n">разница</th></tr></thead><tbody>':
+        '<div class="scroll"><table><thead><tr><th>funnel step</th><th class="n">before</th><th class="n">now</th><th class="n">change</th></tr></thead><tbody>',
+    'Разрыв закрыт: {a0}': 'Gap closed: {a0}',
+    'Разрыв ИИ-поиска закрыт: {a0}': 'AI-search gap closed: {a0}',
+    '{a0}: потеряно было {a1}, стало {a2} ({a3:+d})': '{a0}: lost was {a1}, now {a2} ({a3:+d})',
+    'Вернулись в индекс ({a0}):': 'Back in the index ({a0}):',
+    'Вернулись в sitemap ({a0}):': 'Back in the sitemap ({a0}):',
+    'Боты пропали из логов: {a0} — проверь robots.txt и защиту CDN.':
+        'Bots gone from the logs: {a0} — check robots.txt and the CDN protection.',
+    'Боты появились в логах: {a0}': 'Bots new in the logs: {a0}',
+    'Ничего не изменилось.': 'Nothing changed.',
+    '<h2>С прошлого прогона</h2>': '<h2>Since the previous run</h2>',
+    'Сравнение с {a0}': 'Compared with {a0}',
 }

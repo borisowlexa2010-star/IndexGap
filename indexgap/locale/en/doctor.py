@@ -37,9 +37,16 @@ MESSAGES = {
         "Meta will not use the page for training",
     "Perplexity не сможет открыть страницу по прямой просьбе пользователя":
         "Perplexity will not be able to open the page when a user asks it to",
-    "{a0}: {a1} адрес(ов) поисковик сам называет не проиндексированными ({a2}) — в шаг «в индексе» они не засчитаны":
+    "{a0}: {a1} адрес(ов) поисковик сам называет не проиндексированными ({a2}) — проиндексированными они не засчитаны":
         "{a0}: the search engine itself reports {a1} address(es) as not indexed "
-        "({a2}) — they are not counted in the index step",
+        "({a2}) — they are not counted as indexed",
+    "Не отклонено поисковиком": "Not rejected by the engine",
+    "поисковик сам назвал страницу не проиндексированной":
+        "the search engine itself reports the page as not indexed",
+    "в выгрузке ({a0}) только страницы, которые поисковик отказался индексировать: они потеряны на шаге индекса. Про остальные {a1} стр. выгрузка ничего не говорит, и потерянными они не считаются":
+        "the export ({a0}) lists only pages the search engine declined to index: "
+        "they are lost at the index step. The export says nothing about the other "
+        "{a1} page(s), so they are not counted as lost",
     "{a0}: помечен как «{a1}», но по столбцам это {a2} — прочитан как {a2}":
         "{a0}: labelled “{a1}”, but its columns say {a2} — read as {a2}",
     "статус не указан": "no status given",
