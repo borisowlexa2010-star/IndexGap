@@ -7,6 +7,12 @@ MESSAGES = {
     "canonical теперь ведёт на {a0}": "the canonical now points to {a0}",
     "страница стала черновиком": "the page became a draft",
     "страница стала заглушкой-редиректом на {a0}": "the page became a redirect stub to {a0}",
+    "страница стала заглушкой-редиректом на {a0}, а оттуда редирект ведёт по кругу — на живом сайте это ошибка вместо страницы":
+        "the page became a redirect stub to {a0}, and from there the redirects go "
+        "round in a loop: on the live site that is an error instead of a page",
+    "страница стала заглушкой-редиректом на главную — поисковик считает это мягким 404":
+        "the page became a redirect stub to the home page: a search engine treats "
+        "that as a soft 404",
     "появился запрет сниппета: страница останется в индексе, но пропадёт из ответов ИИ-поиска":
         "a snippet ban appeared: the page stays indexed but disappears from AI-search answers",
     "текста стало меньше на {a0:.0%}: {a1} → {a2} слов":

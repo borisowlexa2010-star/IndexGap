@@ -35,6 +35,10 @@ MESSAGES = {
         "Write the link in the form the page has in the build: the same letter case, /about/ for about/index.html, /faq.html or /faq for faq.html. If the host redirects that form itself, add the rule to _redirects, netlify.toml or vercel.json and the finding goes away.",
     "Пиши canonical в той форме, в какой страница лежит в сборке: /about/ для about/index.html, /about.html или /about для about.html — обычно это настройка trailingSlash генератора. Если хостинг отдаёт эту форму сам — cleanUrls или trailingSlash в vercel.json, правило в _redirects или netlify.toml, — находка уйдёт.":
         "Write the canonical in the form the page has in the build: /about/ for about/index.html, /about.html or /about for about.html — usually this is the generator's trailingSlash setting. If the host serves that form itself — cleanUrls or trailingSlash in vercel.json, a rule in _redirects or netlify.toml — the finding goes away.",
+    "Веди заглушку не на главную, а на страницу, которая заменила старую по смыслу. Если редирект на главную поставил шаблон на страницы с текстом, найди в шаблоне meta refresh и убери его.":
+        "Point the stub at the page that replaced the old one in meaning, not at "
+        "the home page. If a template put the redirect to the home page on pages "
+        "with text, find the meta refresh in the template and remove it.",
     "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
         "The links point at pages the build does not have. Find where the "
         "template takes these addresses from, and either remove the link or "

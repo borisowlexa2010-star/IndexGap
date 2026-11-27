@@ -199,6 +199,13 @@ WHY = {
    "template linking to a data row that a filter kept out of generation — one "
    "line in the template, repeated on every page. Links to assets, feeds and "
    "sections not present in the checked directory are not judged.",
+ "redirect-home":
+   "A redirect stub (meta refresh, a one-line JavaScript redirect or a Next.js "
+   "NEXT_REDIRECT page) whose target is the home page. Google treats a removed "
+   "page redirected to the home page as a soft 404, so the old address keeps "
+   "nothing. It is a warning when the stub still carries the text of a page — "
+   "usually a template that put the redirect on every page of a section — and "
+   "info for an empty alias.",
  "orphan":
    "A page nothing links to is discovered only through the sitemap, crawled "
    "rarely, and treated as unimportant — because in the site's own structure it "
@@ -465,7 +472,7 @@ FAMILIES = [
   "Whether a page can be found, crawled and kept in the index at all. Nothing "
   "further down this list matters on a page that fails here.",
   ["noindex", "noindex-group", "nosnippet", "canonical-elsewhere", "orphan", "unreachable", "broken-link",
-   "wrong-link-form", "canonical-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
+   "redirect-home", "wrong-link-form", "canonical-form", "hub-missing-links", "deep", "js-shell", "heavy-html"]),
 
  ("content", "Content quality at scale",
   "The failures that only appear when pages are compared with each other. A "
