@@ -2,6 +2,10 @@
 """core, freshness, publish, portfolio, engines, install — English."""
 
 MESSAGES = {
+    "в сборке нет ни одного файла картинки, а страницы ссылаются на {a0}: {a1}. Если картинки отдаёт другое приложение — всё в порядке; если они должны лежать в сборке — они в неё не попали":
+        "the build holds no image files at all, and the pages refer to {a0}: {a1}. If "
+        "another application serves the images, all is well; if they belong in the "
+        "build, they did not get into it",
     "{a0} файл(ов) HTML — куски шаблонов без <html> и <title>, а не страницы; не проверялись: {a1}":
         "{a0} HTML file(s) are template fragments with no <html> or <title>, not "
         "pages; not checked: {a1}",

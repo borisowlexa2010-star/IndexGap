@@ -1838,7 +1838,7 @@ CODE_WEIGHT = {
     "jsonld-mismatch": 9, "microdata-mismatch": 9, "no-viewport": 10, "stale-year": 11, "heavy-html": 11, "near-duplicate": 8, "low-uniqueness": 9,
     "template-skeleton": 10, "same-opening": 11, "thin": 12,
     "no-title": 13, "no-h1": 14, "duplicate-title": 15, "deep": 16,
-    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "redirect-home": 16, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
+    "similar": 17, "duplicate-risk": 10, "broken-link": 17, "broken-image": 17, "redirect-home": 16, "wrong-link-form": 17, "canonical-form": 17, "source-note": 18, "check-by-eye": 19, "stale-closed": 30,
 }
 
 
@@ -2720,6 +2720,25 @@ def redirect_chain(page, by_key: dict, hops: int = 20) -> tuple:
     return chain, False
 
 
+def broken_image_issues(pages: list) -> list:
+    """
+    Картинки, которых нет в сборке: одна находка на страницу, с первыми
+    адресами. Пропавшие файлы отмечает загрузка (`_mark_missing_images`).
+    """
+    issues = []
+    for page in pages:
+        missing = page.__dict__.get("_missing_images")
+        if not missing:
+            continue
+        shown = ", ".join(unquote(p) for p in missing[:3])
+        more = tr(" и ещё {a0}", a0=len(missing) - 3) if len(missing) > 3 else ""
+        issues.append(("warning", page.url, "broken-image", Said(tr(
+            "картинок, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404: "
+            "на месте картинки будет пусто", a0=len(missing), a1=shown, a2=more),
+            [unquote(p) for p in missing])))
+    return issues
+
+
 def redirect_stub_issues(pages: list, home_url: str = None) -> list:
     """
     Заглушки, у которых плоха сама цель, хотя она и есть в сборке.
@@ -2834,6 +2853,7 @@ def run_all(pages: list, home_url: str = None, cfg: dict = None,
                 "заглушка-редирект ведёт на страницу, которой нет в сборке: {a0}. "
                 "На живом сайте это 404 за редиректом", a0=shown), subjects)))
         issues += wrong_form_issues(pages, twins)
+        issues += broken_image_issues(pages)
         for section, n in missing_sections(pages, graph, base_path):
             notes.append(tr(
                 "в раздел {a0} ведут ссылки на {a1} разных страниц, а ни одной страницы "

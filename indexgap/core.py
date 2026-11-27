@@ -926,6 +926,12 @@ class _Extractor(HTMLParser):
         self.alternates_in_body = 0
         self._in_body = False
         self.alts = []
+        # Адреса картинок как написаны: src и srcset у <img> и <source>,
+        # poster у <video>, иконки <link rel=icon>. По ним ищутся пропавшие файлы.
+        self.images = []
+        # Размеры встроенных data:-картинок в байтах после декодирования: их
+        # браузер получает вместе с HTML, на диске их не видно.
+        self.inline_images = []
         self.microdata = []        # (поле, значение) цен микроданных и RDFa
         self._scope_stack = []     # глубины открытых itemscope / typeof / vocab
         # RDFa: открытые `vocab` и `prefix` — (глубина, словарь schema.org ли;
@@ -1216,6 +1222,35 @@ class _Extractor(HTMLParser):
             if name not in INLINE_TAGS and name not in ("a", "span"):
                 return
 
+    def _collect_images(self, tag: str, a: dict):
+        refs = []
+        if tag == "img":
+            refs.append(a.get("src", ""))
+            refs += _srcset_urls(a.get("srcset", ""))
+        elif tag == "source":
+            refs += _srcset_urls(a.get("srcset", ""))
+        elif tag == "video":
+            refs.append(a.get("poster", ""))
+        elif tag == "link" and any(r == "icon" or r.endswith("-icon")
+                                   for r in a.get("rel", "").lower().split()):
+            refs.append(a.get("href", ""))
+        style = a.get("style", "")
+        if "data:" in style:
+            for m in _STYLE_DATA_URL.finditer(style):
+                size = data_uri_bytes(m.group(1))
+                if size:
+                    self.inline_images.append(size)
+        for ref in refs:
+            ref = (ref or "").strip()
+            if not ref:
+                continue
+            if ref[:5].lower() == "data:":
+                size = data_uri_bytes(ref)
+                if size:
+                    self.inline_images.append(size)
+                continue
+            self.images.append(ref)
+
     # -- разбор ---------------------------------------------------------------
 
     def handle_starttag(self, tag, attrs):
@@ -1258,6 +1293,7 @@ class _Extractor(HTMLParser):
             return
         if tag == "body" or tag not in HEAD_TAGS:
             self._in_body = True
+        self._collect_images(tag, a)
 
         if tag not in INLINE_TAGS:
             self._glue = False
@@ -1707,6 +1743,51 @@ _IMPLIED_END.update({"li": {"li"}, "dt": {"dt", "dd"}, "dd": {"dt", "dd"},
 # панель; `S:0`, `P:0` — потоковый рендер React: скрипт переносит блок на
 # место сразу после загрузки.
 _STYLE_HIDDEN = re.compile(r"(?<![\w-])(?:display\s*:\s*none|visibility\s*:\s*hidden)(?![\w-])", re.I)
+_STYLE_DATA_URL = re.compile(r"url\(\s*['\"]?(data:[^'\")\s]*)", re.I)
+
+
+def data_uri_bytes(uri: str) -> int:
+    """
+    Размер картинки из data:-адреса после декодирования; 0 — не картинка.
+    Base64 раздувает данные на треть: считается то, что браузер получит.
+    """
+    head, comma, body = uri[5:].partition(",")
+    if not comma or not head.strip().lower().startswith("image/"):
+        return 0
+    if ";base64" in head.lower():
+        body = re.sub(r"\s+|%0[aAdD]|%20", "", body)
+        return max(0, len(body) * 3 // 4 - min(2, len(body) - len(body.rstrip("="))))
+    return len(unquote(body).encode("utf-8", "surrogatepass"))
+
+
+def _srcset_urls(value: str) -> list:
+    """
+    Адреса из srcset по правилам HTML: адрес — всё до пробела, запятая в
+    нём не делит кандидатов (`data:image/png;base64,…`, `w_100,h_100`).
+    """
+    out, pos, n = [], 0, len(value or "")
+    while pos < n:
+        lead = _SRCSET_LEAD.match(value, pos)
+        pos = lead.end()
+        token = _SRCSET_URL.match(value, pos)
+        if not token:
+            break
+        url, pos = token.group(), token.end()
+        if url.endswith(","):
+            out.append(url.rstrip(","))
+            continue
+        out.append(url)
+        # Дескрипторы (`800w`, `2x`) — до запятой вне скобок.
+        tail = _SRCSET_DESCRIPTORS.match(value, pos)
+        pos = tail.end() if tail else n
+    return [u for u in out if u]
+
+
+_SRCSET_LEAD = re.compile(r"[\s,]*")
+_SRCSET_URL = re.compile(r"\S+")
+_SRCSET_DESCRIPTORS = re.compile(r"(?:[^,(]|\([^)]*\))*")
+
+
 _STYLE_NONE = re.compile(r"(?<![\w-])display\s*:\s*none(?![\w-])", re.I)
 _STYLE_VISIBLE = re.compile(r"(?<![\w-])visibility\s*:\s*visible(?![\w-])", re.I)
 _STREAMED_ID = re.compile(r"^[SP]:\d+$")
@@ -2400,6 +2481,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         md_anchors = [text.strip() for text, _ in matches]
         md_headings = [(len(h), _clean(t)) for h, t in MD_HEADING.findall(_strip_fences(body))]
         base_href = ""
+        images, inline = [], []
         text = _strip_markdown(body)
         # Без шапки заголовком страницы становится первый заголовок текста —
         # так делает GitHub Pages. При шапке без title это не действует:
@@ -2449,6 +2531,7 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
         hrefs = ex.hrefs
         nofollow_hrefs = ex.nofollow_hrefs
         base_href = ex.base
+        images, inline = ex.images, ex.inline_images
         page = Page(
             path=path, url=url,
             title=_clean(ex.title),
@@ -2614,6 +2697,16 @@ def load_page(path: str, root: str, base_url: str, as_index: bool = False) -> Pa
             unfollowed.append(absolute)
     if unfollowed:
         page.__dict__["_nofollow_links"] = unfollowed
+    if inline:
+        page.__dict__["_inline_images"] = (sum(inline), max(inline), len(inline))
+    refs = []
+    for ref in dict.fromkeys(images):
+        target = _image_target(ref, base_for_links, host)
+        if target:
+            refs.append(target)
+    refs = list(dict.fromkeys(refs))
+    if refs:
+        page.__dict__["_image_refs"] = refs
     if foreign:
         page.__dict__["_foreign_links"] = foreign
 
@@ -3491,11 +3584,162 @@ def _has_own_page(folder: str, root: str, exts) -> bool:
     return False
 
 
+# Расширения файлов картинок и иконок. Адрес без такого расширения — чаще
+# всего обработчик (`/api/og?title=…`, `/avatar/42`), а не файл сборки.
+_IMAGE_FILE = re.compile(r"\.(?:jpe?g|png|gif|webp|avif|bmp|tiff?|svg|ico|jxl|heic)$", re.I)
+_TEMPLATE_MARK = re.compile(r"\{\{|\}\}|\{%|%\}|\$\{|%7B%7B|%7B%25", re.I)
+# Оптимизаторы картинок с исходником в параметре: Next.js, Vercel, Netlify, Astro.
+_OPTIMIZER_QUERY = ("/_next/image", "/_vercel/image", "/.netlify/images", "/_image")
+# Оптимизаторы с исходником в пути: `/_ipx/w_640/img/a.jpg` (Nuxt),
+# `/cdn-cgi/image/width=640/img/a.jpg` (Cloudflare).
+_OPTIMIZER_PATH = re.compile(r"(?:^|/)(?:_ipx|cdn-cgi/image)/[^/]*(/.*)$")
+
+
+def _image_target(ref: str, base: str, host: str):
+    """То же, что `_resolve_image`, с кешем: шапка и подвал у всех страниц одни."""
+    if ref.startswith("/") and not ref.startswith("//"):
+        # От корня: от страницы зависят только схема и хост.
+        cut = base.find("/", base.find("//") + 2)
+        base = base if cut < 0 else base[:cut + 1]
+    elif "://" in ref[:12]:
+        base = ""
+    return _resolve_image(ref, base, host)
+
+
+@functools.lru_cache(maxsize=65536)
+def _resolve_image(ref: str, base: str, host: str, depth: int = 0):
+    """
+    Абсолютный адрес картинки своего сайта, которую стоит искать в сборке, —
+    или None: чужой хост, blob:, шаблон, обработчик без расширения файла.
+    У оптимизатора (`/_next/image?url=/img/a.jpg`) ищется его исходник.
+    """
+    if not ref or _TEMPLATE_MARK.search(ref) or ref.lower().startswith(("data:", "blob:", "#")):
+        return None
+    try:
+        absolute = urldefrag(urljoin(base, ref))[0]
+        parts = urlsplit(absolute)
+        if parts.scheme not in ("http", "https") or urlsplit(url_key(absolute)).netloc != host:
+            return None
+    except ValueError:
+        return None
+    path = parts.path
+    if depth < 2:
+        if path.rstrip("/").endswith(_OPTIMIZER_QUERY):
+            from urllib.parse import parse_qs
+            query = parse_qs(parts.query)
+            source = (query.get("url") or query.get("href") or query.get("src") or [""])[0]
+            return _resolve_image(source, absolute, host, depth + 1) if source else None
+        inner = _OPTIMIZER_PATH.search(path)
+        if inner:
+            source = inner.group(1)
+            # `/_ipx/_/https://cdn.example/a.jpg` — исходник на другом хосте.
+            if re.match(r"/+https?:/", source):
+                return None
+            return _resolve_image(source, absolute, host, depth + 1)
+    if not _IMAGE_FILE.search(path):
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _without_static_assets(root: str, pages: list) -> bool:
+    """
+    Сборка, в которой картинок сайта нет и не должно быть: `.next/server/app`
+    (картинки из public/ и .next/static/ лежат вне её), каталог `indexgap
+    fetch` (скачан только HTML) и исходники генератора (картинки в static/,
+    public/, assets/ и выходят по другим путям).
+    """
+    real = os.path.abspath(root).replace(os.sep, "/").rstrip("/")
+    up = os.path.dirname(os.path.dirname(os.path.abspath(root)))
+    if (re.search(r"/\.next/server(?:/(?:app|pages))?$", real)
+            or os.path.isfile(os.path.join(up, "routes-manifest.json"))
+            or os.path.isfile(os.path.join(root, FETCH_MANIFEST))
+            or any(os.path.exists(os.path.join(root, m)) for m in SOURCE_MARKERS
+                   if m not in _REPO_ONLY_MARKERS)):
+        return True
+    # Скопированный куда-то `.next/server/app`: рядом со страницей её
+    # RSC-данные и метаданные маршрута.
+    for page in pages[:50]:
+        stem = os.path.splitext(page.path or "")[0]
+        if stem and any(os.path.isfile(stem + ext) for ext in (".rsc", ".meta")):
+            return True
+    return False
+
+
 def _twin_links(page) -> tuple:
     """Исходящие пропущенного двойника: ссылки, nofollow-ссылки, редирект, nofollow страницы."""
     from .checks import redirect_target
     return (list(page.links), list(page.__dict__.get("_nofollow_links", ())),
             redirect_target(page), page.nofollow)
+
+
+def _has_image_files(root: str, limit: int = 200_000) -> bool:
+    """Есть ли в сборке хоть один файл картинки; обход до первого."""
+    seen = 0
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ALWAYS_SKIP and not d.startswith(".")]
+        if any(_IMAGE_FILE.search(name) for name in files):
+            return True
+        seen += len(files)
+        if seen > limit:
+            return True            # не досчитали — считаем, что картинки есть
+    return False
+
+
+def _mark_missing_images(pages: list, root: str, base_url: str, problems: list):
+    """
+    Картинки, на которые ссылаются страницы, а файла в сборке нет: на живом
+    сайте это 404 и пустое место. Адрес вне пути `--site` не проверяется:
+    его отдаёт кто-то другой.
+    """
+    if not any(p.__dict__.get("_image_refs") for p in pages):
+        return
+    if _without_static_assets(root, pages):
+        for page in pages:
+            page.__dict__.pop("_image_refs", None)
+        return
+    rules = host_redirect_rules(root)[0]
+    prefix = urlsplit(base_url).path.rstrip("/") + "/"
+    known = {}
+
+    def exists(path: str) -> bool:
+        if path not in known:
+            rel = unquote(path[len(prefix):])
+            full = os.path.join(root, *[x for x in rel.split("/") if x])
+            try:
+                # Имя на диске в NFD (macOS), в ссылке — в NFC, и наоборот.
+                known[path] = any(os.path.isfile(v) for v in {
+                    full, unicodedata.normalize("NFC", full), unicodedata.normalize("NFD", full)})
+            except (ValueError, OSError):
+                known[path] = True
+        return known[path]
+
+    found = {}
+    for page in pages:
+        missing = []
+        for absolute in page.__dict__.pop("_image_refs", ()):
+            path = urlsplit(absolute).path
+            if not path.startswith(prefix) or any(r.match(path) for r in rules):
+                continue
+            if not exists(path):
+                missing.append(path)
+        if missing:
+            found[page.url] = missing
+    if not found:
+        return
+    # Ни одна картинка не нашлась, и файлов картинок в сборке нет вовсе: это
+    # не сотня пропавших файлов, а каталог без картинок — HTML скопирован
+    # отдельно, картинки отдаёт другое приложение. Говорится один раз.
+    if not any(known.values()) and not _has_image_files(root):
+        paths = sorted({unquote(p) for m in found.values() for p in m})
+        problems.append(tr(
+            "в сборке нет ни одного файла картинки, а страницы ссылаются на {a0}: {a1}. "
+            "Если картинки отдаёт другое приложение — всё в порядке; если они должны "
+            "лежать в сборке — они в неё не попали",
+            a0=len(paths), a1=", ".join(paths[:3]) + (" …" if len(paths) > 3 else "")))
+        return
+    for page in pages:
+        if page.url in found:
+            page.__dict__["_missing_images"] = found[page.url]
 
 
 def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tuple:
@@ -3728,6 +3972,7 @@ def load_pages(root: str, base_url: str, exts=DEFAULT_EXTS, jobs: int = 1) -> tu
                            "хостинге без учёта регистра один файл затрёт другой",
                            a0=", ".join(group)))
     _settle_canonical_origins(pages, base_url, problems)
+    _mark_missing_images(pages, root, base_url, problems)
     pages.sort(key=lambda p: p.url)
     return pages, problems
 

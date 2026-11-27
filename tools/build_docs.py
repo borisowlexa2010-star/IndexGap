@@ -190,7 +190,7 @@ WHY = {
  "heavy-html":
    "An HTML file over 2 MB. Googlebot reads the first 2 MB of a supported file and indexes what it has read — Google's own documentation, updated 2026-02-03. Hydration payloads embedded in the page are the usual cause on modern frameworks.",
  "heavy-images":
-   "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads.",
+   "Images over 1 MB anywhere in the build — one site-level finding with the heaviest named. They do not stop indexing, but they are most of the weight a phone downloads. Pages whose inline `data:` images (in `<img src>`, `srcset`, `<picture><source>` or a `style` background) add up to more than 1 MB after decoding are named in the same finding with their size: that weight comes with every page view and is never cached on its own. Small inline icons and SVG sprites stay quiet.",
  "dataset-unbound":
    "The dataset was given, but fewer than half of the pages were bound to its rows \u2014 so the numbers on the rest were never checked against anything, and a clean fact check means nothing. A page is bound by `keyword:` in its front matter, by `<meta name=\"keyword\">`, by a `slug`/`url`/`path` column in the dataset matching its address, by its folder name, or by its title. The run also lists the dataset rows that have no page at all: a generation failure or a filter.",
  "wrong-link-form":
@@ -203,6 +203,18 @@ WHY = {
    "template linking to a data row that a filter kept out of generation — one "
    "line in the template, repeated on every page. Links to assets, feeds and "
    "sections not present in the checked directory are not judged.",
+ "broken-image":
+   "An image the page refers to — `<img src>`, a `srcset` candidate, `<picture><source srcset>`, "
+   "a `<video poster>` or a `<link rel=icon>` — that is not in the build. The address is resolved "
+   "the way links are: against `<base href>`, with percent-encoding decoded and the query string "
+   "dropped. One warning per page, naming the first few. Images on other hosts, `data:` and "
+   "`blob:` addresses, template placeholders and addresses without an image file extension "
+   "(`/api/og?title=…`) are not judged; for `/_next/image?url=…` and similar optimizer endpoints "
+   "the source in the parameter is checked. Builds that do not hold the site's images at all — "
+   "`.next/server/app`, an `indexgap fetch` mirror, a source repository — are skipped, as are "
+   "addresses outside the `--site` path and paths a redirect rule catches. A build that holds "
+   "no image file at all, while none of the referenced images resolve, gets one load note "
+   "instead of a warning per page: the HTML was most likely copied without its images.",
  "redirect-home":
    "A redirect stub (meta refresh, a one-line JavaScript redirect or a Next.js "
    "NEXT_REDIRECT page) whose target is the home page. Google treats a removed "
@@ -511,7 +523,7 @@ FAMILIES = [
    "no-description", "description-length", "duplicate-description",
    "no-h1", "many-h1", "no-headings", "title-h1-mismatch", "no-structure", "img-no-alt",
    "img-alt-filler", "img-alt-language",
-   "vague-anchor", "no-og", "no-viewport", "heavy-images"]),
+   "vague-anchor", "no-og", "no-viewport", "heavy-images", "broken-image"]),
 
  ("hreflang", "hreflang and language versions",
   "hreflang is mutual, self-inclusive and per-page — three properties a "

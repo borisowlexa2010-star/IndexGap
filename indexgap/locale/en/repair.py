@@ -39,6 +39,8 @@ MESSAGES = {
         "Point the stub at the page that replaced the old one in meaning, not at "
         "the home page. If a template put the redirect to the home page on pages "
         "with text, find the meta refresh in the template and remove it.",
+    "Найди, откуда шаблон берёт адреса этих картинок: файл переименован, не скопирован в сборку или путь записан от другой папки. Положи файл в сборку или исправь путь.":
+        "Find where the template takes these image addresses from: the file was renamed, not copied into the build, or the path is written from another folder. Put the file into the build or fix the path.",
     "Ссылки ведут на страницы, которых нет в сборке. Найди, откуда шаблон берёт эти адреса, и либо убери ссылку, либо сгенерируй страницу. Если сервер перенаправляет эти адреса — проверь, что перенаправление действительно есть.":
         "The links point at pages the build does not have. Find where the "
         "template takes these addresses from, and either remove the link or "
