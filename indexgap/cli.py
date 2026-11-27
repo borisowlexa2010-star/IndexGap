@@ -590,6 +590,31 @@ def _sitemaps(args) -> dict:
     return cached
 
 
+def _sitemap_notes(args, sm: dict) -> list:
+    """
+    Что сказать о прочитанном sitemap в отчёте и JSON, а не только в консоли:
+    в CI остаются только они. Непрочитанный дочерний файл значит, что шаг
+    «в sitemap» и список «нет в sitemap» неполные.
+    """
+    notes = [tr("sitemap прочитан не целиком: {a0}. Шаг «в sitemap» и список «нет в "
+                "sitemap» неполные", a0=error) for error in sm.get("errors") or ()]
+    notes += list(sm.get("warnings") or ())
+    site = urlsplit(args.site or "")
+    if site.scheme and site.netloc:
+        other = [u for u in sm.get("urls") or ()
+                 if u.lower().startswith(("http://", "https://"))
+                 and doctor._host(u) == doctor._host(args.site)
+                 and (urlsplit(u).scheme.lower() != site.scheme.lower()
+                      or urlsplit(u).netloc.lower() != site.netloc.lower())]
+        if other:
+            notes.append(tr(
+                "{a0} адрес(ов) в sitemap — не на {a1}, а на другой схеме или хосте ({a2}): "
+                "каждый из них отвечает редиректом, и Search Console отметит их как "
+                "«страница с переадресацией». В sitemap нужны адреса как в --site",
+                a0=len(other), a1=f"{site.scheme}://{site.netloc}", a2=other[0]))
+    return notes
+
+
 def _sitemap_hreflang(args, pages) -> None:
     """hreflang, объявленный в sitemap, отдаётся страницам до проверок."""
     if not getattr(args, "sitemap", None):
@@ -766,8 +791,7 @@ def cmd_check(args):
             # Как у doctor: sitemap просили сверить, а он не читается — это
             # ошибка входа, а не зелёная проверка с примечанием.
             raise SourceError(tr("sitemap не прочитан: {a0}", a0=sm["errors"][0]))
-        for error in sm["errors"]:
-            print(tr("  ! sitemap не прочитан: {a0}", a0=error))
+        notes += _sitemap_notes(args, sm)
         if sm["urls"]:
             sitemap_urls = sm["urls"]
             analysis["issues"] = checks.sort_issues(
@@ -1076,6 +1100,42 @@ def _warn_sitemap_blocked(args, pages) -> None:
                  + (" …" if len(listed) > 3 else "")))
 
 
+def _short_list(urls: list) -> str:
+    return ", ".join(urls[:3]) + (" …" if len(urls) > 3 else "")
+
+
+def _warn_sitemap_shape(args, pages) -> None:
+    """
+    Адреса sitemap, по которым хостинг ответит не страницей, и sitemap, о
+    котором robots.txt не знает. Из sitemap ничего не убирается: что неверно —
+    правило, canonical или список, решает человек.
+    """
+    listed = [p for p in pages if publish.indexable(p)]
+    rules, _found = diffs.read_redirects(args.root, urlsplit(args.site or "").netloc)
+    if rules:
+        keys = {p.key for p in pages}
+        shadowed = sorted(p.url for p in listed if diffs._shadowed(rules, p, keys))
+        if shadowed:
+            print(tr("  ! {a0} адрес(ов) в sitemap перехватывает правило хостинга "
+                     "(redirects в vercel.json, `301!`/`404!` в _redirects) раньше файла — "
+                     "поисковик получит редирект или ошибку, а не страницу: {a1}",
+                     a0=len(shadowed), a1=_short_list(shadowed)))
+    forms = sorted(p.url for p in listed if p.__dict__.get("_canonical_form"))
+    if forms:
+        print(tr("  ! {a0} адрес(ов) в sitemap взяты из canonical в форме, которой раскладка "
+                 "файлов не отдаёт (check: canonical-form) — хостинг ответит редиректом "
+                 "или 404: {a1}. Поправь canonical", a0=len(forms), a1=_short_list(forms)))
+    robots_path = _guess_robots(args)
+    declared = aeo.read_robots(robots_path).get("sitemaps") or [] if robots_path else []
+    if declared:
+        mine = publish._shard_loc(args.site or "", args.public_prefix, "sitemap.xml")
+        if url_key(mine) not in {url_key(publish.ascii_url(u)) for u in declared} | {
+                url_key(u) for u in declared}:
+            print(tr("  ! {a0} объявляет другой sitemap ({a1}), а записан {a2} — поисковик "
+                     "будет читать объявленный. Пропиши в robots.txt `Sitemap: {a2}`",
+                     a0=robots_path, a1=_short_list(declared), a2=mine))
+
+
 def cmd_sitemap(args):
     config_path = apply_project_defaults(args)
     pages = _load(args)
@@ -1105,12 +1165,17 @@ def cmd_sitemap(args):
             "Все {a0} страниц закрыты от индекса (noindex, canonical, черновики) — пустой "
             "sitemap не записан.\n    Проверь noindex в шаблоне и X-Robots-Tag в _headers, "
             "netlify.toml, vercel.json. Если так и задумано — добавь --force.", a0=len(pages)))
+    if "://" in (args.public_prefix or ""):
+        raise SourceError(tr(
+            "--public-prefix — путь на сайте ({a0}), а не адрес: шарды лежат на том же "
+            "хосте, что и --site. Например: --public-prefix sitemaps", a0=args.public_prefix))
     if first_run:
         _first_run_note(manifest_path)
+    before = manifest.get("_included")
     result = publish.build_sitemap(pages, args.out_dir or args.root, args.site,
                                    manifest=manifest,
                                    public_prefix=args.public_prefix,
-                                   base_dir=manifest_base)
+                                   base_dir=manifest_base, force=args.force)
     save_manifest(manifest_path, result["manifest"])
     print(tr("Включено: {a0}   Исключено (noindex, canonical, черновики): {a1}", a0=result['included'], a1=result['excluded']))
     if result["drafts"]:
@@ -1120,6 +1185,15 @@ def cmd_sitemap(args):
     for path in result["removed"]:
         print(tr("  удалён устаревший шард: {a0}", a0=path))
     _warn_sitemap_blocked(args, pages)
+    _warn_sitemap_shape(args, pages)
+    if (isinstance(before, int) and not isinstance(before, bool) and before >= 5
+            and result["included"] * 2 < before):
+        # Шаблон раздела получил noindex, а главная осталась открытой: запрет
+        # «всё закрыто» тут не срабатывает, а sitemap молча худеет вдвое.
+        print(tr("  ! в sitemap {a0} адрес(ов), в прошлый раз было {a1}: больше половины "
+                 "выпало разом. Проверь noindex и canonical в шаблонах и X-Robots-Tag "
+                 "хостинга — чаще всего так выглядит правило, закрывшее целый раздел",
+                 a0=result["included"], a1=before))
     if result["too_long"]:
         print(tr("  ! {a0} адрес(ов) длиннее {a1} символов — поисковик такой адрес из sitemap "
                  "не примет, укороти slug: {a2}", a0=len(result["too_long"]),
@@ -1264,8 +1338,7 @@ def cmd_doctor(args):
         if not sm["urls"] and sm["errors"]:
             raise SourceError(
                 tr("sitemap не прочитан: {a0}\n    Пока он не читается, сверять не с чем — «потеряно всё» в такой ситуации было бы враньём.", a0=sm['errors'][0]))
-        for error in sm["errors"]:
-            print(tr("  ! sitemap не прочитан: {a0}", a0=error))
+        notes += _sitemap_notes(args, sm)
         sitemap_urls = sm["urls"]
         _warn_undeclared(_guess_robots(args), args.sitemap, args.root, args.site)
     by_engine, by_source, cited, impressions = _collect_indexed(args)

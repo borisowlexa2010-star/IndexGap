@@ -102,7 +102,7 @@ def _fetch_sitemap(source: str) -> bytes:
     return data
 
 
-def _child_sitemap(source: str, loc: str) -> tuple:
+def _child_sitemap(source: str, loc: str, shared=()) -> tuple:
     """
     Куда идти за дочерним файлом индекса: (источник, ошибка).
 
@@ -111,7 +111,9 @@ def _child_sitemap(source: str, loc: str) -> tuple:
     путь, и тот читался, или адрес во внутренней сети, и туда уходил запрос.
     Индекс с диска ищет дочерние файлы рядом с собой — по пути из адреса
     (`/en/sitemap.xml` → `en/sitemap.xml`), потом по имени — и не выходит за
-    свой каталог.
+    свой каталог. По имени — только если это имя у дочерних файлов индекса
+    одно: `en/sitemap.xml` и `de/sitemap.xml` (`shared`) по имени не ищутся,
+    иначе пропавший `de/` подменялся посторонним `sitemap.xml` рядом.
     """
     from urllib.parse import unquote, urlsplit
     remote = loc.startswith(("http://", "https://"))
@@ -129,24 +131,28 @@ def _child_sitemap(source: str, loc: str) -> tuple:
     # таким «дочерним» файлом в сеть нельзя: это был бы запрос ради петли.
     if os.path.realpath(os.path.join(base, path)) == me:
         return "", tr("{a0}: индекс ссылается сам на себя", a0=loc)
-    for candidate in (os.path.join(base, path), os.path.join(base, os.path.basename(path))):
+    candidates = [os.path.join(base, path)]
+    if os.path.basename(path) not in shared:
+        candidates.append(os.path.join(base, os.path.basename(path)))
+    for candidate in candidates:
         real = os.path.realpath(candidate)
         inside = real == base or real.startswith(base + os.sep)
         if inside and real != me and os.path.isfile(real):
             return real, ""
-    if remote:
-        return loc, ""
+    # Индекс с диска в сеть не ходит: проверка без --live остаётся без сети,
+    # а сохранённая копия чужого индекса не выбирает, куда пакету слать запрос.
     return "", tr("{a0}: дочерний файл не найден рядом с индексом", a0=loc)
 
 
 def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
-                 fetcher=None) -> dict:
+                 fetcher=None, _stack: tuple = ()) -> dict:
     """
     Читает sitemap с диска или по URL, разворачивает sitemap-index.
 
-    Возвращает {"urls": [...], "error": "..."} — раньше при любой ошибке
-    возвращался пустой список, и опечатка в пути выглядела как «сайт
-    не попал в sitemap целиком».
+    Возвращает {"urls": [...], "error": "...", "warnings": [...]} — раньше при
+    любой ошибке возвращался пустой список, и опечатка в пути выглядела как
+    «сайт не попал в sitemap целиком». `warnings` — нарушения протокола,
+    из-за которых поисковик может отвергнуть файл; адреса из него читаются.
 
     `fetcher(source) -> bytes` заменяет чтение: `fetch` так сохраняет каждый
     файл индекса и не идёт за редиректом на чужой хост. Беда — SourceError.
@@ -158,46 +164,65 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
     key = source if source.startswith(("http://", "https://")) else os.path.realpath(source)
     # Петля — это ошибка, и молчать о ней нельзя: индекс, сославшийся на себя,
     # давал ноль адресов без единого слова, и воронка сообщала, что из sitemap
-    # выпал весь сайт.
-    if key in _seen:
+    # выпал весь сайт. Петля — это файл, который уже читается выше по цепочке;
+    # файл, прочитанный раньше по соседней ветке, — просто повтор.
+    if key in _stack:
         return {"urls": [], "error": tr("{a0}: индекс ссылается сам на себя", a0=source)}
+    if key in _seen:
+        return {"urls": [], "error": "", "repeat": True}
     if len(_seen) >= MAX_SITEMAPS:
         return {"urls": [], "error": tr(
             "больше {a0} sitemap-файлов за один прогон — остальные не читались",
             a0=MAX_SITEMAPS)}
     _seen.add(key)
     try:
-        root = parse_xml((fetcher or _fetch_sitemap)(source))
+        data = (fetcher or _fetch_sitemap)(source)
+        root = parse_xml(data)
     except SourceError as exc:
         text = str(exc)
         return {"urls": [], "error": text if source in text else f"{source}: {text}"}
 
+    warnings = []
+    namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    if namespace.split("://", 1)[-1] != SITEMAP_NS.strip("{}").split("://", 1)[-1]:
+        warnings.append(tr(
+            "{a0}: корневой элемент не в пространстве имён {a1} ({a2}) — Search Console "
+            "отвергает такой файл как «неверное пространство имён»",
+            a0=source, a1=SITEMAP_NS.strip("{}"), a2=namespace or tr("не объявлено")))
     tag = root.tag.rsplit("}", 1)[-1]
     if tag == "sitemapindex":
-        urls, errors, alternates = [], [], {}
+        urls, errors, alternates, repeated = [], [], {}, False
+        locs = []
         for sm in [e for e in root
                    if e.tag.rsplit("}", 1)[-1] == "sitemap"]:
             loc = next((c.text for c in sm
                         if c.tag.rsplit("}", 1)[-1] == "loc" and c.text), "")
-            if not loc:
-                continue
-            child, problem = _child_sitemap(source, loc.strip())
+            if loc and loc.strip() not in locs:
+                locs.append(loc.strip())
+        from urllib.parse import unquote, urlsplit
+        names = Counter(os.path.basename(unquote(urlsplit(loc).path)) for loc in locs)
+        shared = {name for name, n in names.items() if n > 1}
+        for loc in locs:
+            child, problem = _child_sitemap(source, loc, shared)
             if child:
-                result = read_sitemap(child, _depth + 1, _seen, fetcher)
+                result = read_sitemap(child, _depth + 1, _seen, fetcher, _stack + (key,))
                 urls.extend(result["urls"])
                 _merge_alternates(alternates, result.get("alternates"))
+                warnings += [w for w in result.get("warnings") or () if w not in warnings]
                 problem = result["error"]
+                repeated = repeated or bool(result.get("repeat"))
             if problem and problem not in errors:
                 errors.append(problem)
             if len(_seen) >= MAX_SITEMAPS and problem:
                 break
-        if not urls and not errors:
+        if not urls and not errors and not repeated:
             errors.append(tr("{a0}: индекс не дал ни одного адреса", a0=source))
-        return {"urls": urls, "error": "; ".join(errors[:5]), "alternates": alternates}
+        return {"urls": urls, "error": "; ".join(errors[:5]), "alternates": alternates,
+                "warnings": warnings}
 
     # Только <url>/<loc>: у <image:loc> и <video:loc> то же имя, и 831
     # картинка каталога виз засчитывалась страницами sitemap.
-    urls, alternates = [], {}
+    urls, alternates, lastmods = [], {}, []
     for url in root:
         if url.tag.rsplit("}", 1)[-1] != "url":
             continue
@@ -206,6 +231,8 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
         if not loc:
             continue
         urls.append(loc)
+        lastmods += [el.text.strip() for el in url
+                     if el.text and el.text.strip() and el.tag.rsplit("}", 1)[-1] == "lastmod"]
         # hreflang можно объявить и здесь, в `<xhtml:link>`: Google считает
         # sitemap равноправным способом. Раньше эта разметка не читалась, и
         # каждая переведённая страница получала «нет hreflang».
@@ -217,7 +244,64 @@ def read_sitemap(source: str, _depth: int = 0, _seen: set = None,
             _merge_alternates(alternates, {loc: links})
     if not urls:
         return {"urls": [], "error": tr("{a0}: в файле нет ни одного <loc>", a0=source)}
-    return {"urls": urls, "error": "", "alternates": alternates}
+    warnings += _urlset_warnings(source, urls, lastmods, len(data))
+    return {"urls": urls, "error": "", "alternates": alternates, "warnings": warnings}
+
+
+# Пределы протокола sitemaps.org для одного файла: файл больше поисковик
+# отвергает целиком.
+MAX_SITEMAP_URLS = 50000
+MAX_SITEMAP_BYTES = 50 * 1024 * 1024
+_W3C_DATE = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2})"
+                       r"(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?)?)?$")
+
+
+def _urlset_warnings(source: str, urls: list, lastmods: list, size: int) -> list:
+    """Нарушения протокола в одном `<urlset>`, из-за которых файл или его даты не в счёт."""
+    from datetime import date, timedelta
+    warnings = []
+    if len(urls) > MAX_SITEMAP_URLS or size > MAX_SITEMAP_BYTES:
+        warnings.append(tr(
+            "{a0}: {a1} адресов, {a2} МБ — больше предела протокола ({a3} адресов и "
+            "{a4} МБ на файл). Поисковик может отвергнуть файл целиком: разбей его на "
+            "части под sitemap-индексом", a0=source, a1=len(urls),
+            a2=round(size / (1024 * 1024), 1), a3=MAX_SITEMAP_URLS,
+            a4=MAX_SITEMAP_BYTES // (1024 * 1024)))
+    relative = [u for u in urls if not u.lower().startswith(("http://", "https://"))]
+    if relative:
+        warnings.append(tr(
+            "{a0}: {a1} <loc> — не полные адреса ({a2}). Протокол требует адрес со схемой "
+            "и хостом, поисковик такие строки пропускает — и здесь они ни с одной "
+            "страницей не совпадут", a0=source, a1=len(relative), a2=", ".join(relative[:3])))
+    bad, future = [], []
+    horizon = (date.today() + timedelta(days=1)).isoformat()
+    for value in lastmods:
+        found = _W3C_DATE.match(value)
+        try:
+            day = date(*(int(n or 1) for n in found.groups())).isoformat() if found else ""
+        except ValueError:
+            day = ""
+        if not day:
+            bad.append(value)
+        elif day > horizon:
+            future.append(value)
+    if bad:
+        warnings.append(tr(
+            "{a0}: {a1} <lastmod> — не дата W3C ({a2}): поисковик такие даты не принимает",
+            a0=source, a1=len(bad), a2=", ".join(sorted(set(bad))[:3])))
+    if future:
+        warnings.append(tr(
+            "{a0}: {a1} <lastmod> — в будущем ({a2}): поисковик таким датам не верит",
+            a0=source, a1=len(future), a2=", ".join(sorted(set(future))[:3])))
+    # Одинаковая дата со временем у каждого адреса — это время сборки, а не
+    # правки. Голая дата бывает честной (сайт выложен в один день), её не трогаем.
+    if (len(lastmods) >= 5 and len(lastmods) == len(urls) and len(set(lastmods)) == 1
+            and "T" in lastmods[0]):
+        warnings.append(tr(
+            "{a0}: у всех {a1} адресов один и тот же <lastmod> {a2} — это время сборки, "
+            "а не правки, и поисковик перестаёт на него смотреть",
+            a0=source, a1=len(urls), a2=lastmods[0]))
+    return warnings
 
 
 URL_COLUMN_HINTS = sources.URL_COLUMN_HINTS
@@ -233,17 +317,18 @@ def read_sitemaps(sources, fetcher=None) -> dict:
     """
     if isinstance(sources, str):
         sources = [sources]
-    urls, seen, errors, alternates = [], set(), [], {}
+    urls, seen, errors, alternates, warnings = [], set(), [], {}, []
     for source in sources or ():
         result = read_sitemap(source, fetcher=fetcher)
         if result.get("error"):
             errors.append(f"{source}: {result['error']}")
+        warnings += [w for w in result.get("warnings") or () if w not in warnings]
         for url in result.get("urls") or ():
             if url not in seen:
                 seen.add(url)
                 urls.append(url)
         _merge_alternates(alternates, result.get("alternates"))
-    return {"urls": urls, "errors": errors, "alternates": alternates}
+    return {"urls": urls, "errors": errors, "alternates": alternates, "warnings": warnings}
 
 
 def _merge_alternates(into: dict, more) -> None:

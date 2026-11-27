@@ -171,4 +171,6 @@ MESSAGES = {
         "{a0} of {a1} pages carry an event date",
     'canonical {a0} из {a1} страниц называют сайт адресом {a2}, а --site — {a3}. Страницы сверены с {a2}; адреса в sitemap и в отчёте строятся от --site — если сайт живёт по {a2}, укажи --site {a2}':
         'the canonical of {a0} of {a1} pages names the site {a2}, but --site is {a3}. Pages were compared against {a2}; addresses in the sitemap and in the report are built from --site, so if the site lives at {a2}, pass --site {a2}',
+    '{a0} страниц(ы) в каталоге с именем кода ответа (…/404/) никто не ссылается — сочтены страницами ошибки, не проверялись и в sitemap не попадут: {a1}. Если это статьи — поставь на них ссылку':
+        '{a0} page(s) in a directory named after a status code (…/404/) are not linked from anywhere — taken for error pages, not checked, and left out of the sitemap: {a1}. If they are articles, link to them',
 }
