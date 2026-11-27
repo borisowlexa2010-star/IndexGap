@@ -572,8 +572,11 @@ def _yaml_value(value: str) -> str:
 
 
 def _brief_value(value: str) -> str:
-    """Значение внутри HTML-комментария: `-->` в данных закрывает комментарий."""
-    return re.sub(r"\s+", " ", str(value or "")).replace("-->", "-- >").strip()
+    """
+    Значение внутри HTML-комментария: `-->` и `--!>` в данных закрывают
+    комментарий — оба по спецификации HTML.
+    """
+    return re.sub(r"--(!?)>", r"-- \1>", re.sub(r"\s+", " ", str(value or ""))).strip()
 
 
 def check_pattern(pattern: str, fields: list) -> None:
@@ -649,7 +652,7 @@ def write_tasks(audit: dict, out_dir: str, keyword_field: str,
             skipped.append(path)
             continue
         os.makedirs(os.path.dirname(path) or root, exist_ok=True)
-        variables = "\n".join(f"  {k}: {_brief_value(v)}" for k, v in row.items()
+        variables = "\n".join(f"  {_brief_value(k)}: {_brief_value(v)}" for k, v in row.items()
                               if k != keyword_field and (v or "").strip())
         try:
             body = brief.format(

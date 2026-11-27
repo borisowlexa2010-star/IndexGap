@@ -5,6 +5,13 @@ MESSAGES = {
     "--home {a0}: такой страницы нет среди разобранных файлов. Укажи адрес страницы сборки — полный или путь от --site.":
         "--home {a0}: there is no such page among the parsed files. Give the address "
         "of a page in the build — a full one or a path from --site.",
+    "{a0} уже существует и это не график пакета.\n    Перезаписывать чужой файл я не буду — укажи другую папку --history.":
+        "{a0} already exists and is not this tool's chart.\n    I will not overwrite "
+        "someone else's file — pick another --history folder.",
+    "  ! прошлый прогон {a0} повреждён — сравнение с ним пропущено":
+        "  ! the previous run {a0} is damaged — the comparison with it was skipped",
+    "{a0}: один файл отчёта у двух проектов — «{a1}» и «{a2}»":
+        "{a0}: two projects share one report file — “{a1}” and “{a2}”",
     "в тексте страницы есть «TODO» — если это пометка автора, а не предмет текста, страница не дописана":
         "the page text contains “TODO” — if it is the author's note rather than "
         "the subject of the text, the page is unfinished",

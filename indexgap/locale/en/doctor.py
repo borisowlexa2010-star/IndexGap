@@ -2,6 +2,8 @@
 """doctor, aeo — English."""
 
 MESSAGES = {
+    "{a0}: таблицы внутри архива вместе больше {a1} МБ — читать не стал":
+        "{a0}: the tables inside the archive add up to more than {a1} MB — not read",
     "Disallow: / для всех агентов, кроме {a0} — остальные поисковики и ИИ-поиск сайт не видят":
         "Disallow: / for every agent except {a0} — other search engines and AI "
         "search cannot see the site",
@@ -54,6 +56,9 @@ MESSAGES = {
         "{a0}: the child address is not http(s) and is not read",
     "{a0}: дочерний файл не найден рядом с индексом":
         "{a0}: the child file was not found next to the index",
+    "{a0}: дочерний файл не найден рядом с индексом, а в сеть индекс с диска не ведёт — передайте его отдельным --sitemap":
+        "{a0}: the child file was not found next to the index, and an index "
+        "read from disk does not lead to the network — pass it as a separate --sitemap",
     "{a0}: индекс не дал ни одного адреса":
         "{a0}: the index produced no addresses",
     "{a0}: индекс ссылается сам на себя":

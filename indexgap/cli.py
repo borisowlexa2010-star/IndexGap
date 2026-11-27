@@ -1477,6 +1477,10 @@ def cmd_doctor(args):
     if history_dir and os.path.exists(history_dir) and not os.path.isdir(history_dir):
         raise SourceError(tr("--history {a0} — это файл, а нужна папка истории.",
                              a0=history_dir))
+    if history_dir and history.foreign_trend(history_dir):
+        raise SourceError(tr("{a0} уже существует и это не график пакета.\n    Перезаписывать "
+                             "чужой файл я не буду — укажи другую папку --history.",
+                             a0=history.foreign_trend(history_dir)))
     baseline_label = args.baseline if getattr(args, "baseline", "") else ""
     if previous is None and history_dir:
         previous = history.latest(history_dir)
@@ -1607,7 +1611,13 @@ def cmd_doctor(args):
     json_path = report_pair(args.out)[1]
     run = {"site": args.site, "funnel": funnel_result, "segments": segments,
            "ai_crawlers": crawl or None, "ai_segments": ai_seg}
-    trend = doctor.compare_runs(run, previous) if previous is not None else None
+    try:
+        trend = doctor.compare_runs(run, previous) if previous is not None else None
+    except (TypeError, KeyError, AttributeError, ValueError):
+        # Прогон, поправленный руками, ронял doctor трассировкой после всей работы.
+        print(tr("  ! прошлый прогон {a0} повреждён — сравнение с ним пропущено",
+                 a0=baseline_label))
+        trend = None
     if trend is not None:
         _print_trend(trend, baseline_label)
     _write_json(json_path, {"site": args.site, "funnel": funnel_result,
@@ -2098,23 +2108,27 @@ def cmd_portfolio(args):
     _check_report_pair(args.out)
     specs = portfolio.read_portfolio(args.portfolio)
     print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
-    # Отчёты проектов тоже не затирают чужие файлы, и проверяется это до
-    # работы — как у check: `out` проекта или --reports мог указать на
-    # рукописную страницу. «shop/a» и «shop a» дают одно имя файла: отчёты
-    # затирали друг друга и сводный отчёт. Занятое имя получает номер.
-    taken = {os.path.normcase(os.path.abspath(p)) for p in report_pair(args.out)}
-    taken |= {os.path.normcase(os.path.abspath(s["out"])) for s in specs if s.get("out")}
+    results = []
+    # Файлы отчётов проектов проверяются до работы, как --out у `check`: путь
+    # из JSON портфеля затирал чужой файл, а «beta/x» и «beta x» давали одно
+    # имя в --reports, и второй отчёт молча заменял первый.
+    taken = {}
+    key_of = lambda out: os.path.normcase(os.path.abspath(report_pair(out)[0]))
     for spec in specs:
         if not spec.get("out") and args.reports:
             stem, n = portfolio.report_name(spec["name"]), 1
-            spec["out"] = os.path.join(args.reports, stem + ".html")
-            while os.path.normcase(os.path.abspath(spec["out"])) in taken:
+            path = os.path.join(args.reports, stem + ".html")
+            while key_of(path).lower() in {k.lower() for k in taken}:
                 n += 1
-                spec["out"] = os.path.join(args.reports, f"{stem}-{n}.html")
-            taken.add(os.path.normcase(os.path.abspath(spec["out"])))
+                path = os.path.join(args.reports, f"{stem}-{n}.html")
+            spec["out"] = path
         if spec.get("out"):
-            check_out_path(spec["out"])
-    results = []
+            key = key_of(spec["out"])
+            if key in taken:
+                raise SourceError(tr("{a0}: один файл отчёта у двух проектов — «{a1}» и «{a2}»",
+                                     a0=spec["out"], a1=taken[key], a2=spec["name"]))
+            taken[key] = spec["name"]
+            _check_report_pair(spec["out"])
     for spec in specs:
         result = portfolio.run_one(spec)
         results.append(result)

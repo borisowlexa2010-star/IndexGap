@@ -121,17 +121,20 @@ def series(root: str) -> dict:
             continue
         if not valid_run(data):
             continue                      # битый или правленный руками прогон
-        when = (data.get("_saved") or os.path.basename(path)[:19].replace("T", " "))
+        when = str(data.get("_saved") or os.path.basename(path)[:19].replace("T", " "))
         dates.append(when.replace("T", " ")[:16])
-        for step in (data.get("funnel") or {}).get("steps") or ():
-            if step.get("id") == "in-source":
+        steps = (data.get("funnel") or {}).get("steps")
+        for step in steps if isinstance(steps, list) else ():
+            if not isinstance(step, dict) or step.get("id") == "in-source":
                 continue                  # строки «из них в …» загромождают график
             # Линия — по id шага, а не по подписи: подпись переведена, и
             # прогон на en и прогон на ru раздваивали каждый шаг.
-            key = (step.get("id") or step.get("name") or "", step.get("engine") or "")
+            key = (str(step.get("id") or step.get("name") or ""), str(step.get("engine") or ""))
             line = out.setdefault(key, {"name": "", "points": []})
-            line["name"] = (step.get("name") or step.get("id") or "").strip()
-            line["points"].append((len(dates) - 1, step.get("count") or 0))
+            line["name"] = str(step.get("name") or step.get("id") or "").strip()
+            count = step.get("count")
+            count = count if isinstance(count, (int, float)) and not isinstance(count, bool) else 0
+            line["points"].append((len(dates) - 1, count))
     # Дата — если все прогоны в разные дни; если нет, со временем.
     if len({d[:10] for d in dates}) == len(dates):
         dates = [d[:10] for d in dates]
@@ -141,6 +144,25 @@ def series(root: str) -> dict:
 
 _COLORS = ("#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#4b5563",
            "#db2777", "#65a30d", "#92400e")
+
+
+def foreign_trend(root: str) -> str:
+    """
+    trend.html в папке истории, который написал не пакет, — или пустая строка.
+    Свой файл несёт метку отчёта; график прошлых версий без неё узнаётся по
+    своей разметке.
+    """
+    path = os.path.join(root, "trend.html")
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            head = fh.read(4096)
+    except OSError:
+        return path
+    if "<!-- indexgap-report -->" in head or 'aria-label="trend"' in head:
+        return ""
+    return path
 
 
 def render(root: str, site: str = "") -> str:
@@ -187,7 +209,7 @@ def render(root: str, site: str = "") -> str:
     parts.append("</svg>")
     title = tr("Динамика воронки")
     doc = (
-        '<!doctype html><html><head><meta charset="utf-8">'
+        '<!doctype html><!-- indexgap-report --><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>{html.escape(title)}</title><style>"
         "body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;"

@@ -491,15 +491,22 @@ def _read_zip_tables(path: str) -> list:
         with zipfile.ZipFile(path) as archive:
             members = [n for n in archive.namelist()
                        if not n.endswith("/") and "__MACOSX" not in n]
-            for name in members:
-                if not name.lower().endswith((".csv", ".tsv", ".txt")):
-                    continue
+            # Потолок — на все таблицы архива вместе, а не на каждую: zip в
+            # 2,5 МБ из десяти таблиц по 99 МБ занимал doctor на минуты.
+            tables = [n for n in members if n.lower().endswith((".csv", ".tsv", ".txt"))]
+            total = sum(archive.getinfo(n).file_size for n in tables)
+            for name in tables:
+                if core.too_big(total):
+                    raise SourceError(tr("{a0}: таблицы внутри архива вместе больше {a1} МБ — "
+                                         "читать не стал", a0=path,
+                                         a1=core.MAX_INPUT_BYTES // (1024 * 1024)))
                 try:
                     raw = _member(archive, name, path)
                 except SourceError:
                     raise
                 except Exception:
                     continue
+                total += max(0, len(raw) - archive.getinfo(name).file_size)
                 for codec in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
                     try:
                         text = raw.decode(codec)
