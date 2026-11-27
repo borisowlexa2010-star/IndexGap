@@ -158,7 +158,7 @@ class SwitchedOffChecks(Tmp):
         self.assertEqual(data["baseline"]["fixed"], [])
         self.assertTrue(data["baseline"]["unchecked"])
         self.assertFalse(data["coverage"]["aeo"])
-        self.assertIn("выключенных в этом прогоне", text)
+        self.assertIn("в этом прогоне", text)
         _, data, text = self.check(d, "nc", "--dataset", dataset, "--no-content",
                                    "--baseline", base)
         self.assertEqual(data["baseline"]["fixed"], [])

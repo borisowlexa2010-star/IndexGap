@@ -676,4 +676,20 @@ MESSAGES = {
         '  ! {a0} declares a different sitemap ({a1}), but {a2} was written — search engines will read the declared one. Add `Sitemap: {a2}` to robots.txt',
     '  ! источники индекса другие (добавлены: {a0}; убраны: {a1}) — шаг индекса и разделы не сравниваются':
         '  ! the index sources are different (added: {a0}; removed: {a1}) — the index step and the sections are not compared',
+    '--min-filled — доля заполненных колонок, от 0 до 1 (например 0.5), а не {a0}':
+        '--min-filled is the share of filled columns, from 0 to 1 (for example 0.5), not {a0}',
+    '--min-words не может быть отрицательным':
+        '--min-words cannot be negative',
+    'сколько слов требовать в брифе каждой заготовки':
+        'how many words the brief of each stub asks for',
+    '--runs — число прогонов на вопрос, не меньше 1':
+        '--runs is the number of runs per question, at least 1',
+    '--limit — сколько вопросов взять из семантики, не меньше 1':
+        '--limit is how many questions to take from the keyword set, at least 1',
+    '--history {a0} — это файл, а нужна папка истории.':
+        '--history {a0} is a file, but a history folder is needed.',
+    '--out пустой: укажи имя файла отчёта, например indexgap-check.html':
+        '--out is empty: give the report a file name, for example indexgap-check.html',
+    '  ! база снята с проверками, выключенными в этом прогоне ({a0}): {a1} находок базы не проверены и в «исчезло» не входят':
+        '  ! the baseline was taken with checks that are off in this run ({a0}): {a1} baseline findings were not checked and are not counted as gone',
 }

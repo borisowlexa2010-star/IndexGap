@@ -390,6 +390,8 @@ def report_pair(out: str) -> tuple:
 
 def _check_report_pair(out: str) -> None:
     """Оба файла отчёта проверяются до работы, а не после неё."""
+    if not (out or "").strip():
+        raise SourceError(tr("--out пустой: укажи имя файла отчёта, например indexgap-check.html"))
     html_path, json_path = report_pair(out)
     check_out_path(html_path)
     check_json_path(json_path)
@@ -465,8 +467,9 @@ def _subject(code: str, message: str, given=None) -> tuple:
 # Находки сверки с датасетом: без датасета их не бывает, и их пропажа в
 # прогоне без --dataset — не исправление, а выключенная проверка.
 FACT_CODES = frozenset({"unsupported-number", "check-by-eye", "dataset-unbound"})
-# Находки проверок, которые выключают --no-aeo и --no-content (или профиль):
-# в таком прогоне их пропажа — тоже не исправление.
+# Находки проверок, которые выключаются флагом или профилем: `--no-aeo`
+# (машинная читаемость и robots.txt) и `--no-content` или профиль без сверки
+# (проверки текста). Их пропажа в таком прогоне — тоже не исправление.
 AEO_CODES = frozenset({
     "ai-crawler-blocked", "answer-long", "answer-preamble", "answer-short",
     "img-alt-filler", "img-alt-language", "img-no-alt", "js-shell", "jsonld-broken",
@@ -493,6 +496,10 @@ def baseline_coverage(path: str, old: list) -> dict:
     got = dict(got) if isinstance(got, dict) else {}
     if not isinstance(got.get("facts"), bool):
         got["facts"] = any(i.get("code") in FACT_CODES for i in old)
+    # База до 1.29 этих полей не хранит: проверка шла, если есть её коды.
+    for name, codes in (("aeo", AEO_CODES), ("content", CONTENT_CODES)):
+        if not isinstance(got.get(name), bool):
+            got[name] = any(i.get("code") in codes for i in old)
     return got
 
 
@@ -656,7 +663,11 @@ def _print_baseline(path: str, diff: dict) -> None:
                  "неё: {a0} находок сверки не проверены и в «исчезло» не входят, "
                  "а новые числа не сверялись. Передай тот же --dataset",
                  a0=facts))
-    if len(unchecked) > facts:
+    if diff.get("checks_off"):
+        print(tr("  ! база снята с проверками, выключенными в этом прогоне ({a0}): "
+                 "{a1} находок базы не проверены и в «исчезло» не входят",
+                 a0=", ".join(diff["checks_off"]), a1=len(unchecked) - facts))
+    elif len(unchecked) > facts:
         print(tr("  находок базы из проверок, выключенных в этом прогоне: {a0} — их "
                  "не искали, и в «исчезло» они не входят", a0=len(unchecked) - facts))
     if diff.get("duplicate_method_changed"):
@@ -967,11 +978,13 @@ def cmd_check(args):
     diff = None
     if baseline is not None:
         facts_off = bool(coverage_before.get("facts") and not coverage["facts"])
-        unchecked = set(FACT_CODES if facts_off else ())
-        if not coverage["aeo"]:
-            unchecked |= AEO_CODES
-        if not coverage["content"]:
-            unchecked |= CONTENT_CODES
+        unchecked, off = set(FACT_CODES if facts_off else ()), []
+        # Проверка выключена в этом прогоне, а в базе шла (или база старая и
+        # не записала, что шло): её находки не проверены, а не исправлены.
+        for name, codes in (("aeo", AEO_CODES), ("content", CONTENT_CODES)):
+            if coverage_before.get(name, True) and not coverage[name]:
+                unchecked |= codes
+                off.append(name)
         diff = compare_baseline(analysis["issues"], baseline,
                                 accepted=analysis.get("accepted"), unchecked=unchecked)
         if facts_off and got["project"].get("_skip_facts"):
@@ -981,6 +994,7 @@ def cmd_check(args):
         elif facts_off and args.no_content:
             facts_off = "--no-content"
         diff["facts_off"] = facts_off
+        diff["checks_off"] = off
         method_before, method_now = baseline_method(args.baseline), analysis.get("duplicate_method")
         diff["duplicate_method_changed"] = ([method_before, method_now]
                                             if method_before and method_now
@@ -1150,6 +1164,8 @@ def cmd_brief(args):
     по тяжести. Текст по-прежнему пишет человек или агент — пакет только
     формулирует задачу.
     """
+    if args.limit < 0:
+        raise SourceError(tr("--limit не может быть отрицательным"))
     got = _analyse(args)
     pages, project, analysis = got["pages"], got["project"], got["analysis"]
 
@@ -1409,8 +1425,9 @@ def cmd_notify(args):
     if args.write_key:
         target = args.key_dir or args.out_dir
         if not target:
-            print(tr("  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками."))
-            print(tr("    Укажи каталог публикации: --key-dir ./public"))
+            print(tr("  ! --write-key без --key-dir: файл ключа должен лежать в КОРНЕ САЙТА, а не рядом с исходниками."),
+                  file=sys.stderr)
+            print(tr("    Укажи каталог публикации: --key-dir ./public"), file=sys.stderr)
             return 1
         path = publish.write_key_file(target, key)
         print(tr("Файл ключа: {a0}", a0=path))
@@ -1455,6 +1472,11 @@ def cmd_doctor(args):
     # База читается до работы: тот же файл может быть и базой, и результатом.
     previous = doctor.load_run(args.baseline) if getattr(args, "baseline", "") else None
     history_dir = getattr(args, "history", "") or ""
+    # Файл вместо папки истории раньше обнаруживался после записи отчёта:
+    # код 2 при готовых файлах на диске.
+    if history_dir and os.path.exists(history_dir) and not os.path.isdir(history_dir):
+        raise SourceError(tr("--history {a0} — это файл, а нужна папка истории.",
+                             a0=history_dir))
     baseline_label = args.baseline if getattr(args, "baseline", "") else ""
     if previous is None and history_dir:
         previous = history.latest(history_dir)
@@ -1926,6 +1948,13 @@ def _print_citations(funnel_result: dict, limit: int = 10) -> None:
 
 
 def cmd_plan(args):
+    # Доля — от 0 до 1: `--min-filled 5` молча отбраковывал все строки,
+    # даже заполненные целиком.
+    if not 0 <= args.min_filled <= 1:
+        raise SourceError(tr("--min-filled — доля заполненных колонок, от 0 до 1 "
+                             "(например 0.5), а не {a0}", a0=args.min_filled))
+    if args.min_words < 0:
+        raise SourceError(tr("--min-words не может быть отрицательным"))
     data = generate.read_dataset(args.dataset)
     rows, fields = data["rows"], data["fields"]
     for problem in data["problems"]:
@@ -1938,8 +1967,14 @@ def cmd_plan(args):
 
     generate.check_pattern(args.pattern, fields)
 
-    cfg = {"min_fields_filled": args.min_filled} if args.min_filled else None
-    audit = generate.audit_dataset(rows, fields, args.keyword, cfg)
+    cfg = {"min_fields_filled": args.min_filled} if args.min_filled else {}
+    # Собственный slug — адрес целиком, только если шаблон пути не берёт
+    # других колонок: `{city}/{slug}` разводит одинаковые slug по каталогам.
+    names = {name.split(".")[0].split("[")[0] for _l, name, _s, _c
+             in __import__("string").Formatter().parse(args.pattern) if name}
+    cfg["own_slug_is_path"] = names <= {"slug"}
+    lines = data.get("lines")
+    audit = generate.audit_dataset(rows, fields, args.keyword, cfg, lines=lines)
     print(tr("Строк в датасете: {a0}", a0=audit['total']))
     print(tr("К генерации:      {a0}", a0=len(audit['keep'])))
     print(tr("Отбраковано:      {a0}", a0=len(audit['rejected'])))
@@ -1965,7 +2000,7 @@ def cmd_plan(args):
     if args.json:
         _write_json(args.json, {
             "total": audit["total"],
-            "keep": [{"row": i + 2, "keyword": k, "slug": s, "intent": generate.query_intent(k)}
+            "keep": [{"row": lines[i] if lines else i + 2, "keyword": k, "slug": s, "intent": generate.query_intent(k)}
                      for i, k, s, _ in audit["keep"]],
             "rejected": audit["rejected"],
             "near_synonyms": [{"kept": a, "dropped": b} for a, b, _ in audit["near_synonyms"]],
@@ -1991,6 +2026,8 @@ def cmd_plan(args):
             print(tr("  Не записано строк: {a0}", a0=len(result['failed'])))
         if result["written"]:
             print(tr("Дальше: попроси агента заполнить их по брифу внутри каждого файла."))
+        # Незаписанная строка — не успех: CI и агент читают код возврата.
+        return 1 if result["failed"] else 0
     else:
         print(tr("\nЭто разбор без записи. Чтобы создать заготовки — добавь --write."))
     return 0
@@ -2059,9 +2096,10 @@ def cmd_portfolio(args):
     _check_report_pair(args.out)
     specs = portfolio.read_portfolio(args.portfolio)
     print(tr("Проектов в портфеле: {a0}", a0=len(specs)))
-    results = []
-    # «shop/a» и «shop a» дают одно имя файла: отчёты затирали друг друга
-    # и сводный отчёт. Занятое имя получает номер.
+    # Отчёты проектов тоже не затирают чужие файлы, и проверяется это до
+    # работы — как у check: `out` проекта или --reports мог указать на
+    # рукописную страницу. «shop/a» и «shop a» дают одно имя файла: отчёты
+    # затирали друг друга и сводный отчёт. Занятое имя получает номер.
     taken = {os.path.normcase(os.path.abspath(p)) for p in report_pair(args.out)}
     taken |= {os.path.normcase(os.path.abspath(s["out"])) for s in specs if s.get("out")}
     for spec in specs:
@@ -2072,6 +2110,10 @@ def cmd_portfolio(args):
                 n += 1
                 spec["out"] = os.path.join(args.reports, f"{stem}-{n}.html")
             taken.add(os.path.normcase(os.path.abspath(spec["out"])))
+        if spec.get("out"):
+            check_out_path(spec["out"])
+    results = []
+    for spec in specs:
         result = portfolio.run_one(spec)
         results.append(result)
         if result["error"]:
@@ -2133,6 +2175,13 @@ def cmd_cite(args):
     по умолчанию ничего не отправляет: сначала показывает, кого и о чём
     спросит и сколько это будет стоить вызовов.
     """
+    # Прогонов меньше одного не бывает: раньше `--runs -3` печаталось и
+    # сохранялось как есть, хотя спрашивали по разу, а `--limit 0` всё равно
+    # брал один вопрос.
+    if args.runs < 1:
+        raise SourceError(tr("--runs — число прогонов на вопрос, не меньше 1"))
+    if args.limit < 1:
+        raise SourceError(tr("--limit — сколько вопросов взять из семантики, не меньше 1"))
     project = apply_project_defaults(args)
     baseline = cite.load_result(args.baseline) if getattr(args, "baseline", "") else None
     if getattr(args, "against", ""):
@@ -2174,11 +2223,11 @@ def cmd_cite(args):
                              a1=", ".join(sorted(cite.PROVIDERS))))
     ready = [p for p in chosen if p in cite.available()]
     if not ready:
-        print(tr("Ни одного ключа не найдено. Нужен хотя бы один:"))
+        print(tr("Ни одного ключа не найдено. Нужен хотя бы один:"), file=sys.stderr)
         for line in cite.missing_keys(chosen):
-            print(f"  {line}")
+            print(f"  {line}", file=sys.stderr)
         print(tr("\n  Это единственная часть пакета, которой нужны ключи "
-                 "и деньги. Всё остальное работает без них."))
+                 "и деньги. Всё остальное работает без них."), file=sys.stderr)
         return 2
 
     calls = len(prompts) * len(ready) * max(1, args.runs)
@@ -2352,6 +2401,14 @@ def cmd_diff(args):
                                profile=args.profile, dataset=args.dataset)
     config = apply_project_defaults(probe)
     if not probe.site:
+        # Как у check: адрес часто лежит в файлах новой сборки.
+        from .install import detect_site
+        guessed = detect_site(args.new, ".")
+        if guessed:
+            probe.site = guessed
+            print(tr("Адрес сайта взят из файлов рядом со страницами: {a0} — если не так, "
+                     "укажи --site", a0=guessed))
+    if not probe.site:
         raise SourceError(tr("Не указан адрес сайта: добавь --site https://… — или запиши "
                              "`site` в indexgap.json."))
     site = check_site_url(probe.site)
@@ -2462,7 +2519,8 @@ def cmd_diff(args):
             grouped[(level, code)].append(url)
     for (level, code), urls in grouped.items():
         more = tr(" и ещё {a0}", a0=len(urls) - 3) if len(urls) > 3 else ""
-        print(f"  {level:<8} {code:<18} {len(urls):>5}  {', '.join(urls[:3])}{more}")
+        label = tr(report.LEVEL_LABEL.get(level, ("", level))[1])
+        print(f"  {label:<8} {code:<18} {len(urls):>5}  {', '.join(urls[:3])}{more}")
     print(tr("Отчёт: {a0}\nДанные: {a1}", a0=html_path, a1=json_path))
     return 1 if (summary["critical"] and args.strict) else 0
 
@@ -2480,9 +2538,13 @@ def preset_language(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     lang = ""
     for i, item in enumerate(argv):
-        if item.startswith("--lang="):
-            lang = item.split("=", 1)[1]
-        elif item == "--lang" and i + 1 < len(argv):
+        # argparse принимает и сокращение (`--la en`): его надо узнать и здесь.
+        name, eq, value = item.partition("=")
+        if len(name) < 3 or not "--lang".startswith(name):
+            continue
+        if eq:
+            lang = value
+        elif i + 1 < len(argv):
             lang = argv[i + 1]
     # Неизвестное значение (`--lang xx`) argparse всё равно отвергнет, но
     # ошибка должна прийти на языке из INDEXGAP_LANG, а не на запасном
@@ -2531,7 +2593,8 @@ def build_parser():
     p.add_argument("--keyword", default="keyword", help=tr("колонка с ключом"))
     p.add_argument("--out-dir", default="content", help=tr("куда класть заготовки"))
     p.add_argument("--pattern", default="{slug}/index.md", help=tr("шаблон пути"))
-    p.add_argument("--min-words", type=int, default=350)
+    p.add_argument("--min-words", type=int, default=350,
+                   help=tr("сколько слов требовать в брифе каждой заготовки"))
     p.add_argument("--min-filled", type=float, default=0.0,
                    help=tr("доля заполненных колонок, ниже которой строка отбраковывается (по умолчанию 0 — не отбраковывать)"))
     p.add_argument("--brief", help=tr("файл со своим шаблоном брифа вместо стандартного"))
@@ -2734,6 +2797,12 @@ def main(argv=None):
     for subparser in getattr(parser, "_subparsers_map", {}).values():
         subparser.add_argument("--lang", choices=i18n.LANGS, help=lang_help)
     args = parser.parse_args(argv)
+    if getattr(args, "lang", None):
+        # Разобранный флаг — последнее слово: сокращение, которое preset не
+        # узнал, иначе молча не действовало.
+        i18n.set_lang(args.lang)
+    out = sys.stdout
+    sys.stdout = _PipeGuard(out)
     try:
         return args.func(args)
     except SourceError as exc:
@@ -2757,6 +2826,53 @@ def main(argv=None):
         print(tr("\n{a0}: не удалось записать или прочитать ({a1}).", a0=where,
                  a1=exc.strerror or exc), file=sys.stderr)
         return 2
+    finally:
+        if sys.stdout is not out and isinstance(sys.stdout, _PipeGuard):
+            sys.stdout = out
+
+
+class _PipeGuard:
+    """
+    stdout, который переживает закрытый пайп.
+
+    `indexgap check --strict | head -1`: пайп рвётся на второй строке, ещё
+    до анализа. Раньше это обрывало команду с кодом 0 — отчёта нет, а
+    провалившийся --strict выглядел пройденным. Теперь вывод после разрыва
+    уходит в никуда, а команда доделывает работу и возвращает свой код.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._broken = False
+
+    def _silence(self):
+        self._broken = True
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, self._stream.fileno())
+            os.close(devnull)
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    def write(self, text):
+        if self._broken:
+            return len(text)
+        try:
+            return self._stream.write(text)
+        except BrokenPipeError:
+            self._silence()
+            return len(text)
+
+    def flush(self):
+        if self._broken:
+            return
+        try:
+            self._stream.flush()
+        except BrokenPipeError:
+            self._silence()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
 
 
 if __name__ == "__main__":
