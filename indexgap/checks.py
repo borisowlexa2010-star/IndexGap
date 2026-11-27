@@ -922,7 +922,35 @@ def link_graph(pages: list, home_url: str = None, blocked: set = frozenset()) ->
             # редиректу. Ссылки из её тела никуда не ведут.
             followed[p.url] = {landing}
         else:
-            followed[p.url] = targets
+            followed[p.url] = set(targets)
+        # Второй файл того же адреса (`about.html` при `about/index.html`):
+        # хост отдаёт и его, и его ссылки краулер видит. Битыми они здесь не
+        # считаются — источник у них другой, а назван был бы этот.
+        for links, soft_links, twin_landing, twin_nofollow in p.__dict__.get("_twins", ()):
+            hits = set()
+            for link in links:
+                key = url_key(link)
+                target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
+                if target and target != p.url:
+                    hits.add(target)
+            for link in soft_links:
+                key = url_key(link)
+                target = by_key.get(key) or by_key.get(key.split("?", 1)[0])
+                if target and target != p.url:
+                    soft[p.url].add(target)
+                    soft_inbound.add(target)
+            aim = (by_key.get(url_key(twin_landing))
+                   or by_key.get(url_key(twin_landing).split("?", 1)[0])) if twin_landing else None
+            if aim and aim != p.url:
+                hits.add(aim)
+            targets |= hits
+            if aim and aim != p.url:
+                followed[p.url].add(aim)
+            elif twin_nofollow:
+                # Входящими остаются, но по ним не идут — как у страницы с nofollow.
+                soft[p.url] |= hits
+            else:
+                followed[p.url] |= hits
         for t in targets:
             inbound[t].add(p.url)
         # hreflang — объявленная связь между версиями страницы. В Astro
