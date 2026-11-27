@@ -1603,6 +1603,14 @@ _CLOSED_BY_DESIGN = {"print", "print.html", "toc", "toc.html", "search", "search
 _INVISIBLE = re.compile("[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
 
 
+def _wide_note(text: str, width: int) -> str:
+    """Пояснение, когда ширина не равна числу знаков: иероглиф — два места."""
+    count = len((text or "").strip())
+    if count and width != count:
+        return tr(" ({a0} знаков: иероглифы и полноширинные считаются за два)", a0=count)
+    return ""
+
+
 def technical_issues(pages: list, cfg: dict = None, language: str = "",
                      shells: set = None) -> list:
     """Плоский список находок: (уровень, url, код, пояснение)."""
@@ -1668,17 +1676,20 @@ def technical_issues(pages: list, cfg: dict = None, language: str = "",
         else:
             n = display_width(p.title)
             if n < bounds["title_min"]:
-                issues.append(("warning", p.url, "title-short", tr("title {a0} символов", a0=n)))
+                issues.append(("warning", p.url, "title-short",
+                               tr("title {a0} символов", a0=n) + _wide_note(p.title, n)))
             elif n > bounds["title_max"]:
                 issues.append(("info", p.url, "title-long",
-                               tr("title {a0} символов, обрежется в выдаче", a0=n)))
+                               tr("title {a0} символов, обрежется в выдаче", a0=n)
+                               + _wide_note(p.title, n)))
         if not p.description or not display_width(p.description):
             issues.append(("warning", p.url, "no-description", tr("нет meta description")))
         else:
             n = display_width(p.description)
             if n < bounds["description_min"] or n > bounds["description_max"]:
                 issues.append(("info", p.url, "description-length",
-                               tr("description {a0} символов", a0=n)))
+                               tr("description {a0} символов", a0=n)
+                               + _wide_note(p.description, n)))
 
         h1 = [t for lvl, t in p.headings if lvl == 1]
         if not p.headings:

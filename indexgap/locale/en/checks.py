@@ -37,6 +37,8 @@ MESSAGES = {
     "canonical указывает на {a0} — страница отдаёт вес другой":
         "canonical points at {a0} — this page hands its weight to another one",
     "description {a0} символов": "description is {a0} characters",
+    " ({a0} знаков: иероглифы и полноширинные считаются за два)":
+        " ({a0} characters: CJK and fullwidth ones count as two)",
     "title {a0} символов": "title is {a0} characters",
     "title {a0} символов, обрежется в выдаче":
         "title is {a0} characters — it will be cut off in the results",

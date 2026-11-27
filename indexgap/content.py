@@ -1953,21 +1953,22 @@ def _opening(page) -> list:
     # Крошки и подпись автора — не начало текста. Крошка обычно кончается
     # тем же H1, и начало искалось с названия города; подпись «By the
     # Editorial Team» одинакова у всех статей блога.
-    service = [w for w in (tokenize(t) for t in getattr(page, "service", None) or ()) if w]
-    if service:
-        kept, at, window = [], 0, words[:400]
-        while at < len(window):
-            for block in service:
-                if window[at:at + len(block)] == block:
-                    at += len(block)
-                    break
-            else:
-                kept.append(window[at])
-                at += 1
-        words = kept + words[len(window):]
     heads = page.headings or []
     title = next((t for level, t in heads if level == 1), heads[0][1] if heads else "")
     marker = tokenize(title) if title else []
+    # Каждый блок снимается один раз, где встретился первым: крошка «Visa ›»
+    # — одно слово, и снимать её везде значило вырезать «visa» из текста.
+    # Последняя крошка — сам H1: по нему ищется начало текста, он остаётся.
+    service = [w for w in (tokenize(t) for t in getattr(page, "service", None) or ())
+               if w and w != marker]
+    if service:
+        window = list(words[:400])
+        for block in service:
+            for at in range(len(window) - len(block) + 1):
+                if window[at:at + len(block)] == block:
+                    del window[at:at + len(block)]
+                    break
+        words = window + list(words[400:])
     if marker:
         window = words[:300]
         for at in range(len(window) - len(marker) + 1):
