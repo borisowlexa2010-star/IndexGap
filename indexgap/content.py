@@ -42,6 +42,7 @@ from .subject import Said
 from .core import (BRIEF_MARKERS, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, brief_prose,
                    find_slots, tokenize, visible_text)
 from .i18n import tr
+from .settings import unit_word
 
 CONFIG = {
     "template_share": 0.70,      # доля страниц с одинаковым скелетом заголовков
@@ -89,11 +90,29 @@ _SAME_SIGNS = str.maketrans({"٫": ".", "٬": ",", "٪": "%",
                              "\u200e": None, "\u200f": None, "\u061c": None,
                              "\u2066": None, "\u2067": None, "\u2068": None,
                              "\u2069": None, "\u202a": None, "\u202b": None,
-                             "\u202c": None, "\u202d": None, "\u202e": None})
+                             "\u202c": None, "\u202d": None, "\u202e": None,
+                             # Гершаим: «ש״ח» — та же запись, что «ש"ח».
+                             "\u05f4": '"'})
+
+# Невидимые знаки у самой цифры: ZWNJ, ZWJ, ZWSP, word joiner, мягкий перенос.
+# «۹۹‌٪» с ZWNJ не читалось как процент. Внутри слов ZWNJ нужен (персидский),
+# поэтому снимается только рядом с цифрой.
+_GLUE_AT_DIGIT = re.compile(r"(?<=\d)[\u200b-\u200d\u2060\u00ad\ufeff]+|[\u200b-\u200d\u2060\u00ad\ufeff]+(?=\d)")
+# Арабская запятая между разрядами: «١،٦٠٠ دولار» — 1600, а не 1 и 600.
+_ARABIC_THOUSANDS = re.compile(r"(?<![\d.,،])\d{1,3}(?:،\d{3})+(?![\d.,،]?\d)")
+# Персидская дробь через косую черту: «۳/۵ درصد» — 3.5%. Только между
+# персидскими или арабскими цифрами и перед процентом, множителем или валютой:
+# дату «۱۴۰۳/۰۵/۱۲» и оценку «۴/۵» это не трогает.
+_PERSIAN_SLASH = re.compile(
+    r"(?<![\d/])([\u0660-\u0669\u06f0-\u06f9]+)/([\u0660-\u0669\u06f0-\u06f9]+)(?![\d/])"
+    r"(?=[ \u00a0\u200c]?(?:%|٪|درصد|هزار|میلیون|میلیارد|تومان|تومن|ریال|دلار|یورو))")
 
 
 def _same_signs(text: str) -> str:
-    return (text or "").translate(_SAME_SIGNS)
+    text = _GLUE_AT_DIGIT.sub("", text or "")
+    text = _ARABIC_THOUSANDS.sub(lambda m: m.group(0).replace("،", ","), text)
+    text = _PERSIAN_SLASH.sub(r"\1.\2", text)
+    return text.translate(_SAME_SIGNS)
 
 
 # Множители после числа. «3万円» — тридцать тысяч иен, «1,5 млн» — полтора
@@ -118,13 +137,33 @@ SCALES = {
     # «$1.6k», «1.45K»: так цену пишут в карточках и объявлениях. Без «k»
     # верные $1,600 читались как $1.6 и становились критичной находкой.
     "k": 10**3,
+    # Арабский, персидский, урду, иврит, хинди, бенгали, индонезийский и
+    # тайский: «٣ ملايين دولار», «۹۹ هزار تومان», «₹15 लाख», «Rp 8,5 juta».
+    # Без них выдумка в тысячу раз проходила молча, а верная цена с
+    # множителем объявлялась выдуманной.
+    "ألف": 10**3, "الف": 10**3, "آلاف": 10**3, "ألاف": 10**3,
+    "مليون": 10**6, "ملايين": 10**6, "مليار": 10**9,
+    "هزار": 10**3, "میلیون": 10**6, "میلیارد": 10**9,
+    "ہزار": 10**3, "لاکھ": 10**5, "کروڑ": 10**7,
+    "אלף": 10**3, "אלפים": 10**3, "מיליון": 10**6, "מיליארד": 10**9,
+    "हज़ार": 10**3, "हजार": 10**3, "\u0939\u095b\u093e\u0930": 10**3, "लाख": 10**5,
+    "करोड़": 10**7, "\u0915\u0930\u094b\u095c": 10**7,
+    "হাজার": 10**3, "লাখ": 10**5, "লক্ষ": 10**5, "কোটি": 10**7,
+    "lacs": 10**5, "cr": 10**7,
+    "ribu": 10**3, "rb": 10**3, "juta": 10**6, "jt": 10**6, "miliar": 10**9,
+    "triliun": 10**12,
+    "พัน": 10**3, "หมื่น": 10**4, "แสน": 10**5, "ล้าน": 10**6,
 }
 _CJK_SCALES = "万萬만億亿억千천"
+# Тайские множители, как и CJK, пишутся слитно с валютой: «15 ล้านบาท».
+_GLUED_SCALES = ("พัน", "หมื่น", "แสน", "ล้าน")
 _SCALE_WORDS = "|".join(re.escape(w) for w in sorted(
-    (k for k in SCALES if k[0] not in _CJK_SCALES), key=len, reverse=True))
+    (k for k in SCALES if k[0] not in _CJK_SCALES and k not in _GLUED_SCALES),
+    key=len, reverse=True))
 _CJK_SCALE = r"千[万萬]|천만|[" + _CJK_SCALES + r"]"
 _SCALE_AFTER = re.compile(
-    _SP + r"?(?:(" + _CJK_SCALE + r")|(" + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
+    _SP + r"?(?:(" + _CJK_SCALE + "|" + "|".join(_GLUED_SCALES) + r")|("
+    + _SCALE_WORDS + r")\.?(?![^\W\d_]))", re.I)
 
 
 # Множители, которые пишут только при цене: «$2.54M», «£2.6m», «₹2.5 Cr»,
@@ -161,6 +200,9 @@ def _scale_in(unit: str, price: bool = False) -> tuple:
         if word[0] in _CJK_SCALES:
             if word in lowered:
                 return word, factor
+        elif word in _GLUED_SCALES:
+            if re.search(r"(?:^|(?<=[\s\d]))" + word, lowered):
+                return word, factor
         elif re.search(r"(?<![^\W\d_])" + re.escape(word) + r"(?![^\W\d_])", lowered):
             return word, factor
     if price and _MONEY.search(unit or ""):
@@ -186,7 +228,7 @@ PERCENT = re.compile(NOT_INSIDE + r"(" + NUMBER + r")\s*%")
 PERCENT_WORDS = (
     "per\\s?cent|percent|pct|процент(?:ов|а|ы)?|відсотк(?:ів|а|и)|prozent|por\\s?ciento|"
     "pour\\s?cent|per\\s?cento|por\\s?cento|procent|persen|peratus|phần\\s?trăm|"
-    "درصد|بالمائة|بالمئة|في\\s?المائة|प्रतिशत|শতাংশ|فیصد|เปอร์เซ็นต์|אחוז(?:ים)?"
+    "درصد|بالمائة|بالمئة|في\\s?المائة|في\\s?المئة|प्रतिशत|শতাংশ|فیصد|เปอร์เซ็นต์|אחוז(?:ים)?"
 )
 # Знак процента перед числом: так пишут по-турецки («%85'i»), по-курдски и
 # по-баскски. Перед знаком — начало, пробел или скобка, а не буква, цифра или
@@ -206,6 +248,7 @@ CURRENCY_CODES = ("USD|EUR|GBP|JPY|CNY|INR|AUD|CAD|CHF|SGD|AED|RUB|BRL|MXN|KRW|T
 # Коды, совпадающие со словами («ron» — ром, «ils» — «они», «cop»), — только
 # заглавными.
 _CASED_CODES = "RON|ILS|NIS|COP|ARS"
+_ALL_CODES = frozenset((CURRENCY_CODES + "|" + _CASED_CODES).split("|"))
 # Доллар с буквой страны и местные сокращения: `S$35`, `HK$200`, `R$ 90`,
 # `RM 35`, `Rp 350.000`. Раньше такие цены не находились вовсе.
 LOCAL_PREFIXES = (r"(?:US|S|A|AU|C|CA|HK|NZ|NT|R|MX|COL|CL)\$|RM|Rp\.?|Rs\.?|₱|₫|₩|₪|₺|₴|₸|৳|"
@@ -218,7 +261,7 @@ _LOCAL_PREFIX = re.compile(LOCAL_PREFIXES)
 # нет: «价格为$450。», «料金は¥9,900。» — знак валюты стоит вплотную к слову.
 _CJK_LETTERS = "\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
 PREFIX_PRICE = re.compile(
-    r"(?:(?<![\w.,$])|(?<=[" + _CJK_LETTERS + r"]))((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽]" + _SP
+    r"(?:(?<![\w.,$])|(?<=[" + _CJK_LETTERS + r"]))((?:" + LOCAL_PREFIXES + r")[  \u00a0]?|[$€£¥₹₽฿](?=\d)|(?<!\d" + _SP + r")[$€£¥₹₽฿]" + _SP
     + r"|(?:" + CURRENCY_CODES + "|" + _CASED_CODES + r")[  \u00a0]?)(" + NUMBER + r")(?![\d])")
 
 # Валюта после числа: `9.900 €`, `9,900 ₪`, `٩٩٠٠ دولار`, `3万円`. Раньше
@@ -230,7 +273,7 @@ CURRENCY_WORDS = (
     "доллар(?:ов|а|ы)?|евро|фунт(?:ов|а)?|"
     "francs?|lira|lire|zł|złotych|kronor|kroner|kč|lei|"
     "руб(?:л[а-яё]*)?|грн|гривен[а-яё]*|гривн[а-яё]*|тенге|сум|сомов|лари|"
-    "دولار[ًا]?|دولارات|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
+    "دولار[ًا]?|دولارات|يورو|ريال|ريالات|درهم|دراهم|دينار|جنيه|ليرة|تومان|ریال|"
     "שקל|שקלים|ש\"ח|"
     "रुपये|रुपया|रुपए|บาท|đồng|"
     "دلار|یورو|تومن|ڈالر|روپے|روپیہ|ডলার|টাকা|রুপি|डॉलर|डालर|यूरो|"
@@ -240,13 +283,15 @@ CURRENCY_WORDS = (
 )
 # Валютные слова CJK пишутся вплотную к следующему слову («35ドルです»), поэтому
 # для них граница слова не нужна, в отличие от `dollar` в `dollars-and-sense`.
-CJK_CURRENCY_WORDS = "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로"
-# «1.540,– €», «1508,-- €», «1510.-€»: прочерк вместо копеек перед валютой.
-_NO_CENTS = r"(?:[.,](?:--?|[–—]))"
+# Тайский тоже пишется без пробелов: «15 ล้านบาทต่อเดือน».
+CJK_CURRENCY_WORDS = "ドル|ユーロ|美元|欧元|港元|新元|人民币|달러|유로|บาท|ดอลลาร์|ยูโร"
+# «1.540,– €», «1508,-- €», «1510.-€», «18,000.- บาท», «2,50,000/- रुपये»:
+# прочерк вместо копеек перед валютой.
+_NO_CENTS = r"(?:[.,](?:--?|[–—])|/-)"
 SUFFIX_PRICE = re.compile(
     NOT_INSIDE + r"(" + NUMBER + r")" + _NO_CENTS + r"?"
     # Слово-множитель — целым словом: «18945 kgbp» — не тысячи фунтов.
-    r"(?:" + _SP + r"?(?:" + _CJK_SCALE + r"|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))"
+    r"(?:" + _SP + r"?(?:" + _CJK_SCALE + "|" + "|".join(_GLUED_SCALES) + r"|(?:" + _SCALE_WORDS + r")(?:\.|(?![^\W\d_]))"
     r"|(?-i:Cr|mn|mi)(?![^\W\d_]))|(?-i:MM|M|B)(?![^\W\d_]))?"
     + _SP + r"?(?:" + CJK_CURRENCY_WORDS + r"|[" + CURRENCY_SIGNS + r"]|(?:" + CURRENCY_WORDS
     + "|" + CURRENCY_CODES + "|(?-i:" + _CASED_CODES + r"))(?:(?![^\W\d_])|(?<=[a-zA-Z])(?=[" + _CJK_LETTERS + r"])))",
@@ -258,7 +303,8 @@ SUFFIX_PRICE = re.compile(
 # Отрицательный просмотр назад отсекает «топ-10», «айфон-15», «ГОСТ-12»:
 # число, приклеенное к слову дефисом, — часть названия, а не мера.
 GENERIC_FACT = re.compile(
-    r"(?<![^\W\d_]-)" + NOT_INSIDE + "(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|[^\\W\\d_]{1,14}|[%°$€£₽¥₹])", re.U)
+    r"(?<![^\W\d_]-)" + NOT_INSIDE + "(" + NUMBER + ")[  \\u00a0]?(м²|м2|km²|" + unit_word(14)
+    + "|[%°$€£₽¥₹])", re.U)
 
 # Слова, которые после числа не делают его фактом: это нумерация и служебное.
 NON_UNITS = {
@@ -519,9 +565,12 @@ def _numbers_in(text: str, fact_pattern) -> dict:
             found.setdefault(number, "%")
     if fact_pattern:
         for match in fact_pattern.finditer(text or ""):
-            number = _norm_number(match.group(1))
+            unit = match.group(0)[len(match.group(1)):].strip(" -\u2010\u2011\u00a0\u202f")
+            # Единица данных — сам множитель («15 लाख», «8,5 juta»): число — с ним.
+            word, factor = _scale_in(unit)
+            number = _scaled(match.group(1), factor if word and word == unit.lower() else 1)
             if number:
-                found[number] = match.group(0)[len(match.group(1)):].strip(" -\u2010\u2011\u00a0\u202f")
+                found[number] = unit
                 for earlier in _listed_before(text, match.start(1)):
                     found.setdefault(earlier, found[number])
     for match in PREFIX_PRICE.finditer(text or ""):
@@ -532,7 +581,8 @@ def _numbers_in(text: str, fact_pattern) -> dict:
         second = _RANGE_SECOND.match(text, match.end() + length)
         # Голое «2026» после цены — обычно год («from $1,450 – 2026 guide»), но
         # «$1450-2000 a month» — диапазон цен: за ним идёт срок оплаты.
-        if second and re.fullmatch(r"\d{4}", second.group(1)) and _year_like(second.group(1)) \
+        if second and re.fullmatch(r"\d{4}", second.group(1)) \
+                and (_year_like(second.group(1)) or sign == "฿" and 2400 <= int(second.group(1)) <= 2700) \
                 and not _PER_PERIOD.match(text, second.end()):
             second = None
         # «$1,450 – 1600 Oak Avenue»: за голым числом — имя собственное, это
@@ -579,8 +629,11 @@ def _numbers_in(text: str, fact_pattern) -> dict:
 # и 149 долларов», «۲۹، ۴۹، ۱۴۹ و ۲۴۹ دلار», «10, 20 or 30%». Без этого
 # цена бралась одна, и перевод, где так и пишут, «терял» остальные цифры.
 # Перед последним числом нужен союз: «In 2026, 15%» — не перечисление.
-_LIST_AND = (_SP + r"+(?:and|or|и|или|و|یا|und|oder|et|ou|y|o|e|dan|atau|và|hoặc|และ|"
-             r"หรือ|ve|veya|और|या|এবং|ও|та|або|ו)" + _SP + r"+")
+_LIST_AND = (r"(?:" + _SP + r"+(?:and|or|и|или|و|یا|und|oder|et|ou|y|o|e|dan|atau|và|hoặc|และ|"
+             r"หรือ|ve|veya|और|या|এবং|ও|та|або|ו)" + _SP + r"+"
+             # Арабское «و» пишется слитно со следующим словом («و١٤٩»),
+             # ивритское «ו» — через макаф или дефис («ו-149»).
+             r"|" + _SP + r"+(?:و|ו[\-\u05be]?))")
 _LIST_COMMA = _SP + r"*[,،、;]" + _SP + r"*"
 _LIST_LAST = re.compile(NOT_INSIDE + r"(" + NUMBER + r")(?:" + _LIST_COMMA + r")?" + _LIST_AND + r"$", re.I)
 _LIST_MORE = re.compile(NOT_INSIDE + r"(" + NUMBER + r")" + _LIST_COMMA + r"$")
@@ -621,13 +674,29 @@ def _year_like(number: str) -> bool:
     return number.isdigit() and 1900 <= int(number) <= 2100
 
 
+# Год буддийской эры — «ปี 2569», «พ.ศ. 2569», «2569 BE» — тоже год, но только
+# с подписью эры: голое 2569 бывает и ценой.
+_BE_BEFORE = re.compile(r"(?:ปี|พ\.\s?ศ\.)" + _SP + r"*$")
+_BE_AFTER = re.compile(_SP + r"*(?:B\.\s?E\.|BE(?![^\W\d_]))")
+
+
+def _year_at(text: str, start: int, end: int, number: str) -> bool:
+    """Год ли число на этом месте: обычный или буддийской эры с подписью."""
+    if _year_like(number):
+        return True
+    return (number.isdigit() and 2400 <= int(number) <= 2700
+            and bool(_BE_BEFORE.search(text, max(0, start - 12), start)
+                     or _BE_AFTER.match(text, end)))
+
+
 def _listed_before(text: str, start: int) -> list:
     """Числа перечисления прямо перед числом с единицей — без своей единицы."""
     match = _RANGE_FIRST.search(text, max(0, start - 40), start)
     if match:
         number = _norm_number(match.group(1))
         last = re.match(NUMBER, text[start:])
-        if number and not _year_like(number) and last and _ascending(number, _norm_number(last.group(0))):
+        if number and not _year_at(text, match.start(1), match.end(1), number) \
+                and last and _ascending(number, _norm_number(last.group(0))):
             return [number]
         return []
     out, end, pattern = [], start, _LIST_LAST
@@ -640,8 +709,8 @@ def _listed_before(text: str, start: int) -> list:
             break
         # Год в начале перечисления — не его член: «In 2026, 15 or 20 minutes».
         # Посреди перечисления — член: «$1,450, 1950 or 2100 dollars».
-        if _year_like(number) and not _LIST_MORE.search(text, max(0, match.start() - 40),
-                                                         match.start()):
+        if _year_at(text, match.start(1), match.end(1), number) \
+                and not _LIST_MORE.search(text, max(0, match.start() - 40), match.start()):
             break
         out.append(number)
         end, pattern = match.start(), _LIST_MORE
@@ -690,7 +759,8 @@ def _generic_numbers_in(text: str) -> dict:
         # Год в тексте — не факт строки: «в 2026 году», «с 1998 г.» Годом
         # считается только голое четырёхзначное число: `1,900` с разделителем
         # разрядов — это тысяча девятьсот чего-то, а не год.
-        if re.fullmatch(r"\d{4}", match.group(1)) and 1900 <= int(number) <= 2100:
+        if re.fullmatch(r"\d{4}", match.group(1)) and _year_at(
+                text, match.start(1), match.end(1), number):
             continue
         found.setdefault(number, match.group(2).strip())
     return found
@@ -1302,9 +1372,10 @@ def _shown(number: str, unit: str) -> str:
         except ValueError:
             raw = ""
         if raw:
-            glue = "" if word[0] in _CJK_SCALES and lowered.startswith(word) else " "
+            glue = "" if (word[0] in _CJK_SCALES or word in _GLUED_SCALES) \
+                and lowered.startswith(word) else " "
             parts = unit.split()
-            code = parts[0].upper() in CURRENCY_CODES.split("|")
+            code = parts[0].upper() in _ALL_CODES
             if unit and (unit[0] in "$€£¥₹₽" or _LOCAL_PREFIX.fullmatch(parts[0]) or code):
                 rest = " ".join(parts[1:])
                 sign = parts[0] + (" " if code else "")
@@ -1317,7 +1388,7 @@ def _shown(number: str, unit: str) -> str:
         return f"{unit}{number}"
     if unit and _LOCAL_PREFIX.fullmatch(unit):
         return f"{unit}{number}" if unit.endswith("$") or len(unit) == 1 else f"{unit} {number}"
-    if unit and unit.upper() in CURRENCY_CODES.split("|"):
+    if unit and unit.upper() in _ALL_CODES:
         return f"{unit} {number}"
     return f"{number} {unit}".strip()
 
@@ -1343,6 +1414,20 @@ _MEASURES = (
     ("m2", r"m²|m2|sqm|sq\.?" + _SP + r"?m|square" + _SP + r"+met(?:er|re)s?|м²|м2|кв\.?" + _SP + r"?м|㎡|平米"),
     ("kg", r"kgs?|kilos?|kilogram(?:me)?s?|кг|килограмм(?:а|ов)?"),
 )
+# Хинди, бенгали, тайский, индонезийский, арабский, персидский, урду, иврит:
+# без них «залог 34 মাস» при «34 মিনিট» в строке проходило молча.
+_MEASURES_MORE = {
+    "minute": r"मिनट|মিনিট|นาที|menit|دقيقة|دقائق|دقیقه|منٹ|דקות|דקה",
+    "hour": r"घंटे|घंटा|ঘণ্টা|ชั่วโมง|jam|ساعة|ساعات|ساعت|گھنٹے|שעות|שעה",
+    "day": r"दिन|দিন|วัน|hari|يوم|أيام|روز|دن|ימים|יום",
+    "week": r"सप्ताह|हफ्ते|সপ্তাহ|สัปดาห์|minggu|أسبوع|أسابيع|هفته|ہفتے|שבועות|שבוע",
+    "month": r"महीने|महीना|माह|মাস|เดือน|bulan|شهر|أشهر|شهور|ماه|مہینے|חודשים|חודש",
+    # «ปี», «वर्ष», «tahun», «سال» стоят и перед годом («฿1,450 ปี 2569»):
+    # мерой они сделали бы цену сроком. Только счётные формы.
+    "year": r"বছর|سنوات|שנים",
+}
+_MEASURES = tuple((name, words + "|" + _MEASURES_MORE[name] if name in _MEASURES_MORE else words)
+                  for name, words in _MEASURES)
 _MEASURE = [(name, re.compile(r"(?:" + words + r")\.?", re.I)) for name, words in _MEASURES]
 
 
