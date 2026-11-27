@@ -85,6 +85,9 @@ MESSAGES = {
         "the canonical declares {a0}, but the page is laid out as {a1}: the build "
         "does not serve that form, and GitHub Pages, S3 and nginx answer {a0} with "
         "a 404. The same address goes into the sitemap and hreflang",
+    "картинок, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404: на месте картинки будет пусто":
+        "images that are not in the build: {a0} — {a1}{a2}. On the live site they are "
+        "404s, and the page shows an empty space",
     "ссылок на страницы, которых нет в сборке: {a0} — {a1}{a2}. На живом сайте это 404, если сервер их не перенаправляет":
         "links to pages that are not in the build: {a0} — {a1}{a2}. On the live "
         "site they are 404s unless the server redirects them",

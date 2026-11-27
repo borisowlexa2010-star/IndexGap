@@ -658,8 +658,51 @@ def _site_folder(page) -> str:
     return folder
 
 
+def _inline_heavy(pages: list) -> list:
+    """
+    Страницы, где встроенные data:-картинки весят больше 1 МБ: их браузер
+    скачивает с каждым заходом, кеш картинок им не помогает, а на диске
+    файла нет — обход сборки их не видел. Иконки и спрайты в счёт не идут.
+    """
+    from urllib.parse import unquote
+    out = []
+    for page in pages:
+        total, biggest, _n = page.__dict__.get("_inline_images") or (0, 0, 0)
+        if total > IMAGE_LIMIT or biggest > IMAGE_LIMIT:
+            out.append((total, unquote(urlsplit(page.url).path) or "/"))
+    return sorted(out, key=lambda x: (-x[0], x[1]))
+
+
 def heavy_images(pages: list) -> list:
     """Картинки тяжелее 1 МБ в сборке — одна находка на сайт, с самыми тяжёлыми."""
+    from .subject import Said
+    inline = _inline_heavy(pages)
+    inline_text = ""
+    if inline:
+        inline_text = tr(
+            "встроенных в HTML картинок (data:) больше 1 МБ на {a0} стр. — {a1}. Их браузер "
+            "скачивает заново с каждой страницей; вынеси их в файлы",
+            a0=len(inline), a1=", ".join(f"{path} ({size / 1024 / 1024:.1f} MB)"
+                                         for size, path in inline[:5]))
+    found = _heavy_files(pages)
+    if not found and not inline:
+        return []
+    names = [name for _, name in found] + [path for _, path in inline]
+    if not found:
+        # Без файлов — только встроенные: совет про сжатие файлов не к месту.
+        return [("info", "", "heavy-images", Said(inline_text, names))]
+    shown = ", ".join(f"{name} ({size / 1024 / 1024:.1f} MB)" for size, name in found[:5])
+    # Предмет — все файлы и страницы: новая тяжёлая картинка видна в --baseline.
+    text = tr(
+        "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; "
+        "сожми их или отдай WebP/AVIF", a0=len(found), a1=shown)
+    if inline_text:
+        text += "; " + inline_text
+    return [("info", "", "heavy-images", Said(text, names))]
+
+
+def _heavy_files(pages: list) -> list:
+    """Файлы картинок тяжелее 1 МБ: (размер, путь от корня сборки), тяжёлые первыми."""
     paths = [_site_folder(p) for p in pages if p.path and _is_html(p)]
     if not paths:
         return []
@@ -683,12 +726,5 @@ def heavy_images(pages: list) -> list:
                 heavy.append((size, os.path.relpath(path, root).replace(os.sep, "/")))
         if seen > MAX_WALK:
             break
-    if not heavy:
-        return []
     heavy.sort(key=lambda x: (-x[0], x[1]))
-    shown = ", ".join(f"{name} ({size / 1024 / 1024:.1f} MB)" for size, name in heavy[:5])
-    # Предмет — все файлы: новая тяжёлая картинка видна в --baseline.
-    from .subject import Said
-    return [("info", "", "heavy-images", Said(tr(
-        "картинок тяжелее 1 МБ в сборке: {a0} — {a1}. Они замедляют страницу на телефоне; "
-        "сожми их или отдай WebP/AVIF", a0=len(heavy), a1=shown), [name for _, name in heavy]))]
+    return heavy

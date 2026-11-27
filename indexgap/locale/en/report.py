@@ -167,6 +167,8 @@ MESSAGES = {
         "A redirect stub leads to the home page. A search engine treats a removed "
         "page redirected to the home page as a soft 404; a stub that still carries "
         "an article's text is usually a template bug.",
+    "Картинка, на которую ссылается страница, не лежит в сборке: на живом сайте это 404 и пустое место на странице.":
+        "An image the page refers to is not in the build: on the live site it is a 404 and an empty space on the page.",
     "Ссылка ведёт на страницу, которой в сборке нет: на живом сайте это 404. Чаще всего шаблон ссылается на строку данных, которую фильтр не пропустил в генерацию. Убери ссылку из шаблона или верни страницу.":
         "The link points at a page the build does not have: a 404 on the live "
         "site. Most often the template links to a data row that a filter kept out "

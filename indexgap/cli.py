@@ -442,7 +442,7 @@ def load_baseline(path: str) -> list:
 # Находки, у которых на одной странице бывает разный предмет: какой бот
 # закрыт, куда ведёт битая ссылка, с какой страницей дубль. Без предмета
 # «открыли OAI-SearchBot, закрыли PerplexityBot» выглядело как «ничего нового».
-_SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "wrong-link-form", "hub-missing-links", "unfilled-slot",
+_SUBJECT_CODES = {"ai-crawler-blocked", "broken-link", "broken-image", "wrong-link-form", "hub-missing-links", "unfilled-slot",
                   "near-duplicate", "similar", "canonical-elsewhere", "duplicate-title",
                   "duplicate-description", "translations-parked", "heavy-images"}
 # Предмет этих находок есть только в поле `subject`: из текста его не вынуть,
