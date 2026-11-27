@@ -34,6 +34,8 @@ MESSAGES = {
     "{a0}: каталог не прочитан ({a1}) — страницы в нём не проверялись":
         "{a0}: the directory could not be read ({a1}) — its pages were not checked",
     "canonical не разбирается как адрес: {a0}": "the canonical cannot be parsed as an address: {a0}",
+    '<link rel="canonical"> стоит в <body> (после тега, который закрывает <head>) — поисковики его не читают: {a0}. Перенеси его в <head>':
+        '<link rel="canonical"> sits in <body> (after a tag that closes <head>), so search engines ignore it: {a0}. Move it into <head>',
     "{a0}: шаблон {a1} не разобран — какие страницы закрывает его X-Robots-Tag: noindex, не проверялось":
         "{a0}: pattern {a1} could not be read — which pages its X-Robots-Tag: noindex "
         "closes was not checked",

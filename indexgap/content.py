@@ -40,6 +40,7 @@ from collections import Counter, defaultdict
 from .subject import Said
 from .core import (BRIEF_MARKERS, OWN_BRIEF_MARKERS, SLOT_TEMPLATE, brief_prose,
                    find_slots, tokenize, visible_text)
+from .core import NOT_SHOWN, drop_spans
 from .i18n import tr
 
 CONFIG = {
@@ -1669,6 +1670,9 @@ _IDENT = re.compile(r"[A-Za-z_]\w*")
 def _docs_page(page) -> bool:
     """Страница с примерами кода: `{FOLDER_NAME}` и `undefined` на ней — нотация автора."""
     raw = (page.raw or "")[:400_000].lower()
+    if "<pre" not in raw and "<code" not in raw:
+        return False
+    raw = drop_spans(raw, NOT_SHOWN)
     return "<pre" in raw or "<code" in raw
 
 

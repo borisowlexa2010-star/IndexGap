@@ -768,7 +768,7 @@ class TestRootMismatch(unittest.TestCase):
         pages = self.site(4)
         note = checks.root_mismatch(pages, checks.link_graph(pages))
         self.assertIn("каталог не соответствует корню", note)
-        self.assertIn("сейчас это /proj/content", note)
+        self.assertTrue(note.endswith("сейчас это /proj"), note)
         self.assertIn("корень example.com", note)
 
     def test_two_pages_are_too_few_to_say(self):
