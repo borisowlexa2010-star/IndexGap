@@ -55,11 +55,63 @@ def _ld_nodes(raw: str) -> list:
         return []
 
 
-def page_dates(page) -> dict:
+def _put(found: dict, key: str, parsed) -> None:
+    """Самая поздняя дата источника: два события в @graph не затирают друг друга."""
+    found[key] = max(found.get(key, parsed), parsed)
+
+
+def _node_dates(node: dict, event: bool) -> tuple:
+    """({источник: дата}, бессрочное ли это событие) для одного узла JSON-LD."""
+    found = {}
+    for key, value in node.items():
+        if str(key).lower() in DATE_FIELDS:
+            parsed = _parse_date(value)
+            if parsed:
+                _put(found, f"jsonld:{key}", parsed)
+    offers = node.get("offers")
+    offers = offers if isinstance(offers, list) else [offers]
+    for offer in offers:
+        if isinstance(offer, dict):
+            parsed = _parse_date(offer.get("validThrough"))
+            if parsed:
+                _put(found, "jsonld:validThrough", parsed)
+    if not event:
+        return found, False
+    # Событие по расписанию идёт до конца расписания, а не до первой
+    # даты: еженедельная встреча с `endDate` через год объявлялась
+    # прошедшей на третьей неделе. Расписание без конца — бессрочное.
+    open_ended = False
+    schedules = node.get("eventSchedule")
+    schedules = schedules if isinstance(schedules, list) else [schedules]
+    for schedule in schedules:
+        if not isinstance(schedule, dict):
+            continue
+        parsed = _parse_date(schedule.get("endDate"))
+        if parsed:
+            _put(found, "jsonld:eventSchedule", parsed)
+        else:
+            open_ended = True
+    parts = node.get("subEvent")
+    for part in parts if isinstance(parts, list) else [parts]:
+        if isinstance(part, dict):
+            parsed = _parse_date(part.get("endDate") or part.get("startDate"))
+            if parsed:
+                _put(found, "jsonld:subEvent", parsed)
+    # Свой `endDate` у события закрывает и бессрочное расписание: серия
+    # кончилась тогда, когда сказано.
+    if open_ended and _parse_date(node.get("endDate")):
+        open_ended = False
+    return found, open_ended
+
+
+def _dates(page) -> tuple:
     """
-    Все даты страницы, какие удалось прочитать: {источник: дата}.
-    Берётся самая поздняя из «когда заканчивается» — именно она решает,
-    протухла страница или нет.
+    ({источник: дата}, [названия бессрочных событий]).
+
+    Бессрочное событие (расписание без конца) пропускается само по себе: его
+    `startDate` — первая встреча серии, а не конец. Остальные узлы и
+    фронтматтер считаются как обычно — прошедший фестиваль рядом с еженедельной
+    встречей раньше пропадал вместе со всеми датами страницы.
     """
     found = {}
     for key, value in (page.meta or {}).items():
@@ -69,49 +121,25 @@ def page_dates(page) -> dict:
                 found[f"frontmatter:{key}"] = parsed
 
     is_event = bool(found)
+    ongoing = []
     for raw in page.jsonld or ():
         for node in _ld_nodes(raw):
             kinds = node.get("@type")
             kinds = kinds if isinstance(kinds, list) else [kinds]
             event = any("event" in str(k).lower() for k in kinds)
             is_event = is_event or event
-            for key, value in node.items():
-                if str(key).lower() in DATE_FIELDS:
-                    parsed = _parse_date(value)
-                    if parsed:
-                        found[f"jsonld:{key}"] = parsed
-            offers = node.get("offers")
-            offers = offers if isinstance(offers, list) else [offers]
-            for offer in offers:
-                if isinstance(offer, dict):
-                    parsed = _parse_date(offer.get("validThrough"))
-                    if parsed:
-                        found["jsonld:validThrough"] = parsed
-            if not event:
+            dates, open_ended = _node_dates(node, event)
+            if open_ended:
+                ongoing.append(str(node.get("name") or "").strip())
                 continue
-            # Событие по расписанию идёт до конца расписания, а не до первой
-            # даты: еженедельная встреча с `endDate` через год объявлялась
-            # прошедшей на третьей неделе. Расписание без конца — бессрочное.
-            schedules = node.get("eventSchedule")
-            schedules = schedules if isinstance(schedules, list) else [schedules]
-            for schedule in schedules:
-                if not isinstance(schedule, dict):
-                    continue
-                parsed = _parse_date(schedule.get("endDate"))
-                if not parsed:
-                    return {}
-                found["jsonld:eventSchedule"] = parsed
-            parts = node.get("subEvent")
-            for part in parts if isinstance(parts, list) else [parts]:
-                if isinstance(part, dict):
-                    parsed = _parse_date(part.get("endDate") or part.get("startDate"))
-                    if parsed:
-                        found.setdefault("jsonld:subEvent", parsed)
-                        found["jsonld:subEvent"] = max(found["jsonld:subEvent"], parsed)
+            for key, parsed in dates.items():
+                _put(found, key, parsed)
 
     # <time> стоит на любой странице: «проверено 2 марта», дата публикации
     # новости. Датой события он становится, только если страница — событие.
-    if is_event:
+    # Рядом с бессрочной серией <time> — обычно дата её ближайшей или первой
+    # встречи, и к какому событию он относится, не понять: он не считается.
+    if is_event and not ongoing:
         from .core import INERT, NOT_LIVE, drop_spans
         raw = drop_spans(page.raw or "", NOT_LIVE + INERT)
         for match in re.finditer(r"<time\b[^<>]{0,500}?datetime=[\"']([^\"'<>]{1,60})", raw, re.I):
@@ -120,7 +148,16 @@ def page_dates(page) -> dict:
                 # Самая поздняя, как везде: «объявлено в 2024-м» перед датой
                 # концерта не делает концерт прошедшим.
                 found["time"] = max(found.get("time", parsed), parsed)
-    return found
+    return found, ongoing
+
+
+def page_dates(page) -> dict:
+    """
+    Все даты страницы, какие удалось прочитать: {источник: дата}.
+    Берётся самая поздняя из «когда заканчивается» — именно она решает,
+    протухла страница или нет. Бессрочные события в них не входят.
+    """
+    return _dates(page)[0]
 
 
 def check(pages: list, cfg: dict = None, today: date = None) -> dict:
@@ -146,12 +183,25 @@ def check(pages: list, cfg: dict = None, today: date = None) -> dict:
     dated = 0
     stale = 0
     for page in sorted(pages, key=lambda p: p.url):
-        dates = page_dates(page)
-        if not dates:
+        dates, ongoing = _dates(page)
+        if not dates and not ongoing:
             continue
         dated += 1
+        if not dates:
+            continue
         latest = max(dates.values())
         if latest >= cutoff:
+            continue
+        if ongoing:
+            # Страница — действующая серия, а прошло только соседнее событие:
+            # закрывать её от индекса не за что, но устаревшую дату стоит убрать.
+            if indexable(page):
+                issues.append((
+                    "warning", page.url, "stale-event-part",
+                    tr("дата {a0} прошла более {a1} дней назад, но на странице есть и бессрочная серия ({a2}), "
+                       "поэтому сама страница актуальна. Убери прошедшее событие из разметки и текста или "
+                       "перенеси его в архив", a0=latest.isoformat(), a1=cfg['grace_days'],
+                       a2=", ".join(sorted({n for n in ongoing if n})) or "eventSchedule")))
             continue
         stale += 1
         if indexable(page):
