@@ -1874,7 +1874,7 @@ def _parse_frontmatter(block: str) -> dict:
             # и перенос длинного значения на следующую строку. Последний —
             # валидный YAML, который дампер делает сам, а пакет объявлял
             # такую страницу «без title».
-            wrapped = []
+            wrapped, items, nested = [], [], False
             while i < len(lines) and (not lines[i].strip()
                                       or lines[i][:1] in (" ", "\t", "-")):
                 nxt = lines[i]
@@ -1882,15 +1882,27 @@ def _parse_frontmatter(block: str) -> dict:
                 stripped = nxt.strip()
                 if not stripped:
                     continue
+                if stripped == "-" or stripped.startswith("- "):
+                    items.append(stripped[1:].strip())
+                    continue
                 if nxt[:1] == "-" or ":" in stripped.split(" ")[0]:
-                    wrapped = []          # список или вложенный объект — не значение
+                    nested = True         # вложенный объект — не значение
                     continue
                 wrapped.append(stripped)
+            # Список из одного элемента — `keyword:\n  - leipzig` — это его
+            # значение; длинный список и вложенный объект — не значение.
+            if len(items) == 1 and not nested and not wrapped:
+                wrapped = [_yaml_scalar(items[0])]
+            elif items or nested:
+                wrapped = []
             if not wrapped:
                 continue
             value = " ".join(wrapped)
         else:
             value = _yaml_scalar(value)
+            # `keyword: [munich]` — тот же список из одного элемента.
+            if value[:1] == "[" and value[-1:] == "]" and "," not in value and "[" not in value[1:]:
+                value = _yaml_scalar(value[1:-1])
         value = _clean(_unquote_value(value))
         if value:
             out[key] = value
