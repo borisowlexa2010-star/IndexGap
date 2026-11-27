@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from urllib.parse import urlsplit
 from collections import Counter, defaultdict
 from .subject import Said
@@ -274,6 +275,9 @@ NON_UNITS = {
     "сентября", "октября", "ноября", "декабря",
     "january", "february", "march", "april", "may", "june", "july", "august",
     "september", "october", "november", "december",
+    # Порядковые суффиксы и время суток: «31st», «the 3rd deadline», «7 pm» —
+    # не мера, а дата, номер и час.
+    "st", "nd", "rd", "th", "pm",
 }
 
 # То же для других языков: служебные слова, счётные контексты и месяцы.
@@ -849,11 +853,55 @@ def _dates_in(text: str) -> list:
         if not (1 <= first <= 31 and 1 <= second <= 31 and min(first, second) <= 12):
             continue
         out.append((match.start(), match.end(), (year, str(first), str(second))))
-    return out
+    # Дата словами — «18 Nov 2026», «November 18, 2026» — и короткая —
+    # «2026-11», «11/2026», «18/11/26». Раньше её день и год становились числами
+    # строки, а одна дата на все строки — постоянными сайта: «залог 18 месяцев»
+    # и «$2026» проходили молча.
+    for match in _NAMED_DATE_IN_CELL.finditer(text):
+        if any(s <= match.start() < e for s, e, _ in out):
+            continue
+        month = _MONTH_NUMBER.get((match.group("nm") or match.group("mm"))[:3].lower(), "")
+        day = match.group("nd") or match.group("md")
+        year = match.group("ny") or match.group("my")
+        if month and 1 <= int(day) <= 31:
+            out.append((match.start(), match.end(), (year, month, str(int(day)))))
+    for match in _SHORT_DATE_IN_CELL.finditer(text):
+        if any(s <= match.start() < e for s, e, _ in out):
+            continue
+        if match.group("ym"):
+            year, month, rest = match.group("ym"), match.group("mo"), ()
+        elif match.group("my2"):
+            year, month, rest = match.group("my2"), match.group("mo2"), ()
+        else:
+            first, second = int(match.group("p")), int(match.group("q"))
+            if not (1 <= first <= 31 and 1 <= second <= 31 and min(first, second) <= 12):
+                continue
+            year, month, rest = "20" + match.group("yy"), str(min(first, second)), (str(max(first, second)),)
+        if 1900 <= int(year) <= 2100 and 1 <= int(month) <= 12:
+            out.append((match.start(), match.end(), (year, str(int(month))) + rest))
+    return sorted(out)
+
+
+_MONTH_NUMBER = {m: str(i) for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_MONTH_NAME = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
+               r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
+_NAMED_DATE_IN_CELL = re.compile(
+    r"(?<![\w.,])(?:(?P<nd>\d{1,2})(?:st|nd|rd|th)?" + _SP + r"+(?P<nm>" + _MONTH_NAME + r")\.?,?"
+    + _SP + r"+(?P<ny>\d{4})|(?P<mm>" + _MONTH_NAME + r")\.?" + _SP + r"+(?P<md>\d{1,2})"
+    r"(?:st|nd|rd|th)?,?" + _SP + r"+(?P<my>\d{4}))(?![\w.,]?\d)", re.I)
+_SHORT_DATE_IN_CELL = re.compile(
+    r"(?<![\w.,\-/:])(?:(?P<ym>\d{4})[\-/](?P<mo>\d{1,2})|(?P<mo2>\d{1,2})/(?P<my2>\d{4})"
+    r"|(?P<p>\d{1,2})(?P<t>[/.])(?P<q>\d{1,2})(?P=t)(?P<yy>\d{2}))(?![\w.,\-/:]?\d)")
+# Время дня в ячейке — «8:30», «9:00-18:00» — не количество минут или часов.
+_CLOCK_IN_CELL = re.compile(
+    r"(?<![\w.,:])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:" + _SP + r"?(?:[ap]\.?m\.?)(?!\w))?(?![\w.,:]?\d)",
+    re.I)
 
 
 def _without_dates(text: str) -> str:
     text = _URL_IN_CELL.sub(" ", text)
+    text = _CLOCK_IN_CELL.sub(" ", text)
     for start, end, _ in reversed(_dates_in(text)):
         text = text[:start] + " " + text[end:]
     return text
@@ -1007,10 +1055,12 @@ def _slug_column(rows: list, keyword_field: str) -> str:
 
 def _path_forms(value: str) -> tuple:
     """`berlin`, `/rent/berlin/`, `rent/berlin.html`, `https://x.com/rent/berlin` → (полный путь, последний сегмент)."""
-    from urllib.parse import urlsplit
+    from urllib.parse import unquote, urlsplit
     text = (value or "").strip()
     if "://" in text:
         text = urlsplit(text).path
+    # `k%C3%B6ln` из выгрузки краулера и `köln` в NFD из macOS — тот же адрес.
+    text = unicodedata.normalize("NFC", unquote(text))
     text = re.sub(r"(^|/)index\.(html?|md|markdown)$", r"\1", text, flags=re.I)
     text = re.sub(r"\.(html?|md|markdown)$", "", text, flags=re.I).strip("/").lower()
     return text, text.rsplit("/", 1)[-1] if text else ""
@@ -1046,12 +1096,16 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
     # демо с колонками `query` и `slug` давало «сверено 0 из 10», и выдуманная
     # цена пропадала из отчёта.
     slug_field = _slug_column(rows, keyword_field)
-    by_path, by_last, last_clash = {}, {}, set()
+    by_path, by_last, last_clash, path_clash = {}, {}, set(), set()
     if slug_field:
         for row in rows:
             full, last = _path_forms(row.get(slug_field) or "")
             if not last:
                 continue
+            # Один адрес у двух строк — та же неоднозначность, что два одинаковых
+            # ключа: раньше молча побеждала первая строка.
+            if full in by_path and by_path[full] is not row:
+                path_clash.add(full)
             by_path.setdefault(full, row)
             if last in by_last and by_last[last] is not row:
                 last_clash.add(last)
@@ -1064,24 +1118,64 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
     # villa» получали ещё и хаб `/austin/`, и статья блога с теми же словами в
     # заголовке — и их числа сверялись с чужими данными.
     claimed, pending = set(), []
+    # Ключ, проставленный шаблоном на всех страницах, — не связь: `<meta
+    # name="keyword" content="berlin">` на странице мюнхена сверял её с
+    # берлином, и чужие числа на ней проходили молча.
+    key_pages = Counter((page.meta.get("keyword") or "").strip().lower() for page in pages)
+    slug_bound = defaultdict(list)
     for page in pages:
         key = (page.meta.get("keyword") or "").strip().lower()
         row = by_keyword.get(key) if key else None
-        if row is None and slug_field:
-            rel = os.path.relpath(page.path, root).replace(os.sep, "/")
-            full, last = _path_forms(rel)
-            row = by_path.get(full) or (by_last.get(last) if last not in last_clash else None)
-        if row is None:
-            slug = _slug_of(page, root)
-            if slug in slug_clash:
-                ambiguous.append(page.url)
-                continue
-            row = by_slug.get(slug)
+        if row is None or key_pages[key] > 1:
+            slug_row, clash = None, False
+            if slug_field:
+                rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+                full, last = _path_forms(rel)
+                if full in path_clash or (full not in by_path and last in last_clash):
+                    clash = True
+                else:
+                    slug_row = by_path.get(full) or by_last.get(last)
+            if slug_row is None and not clash:
+                # Папка `Berlin`, `köln`, `аренда-берлин` — тот же ключ, что
+                # `berlin`, `koln`, `arenda-berlin`.
+                slug = _slug_of(page, root)
+                if slug not in by_slug and slug not in slug_clash:
+                    slug = slugify(unicodedata.normalize("NFC", slug))
+                clash = slug in slug_clash
+                slug_row = None if clash else by_slug.get(slug)
+            if row is None:
+                if clash:
+                    ambiguous.append(page.url)
+                    continue
+                row = slug_row
+                if row is not None:
+                    slug_bound[id(row)].append(page)
+            elif slug_row is not None and slug_row is not row:
+                row = slug_row
+                slug_bound[id(row)].append(page)
         if row is not None:
             matched[page.url] = row
             claimed.add(id(row))
         else:
             pending.append(page)
+
+    # Одна строка по последнему сегменту у страниц из разных разделов —
+    # `/rent/berlin/` и `/buy/berlin/`: строка принадлежит разделу, в котором
+    # лежат остальные страницы датасета. Без перевеса неизвестно, чья она.
+    def parent(page):
+        rel = os.path.relpath(page.path, root).replace(os.sep, "/")
+        return _path_forms(rel)[0].rpartition("/")[0]
+    sections = Counter(parent(page) for group in slug_bound.values() for page in group)
+    for group in slug_bound.values():
+        if len(group) < 2:
+            continue
+        best = max(sections[parent(page)] for page in group)
+        winners = [page for page in group if sections[parent(page)] == best]
+        for page in group:
+            if len(winners) > 1 or page is not winners[0]:
+                matched.pop(page.url, None)
+                if len(winners) > 1:
+                    ambiguous.append(page.url)
     free = sorted(k for k, r in by_keyword.items() if id(r) not in claimed)
 
     for page in pending:
@@ -1091,10 +1185,19 @@ def match_rows(pages: list, rows: list, keyword_field: str, root: str,
         # Без нормализации словоформ сопоставлялось 10 страниц из 100,
         # и сверка фактов молча выключалась на девяти десятых сайта.
         haystack_tokens = _stems(haystack)
+        # Страница, которая называет в заголовке свой адрес, — о нём, а не о
+        # ключе: `/rent/potsdam/` с заголовком «Renting in Potsdam near Berlin»
+        # сверялась со строкой berlin, и её верные числа становились выдумкой.
+        own_slug = slugify(_slug_of(page, root))
+        own_slug = set() if own_slug.startswith("p-") else (
+            {t for t in re.findall(r"[a-z]+", own_slug) if len(t) > 2}
+            & set(re.findall(r"[a-z]+", slugify(haystack, max_len=10 ** 6))))
         scored = []
         for candidate_key in free:
             key_tokens = _stems(candidate_key)
             if not key_tokens:
+                continue
+            if own_slug and not own_slug & set(re.findall(r"[a-z]+", slugify(candidate_key))):
                 continue
             scored.append((len(key_tokens & haystack_tokens) / len(key_tokens),
                            len(key_tokens), candidate_key))
@@ -1147,6 +1250,11 @@ def _shown(number: str, unit: str) -> str:
 # Чем меряется число — по подписи, в которой не ошибиться. Остальные подписи
 # мерой не считаются, и число с ними сверяется как раньше, без единицы.
 _MEASURES = (
+    # Секунды, ночи и десятилетия — тоже мера: без неё «34 seconds» и «2 nights»
+    # прощались за «34 minutes» и «2 months».
+    ("second", r"secs?|seconds?|секунд[аы]?|сек|sekunden?|secondes?|segundos?|secondi|秒|秒間|초"),
+    ("night", r"nights?|ноч[ьи]|ночей|nächte|nacht|nuits?|noches?|nott[ei]|泊|박"),
+    ("decade", r"decades?|десятилети[еяй]|jahrzehnte?n?|décennies?|décadas?|decenni?o?"),
     ("minute", r"min|mins|minutes?|минут[аы]?|мин|minuten?|minutos?|minuti|分|分間|分钟|分鐘|분"),
     ("hour", r"hrs?|hours?|час|часа|часов|stunden?|heures?|horas?|ore|ora|時間|小时|小時|시간"),
     ("day", r"days?|день|дня|дней|суток|tage?n?|tag|jours?|d[ií]as?|giorn[oi]|日|日間|天|일"),
@@ -1414,6 +1522,11 @@ def _derivation(number: str, row_numbers: set, kinds: dict = None, kind: str = N
 _DATE_UNIT = re.compile(r"[年月日년월일]")
 
 
+_HOURS_MINUTES = re.compile(
+    r"(?<![\w.,])(\d{1,2})" + _SP + r"?(?:hours?|hrs?|h|час(?:а|ов)?|ч)\.?,?" + _SP + r"*(?:and" + _SP
+    + r"+|и" + _SP + r"+)?(\d{1,2})" + _SP + r"?(?:minutes?|mins?|минут[аы]?|мин)(?!\w)", re.I)
+
+
 def _descending_before(text: str, fact_pattern) -> dict:
     """Первые края обратных диапазонов перед числом с единицей проекта."""
     found = {}
@@ -1480,9 +1593,21 @@ def check_facts(pages: list, matched: dict, rows: list, cfg: dict = None,
         if any(_MONEY.search(str(v)) and re.search(r"\d", str(v)) for v in row.values()):
             bare = set()
 
+        # «1 hour 30 minutes» при `90 minutes`: обе части верны вместе.
+        compound = set()
+        for match in _HOURS_MINUTES.finditer(_same_signs(_with_head(page))):
+            total = _norm_number(str(int(match.group(1)) * 60 + int(match.group(2))))
+            if _supported(total, "minutes", allowed, measures, bare):
+                compound |= {(_norm_number(match.group(1)), "hour"),
+                             (_norm_number(match.group(2)), "minute")}
+
         def supported(number, unit):
+            if (number, _measure(unit)) in compound:
+                return True
             if number in dates:
-                return bool(_DATE_UNIT.fullmatch((unit or "").strip()))
+                # «15日です»: после 日 идёт слово, а не другая единица.
+                return bool(_DATE_UNIT.fullmatch((unit or "").strip()[:1])) \
+                    and not re.search(r"[^\u3040-\u309f]", (unit or "").strip()[1:])
             return _supported(number, unit, allowed, measures, bare)
 
         # Заголовок и описание — тот текст, который человек видит в выдаче:
@@ -2075,7 +2200,8 @@ def run(pages: list, rows: list = None, keyword_field: str = "keyword",
         "notes": notes,
         "unmatched": sorted(p.url for p in pages if p.url not in matched) if rows else [],
         # В обратную сторону: строка без страницы — сбой генерации или фильтр.
+        # Строка без ключа называется номером: раньше она шла пустой строкой.
         "rows_without_page": sorted(
-            str(r.get(keyword_field) or "") for r in (rows or [])
+            str(r.get(keyword_field) or "").strip() or f"#{n}" for n, r in enumerate(rows or [], 1)
             if id(r) not in {id(v) for v in matched.values()}),
     }

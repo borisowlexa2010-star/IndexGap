@@ -793,9 +793,18 @@ def cmd_check(args):
             a0=len(listed_stubs), a1=", ".join(listed_stubs[:5])
             + (tr(" и ещё {a0}", a0=len(listed_stubs) - 5) if len(listed_stubs) > 5 else "")))
 
+    # Покрытие сверки — и в HTML: человек читает отчёт, а не консоль.
+    coverage_notes = []
+    if content_result and (content_result["matched"] or content_result["unmatched"]):
+        coverage_notes.append(tr("Сверено с датасетом: {a0} из {a1}",
+                                 a0=content_result['matched_rows'], a1=len(pages)))
+        orphan_rows = content_result.get("rows_without_page") or []
+        if orphan_rows:
+            coverage_notes.append(tr("  строк датасета без страницы: {a0} — например: {a1}",
+                                     a0=len(orphan_rows), a1=", ".join(orphan_rows[:10])).strip())
     html_path = report.build(analysis, funnel_result, causes,
                              out_path=check_out_path(report_pair(args.out)[0]), site=args.site,
-                             cross=cross, notes=notes,
+                             cross=cross, notes=coverage_notes + notes,
                              title=tr("Проверка перед публикацией"),
                              templates=got["templates"], segments=segments)
     json_path = report_pair(args.out)[1]
