@@ -222,6 +222,10 @@ def _serialize_issues(issues):
         if subject_of(m) is not None:
             # Полный предмет: в тексте он укорочен до трёх адресов.
             item["subject"] = list(subject_of(m))
+            # У находки большой группы дублей предмет укорочен и в JSON:
+            # рядом — сколько адресов в нём на самом деле.
+            if getattr(m, "total", 0) > len(item["subject"]):
+                item["subject_total"] = m.total
         out.append(item)
     return out
 
@@ -579,10 +583,26 @@ def compare_baseline(issues: list, old: list, accepted: list = None,
                  for level, url, code, message in issues]
     had, has = subjects(old_items), subjects(new_items)
 
+    # Укороченный предмет (большая группа дублей: записаны первые адреса
+    # группы) — окно, а не список: убрали первую страницу группы, и окно
+    # сдвинулось у всех. Такая находка новая, только если окна не
+    # пересекаются вовсе.
+    partial = set()
+    for i in old:
+        total, given = i.get("subject_total"), i.get("subject")
+        if (isinstance(total, int) and not isinstance(total, bool)
+                and isinstance(given, list) and total > len(given)):
+            partial.add(key(i.get("level"), i.get("url"), i.get("code")))
+    for level, url, code, message in issues:
+        if getattr(message, "total", 0) > len(subject_of(message) or ()):
+            partial.add(key(level, url, code))
+
     def changed(item, other):
         level, url, code, message, given = item
         k = key(level, url, code)
         mine = set(subject(code, message, given))
+        if k in partial:
+            return k in other and bool(other[k]) and bool(mine) and not (mine & other[k])
         # Пустой предмет на той стороне — неизвестный, а не «никакой»: у дубля
         # из группы, сравненной с образцом, близнец — артефакт выборки.
         return k in other and bool(other[k]) and bool(mine - other[k])
@@ -893,6 +913,36 @@ def _drop_accepted_lists(analysis: dict, notes: list, accepted: list) -> None:
         notes.remove(note)
 
 
+def _duplicates_json(analysis: dict) -> dict:
+    """
+    Пары похожих страниц для JSON. Большая группа почти-дублей пишется
+    составом: двести клонов давали 19 900 строк пар и десятки мегабайт, а
+    читать в них нечего — все страницы группы совпадают друг с другом.
+    В `duplicates` остаются пары вне таких групп и пары между группой и
+    остальными страницами; `duplicate_pairs` — сколько пар найдено всего.
+    """
+    pairs = analysis.get("duplicates") or []
+    groups = checks.duplicate_groups(pairs, analysis.get("config"))
+    member_of = {u: n for n, g in enumerate(groups) for u in g}
+    inside = defaultdict(list)
+    listed = []
+    for a, b, j in pairs:
+        n = member_of.get(a.url)
+        if n is not None and n == member_of.get(b.url):
+            inside[n].append(j)
+            continue
+        listed.append({"a": a.url, "b": b.url, "jaccard": j})
+    return {
+        "duplicates": listed,
+        "duplicate_pairs": len(pairs),
+        "duplicate_groups": [
+            {"id": g[0], "size": len(g), "members": g,
+             "jaccard_min": min(inside[n]) if inside[n] else None,
+             "jaccard_max": max(inside[n]) if inside[n] else None}
+            for n, g in enumerate(groups)],
+    }
+
+
 def _given_files_exist(args) -> None:
     """
     Путь, названный явно, обязан существовать. Опечатка в `--sitemap` или
@@ -1013,8 +1063,7 @@ def cmd_check(args):
         "coverage": coverage,
         "orphans": analysis["graph"]["orphans"],
         "unreachable": analysis["graph"]["unreachable"],
-        "duplicates": [{"a": a.url, "b": b.url, "jaccard": j}
-                       for a, b, j in analysis["duplicates"]],
+        **_duplicates_json(analysis),
         "duplicate_method": analysis.get("duplicate_method"),
         "duplicate_method_label": analysis.get("duplicate_method_label"),
         "duplicates_sampled": bool(analysis.get("duplicates_sampled")),

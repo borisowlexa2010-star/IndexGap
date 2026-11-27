@@ -238,7 +238,12 @@ WHY = {
    "each row's own data is both better reading and better evidence of effort. "
    "The share is measured across the site and within the group's own section: "
    "twenty stamped `/rent/` pages are reported even when seventy blog posts with "
-   "their own headings sit beside them.",
+   "their own headings sit beside them. Flat addresses form a section by a shared "
+   "start (`/rent-berlin/`) or a shared end (`/berlin-rent/`). Bare addresses "
+   "(`/berlin/`) count as a section only for one exact skeleton of three or more "
+   "headings shared by at least five pages that make up a clear majority of "
+   "their level, not counting pages that form their own slug section such as "
+   "`/post-1/` … `/post-20/`.",
  "same-opening":
    "The opening paragraph is what gets quoted, previewed and read first. When "
    "it is identical across pages, every one of them makes the same first "
@@ -249,7 +254,12 @@ WHY = {
    "twenty cannot be fixed alone. When the pages target different queries "
    "(one per city or model), the fix is each page's own data, not a canonical: "
    "a canonical would hide the pages the site was built for. When the query is "
-   "the same, keep one page and redirect the rest to it.",
+   "the same, keep one page and redirect the rest to it. In a group of thirty "
+   "or more near-duplicates a new page is compared with one page of the group "
+   "rather than with every member, so large clone groups cost linear time. "
+   "The finding then names the group: the JSON keeps its first ten addresses in "
+   "`subject` and the full count in `subject_total`, and lists the group once in "
+   "`duplicate_groups` (id, size, members) instead of every pair in `duplicates`.",
  "similar":
    "Weaker than a near-duplicate, but the same shape. Worth reading as a "
    "warning that two keywords with the same intent produced two competing "

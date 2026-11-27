@@ -14,16 +14,21 @@
 
 
 class Said(str):
-    """Строка сообщения с полным предметом находки (`subject`)."""
+    """
+    Строка сообщения с полным предметом находки (`subject`). `total` — сколько
+    адресов в предмете на самом деле, если записаны не все: у группы из сотен
+    почти-дублей предмет укорочен, а число остаётся.
+    """
 
-    def __new__(cls, text, subject=()):
+    def __new__(cls, text, subject=(), total=None):
         self = super().__new__(cls, text)
         self.subject = tuple(sorted({str(s) for s in subject}))
+        self.total = max(total or 0, len(self.subject))
         return self
 
     def __reduce__(self):
         # Параллельный разбор шлёт находки между процессами.
-        return (Said, (str(self), self.subject))
+        return (Said, (str(self), self.subject, self.total))
 
 
 def subject_of(message):

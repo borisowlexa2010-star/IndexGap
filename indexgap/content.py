@@ -2045,14 +2045,20 @@ _SLUG_TOKEN = re.compile(r"[-_.]+")
 _SLUG_DEPTH = 8
 
 
-def _section_counter(pages: list, counted=None):
+def _section_counter(pages: list, counted=None, bare: bool = False):
     """
     Сколько страниц под общим каталогом группы. Порог шаблонности, взятый от
     всего сайта, гас, стоило рядом появиться блогу: двадцать одинаковых
     городских страниц среди семидесяти статей — 22% сайта, но 100% раздела.
 
     У плоских адресов (`/rent-alpha/`, `/rent-beta/`) общего каталога нет:
-    раздел тогда — общее начало адреса (`rent-`) у страниц одного уровня.
+    раздел тогда — общее начало адреса (`rent-`) у страниц одного уровня,
+    а если начала нет — общий конец (`/alpha-rent/`, `/beta-rent/`).
+
+    `bare` — ещё и голые адреса (`/alpha/`, `/beta/`): раздел тогда — все
+    страницы этого уровня, кроме тех, что сами составляют раздел по началу
+    или концу адреса (`/post-1/` … `/post-20/`). Признак слабый, поэтому
+    его ищет только проверка скелета, и только для одного точного скелета.
 
     Счёт по готовым таблицам: раньше на каждую группу перебирался весь сайт,
     и на 30 000 страниц с разным началом текста это стоило две минуты.
@@ -2060,17 +2066,45 @@ def _section_counter(pages: list, counted=None):
     paths = {p.url: [x for x in urlsplit(p.url).path.split("/") if x] for p in pages}
     under = Counter()
     by_slug = Counter()
+    by_tail = Counter()
+    # Голые адреса считаются по всем страницам уровня, а не только по тем,
+    # что прошли `counted`: «большинство страниц уровня» — про весь уровень.
+    level = defaultdict(list)
+    first_all, last_all = Counter(), Counter()
+
+    def tokens_of(slug):
+        return [t for t in _SLUG_TOKEN.split(slug.lower()) if t]
+
     for p in pages:
+        x = paths[p.url]
+        if bare and x:
+            tokens = tokens_of(x[-1])
+            if tokens:
+                parent = tuple(x[:-1])
+                level[parent].append(tokens)
+                first_all[(parent, tokens[0])] += 1
+                last_all[(parent, tokens[-1])] += 1
         if counted is not None and not counted(p):
             continue
-        x = paths[p.url]
         for i in range(1, len(x) + 1):
             under[tuple(x[:i])] += 1
         if x:
             parent = tuple(x[:-1])
-            tokens = [t for t in _SLUG_TOKEN.split(x[-1].lower()) if t]
+            tokens = tokens_of(x[-1])
             for i in range(1, min(len(tokens), _SLUG_DEPTH) + 1):
                 by_slug[(parent, tuple(tokens[:i]))] += 1
+                by_tail[(parent, tuple(tokens[-i:]))] += 1
+
+    def shared(slugs, reverse):
+        common = []
+        for column in zip(*[(t[::-1] if reverse else t)[:_SLUG_DEPTH] for t in slugs]):
+            if len(set(column)) != 1:
+                break
+            common.append(column[0])
+        # Начало, равное целому адресу одной из страниц, — не раздел.
+        if not common or any(len(t) == len(common) for t in slugs):
+            return []
+        return common[::-1] if reverse else common
 
     def slug_section(parts):
         # Только страницы одного уровня с одним родителем: иначе общее
@@ -2079,17 +2113,26 @@ def _section_counter(pages: list, counted=None):
         if len(parents) != 1 or not all(parts):
             return 0, ""
         parent = parents.pop()
-        slugs = [[t for t in _SLUG_TOKEN.split(x[-1].lower()) if t] for x in parts]
-        common = []
-        for column in zip(*[t[:_SLUG_DEPTH] for t in slugs]):
-            if len(set(column)) != 1:
-                break
-            common.append(column[0])
-        # Начало, равное целому адресу одной из страниц, — не раздел.
-        if not common or any(len(t) == len(common) for t in slugs):
+        slugs = [tokens_of(x[-1]) for x in parts]
+        where = "/" + "".join(x + "/" for x in parent)
+        common = shared(slugs, False)
+        if common:
+            return by_slug[(parent, tuple(common))], where + "-".join(common) + "-"
+        # `/alpha-rent/`, `/beta-rent/`: тот же раздел, только метка в конце.
+        common = shared(slugs, True)
+        if common:
+            return by_tail[(parent, tuple(common))], where + "*-" + "-".join(common) + "/"
+        if not bare:
             return 0, ""
-        size = by_slug[(parent, tuple(common))]
-        return size, "/" + "".join(x + "/" for x in parent) + "-".join(common) + "-"
+        # Голые адреса: раздел — страницы уровня, не входящие в свой раздел
+        # по началу или концу адреса из SECTION_SEAM_MIN страниц и больше.
+        def alone(t):
+            return (first_all[(parent, t[0])] < SECTION_SEAM_MIN
+                    and last_all[(parent, t[-1])] < SECTION_SEAM_MIN)
+
+        if not all(alone(t) for t in slugs):
+            return 0, ""
+        return sum(1 for t in level[parent] if alone(t)), where + "*/"
 
     def section_size(urls):
         parts = [paths[u] for u in urls if u in paths]
@@ -2130,7 +2173,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
     threshold = max(3, int(max(with_skeleton, 1) * cfg["template_share"]))
     stamped = set()
     in_section = _section_counter(
-        pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2)
+        pages, lambda p: sum(1 for level, _ in p.headings if level >= 2) >= 2, bare=True)
 
     # Два шаблона в одном каталоге: тридцать страниц аренды и тридцать
     # услуг под /rent/ — у каждого скелета половина раздела, и порог в 70%
@@ -2143,7 +2186,7 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
         for skeleton, urls in groups:
             if len(skeleton) >= 3 and len(urls) >= SECTION_SEAM_MIN:
                 size, prefix = in_section(urls)
-                if size and len(urls) >= size * TEMPLATE_PART:
+                if size and len(urls) >= size * TEMPLATE_PART and not prefix.endswith("*/"):
                     covered[prefix] += len(urls)
 
     def stamped_here(urls, skeleton=()):
@@ -2154,6 +2197,10 @@ def check_template_seams(pages: list, cfg: dict = None) -> dict:
         size, prefix = in_section(urls)
         if size < cfg["min_pages_for_seams"]:
             return False
+        if prefix.endswith("*/"):
+            # Голые адреса (`/alpha/`) — слабый признак раздела: нужен один
+            # точный скелет от трёх заголовков у явного большинства уровня.
+            return len(skeleton) >= 3 and len(urls) >= size * cfg["template_share"]
         return (len(urls) >= size * cfg["template_share"]
                 or (len(skeleton) >= 3 and len(urls) >= size * TEMPLATE_PART
                     and covered[prefix] >= size * cfg["template_share"]))
