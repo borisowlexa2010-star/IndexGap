@@ -411,6 +411,8 @@ def read_table(path: str) -> tuple:
 
 
 _BARE_URL = re.compile(r"^(?:https?://|/)\S*$")
+# `sep=;` — подсказка Excel о разделителе в первой строке CSV.
+_SEP_HINT = re.compile(r'^\s*"?sep=.?"?\s*$', re.I)
 
 
 def _rows_from_text(text: str) -> list:
@@ -423,8 +425,19 @@ def _rows_from_text(text: str) -> list:
     lines = text.splitlines(keepends=True)
     start = 0
     while start < len(lines) and (not lines[start].strip()
-                                  or lines[start].lstrip().startswith("#")):
+                                  or lines[start].lstrip().startswith("#")
+                                  or _SEP_HINT.match(lines[start])):
         start += 1
+    # Заголовок отчёта над таблицей («Pages report», пустая строка, шапка):
+    # строки без разделителя, за которыми идёт таблица, — не список адресов.
+    probe = start
+    while (probe < len(lines) and probe - start < 3
+           and not any(ch in lines[probe] for ch in ",;\t|")
+           and not _BARE_URL.match(lines[probe].strip())):
+        probe += 1
+    if (probe > start and probe < len(lines) and any(ch in lines[probe] for ch in ",;\t|")
+            and not _BARE_URL.match(lines[probe].strip())):
+        start = probe
     text = "".join(lines[start:])
     first = text.splitlines()[0] if text.strip() else ""
     if not any(ch in first for ch in ",;\t|"):
@@ -516,7 +529,7 @@ def _read_zip_tables(path: str) -> list:
 # одной причины из отчёта «Индексирование страниц». Есть она только у причин,
 # по которым страница НЕ в индексе.
 _ISSUE_KEYS = {"issue", "reason", "проблема", "причина", "problem", "problème",
-               "problema", "grund", "motivo", "問題"}
+               "problema", "grund", "motivo", "問題", "问题", "probleem", "sorun", "문제"}
 
 
 def zip_issue(path: str) -> str:
@@ -530,6 +543,8 @@ def zip_issue(path: str) -> str:
     """
     try:
         with zipfile.ZipFile(path) as archive:
+            if any(n.startswith("xl/") for n in archive.namelist()):
+                return _xlsx_issue(archive, path)
             for name in archive.namelist():
                 if name.endswith("/") or "__MACOSX" in name:
                     continue
@@ -546,6 +561,34 @@ def zip_issue(path: str) -> str:
                             and str(row[1]).strip()):
                         return str(row[1]).strip()
     except (zipfile.BadZipFile, OSError):
+        return ""
+    return ""
+
+
+def _issue_in(rows: list) -> str:
+    for row in rows:
+        if (len(row) >= 2 and str(row[0]).strip().lower() in _ISSUE_KEYS
+                and str(row[1]).strip()):
+            return str(row[1]).strip()
+    return ""
+
+
+def _xlsx_issue(book, path: str) -> str:
+    """Та же строка «Issue» на листе Metadata книги xlsx."""
+    names = book.namelist()
+    try:
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            root = core.parse_xml(_member(book, "xl/sharedStrings.xml", path))
+            for si in root:
+                shared.append("".join(t.text or "" for t in si.iter(_XML_NS + "t")))
+        for sheet in sorted(n for n in names if _SHEET_RE.search(n)):
+            if book.getinfo(sheet).file_size > 64 * 1024:
+                continue
+            found = _issue_in(_sheet_rows(core.parse_xml(_member(book, sheet, path)), shared))
+            if found:
+                return found
+    except (SourceError, ValueError, SyntaxError):
         return ""
     return ""
 
@@ -582,6 +625,10 @@ def identify(path: str, header: list) -> tuple:
     named = _tool_in_name(path)
     if named:
         return named, TOOLS[named]["kind"], True
+
+    # Строка «Issue» в Metadata — подпись выгрузки причины из Search Console.
+    if zip_issue(path):
+        return "google", TOOLS["google"]["kind"], True
 
     scores = {}
     for tool, meta in TOOLS.items():

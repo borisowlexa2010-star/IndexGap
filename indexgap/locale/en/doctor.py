@@ -362,4 +362,14 @@ MESSAGES = {
         '{a0}: all {a1} addresses share one <lastmod> {a2} — that is the build time, not an edit, and search engines stop looking at it',
     'не объявлено':
         'not declared',
+    'Лог {a0} повреждён или обрезан ({a1}) — прочитать из него ничего не удалось.':
+        'Log {a0} is corrupt or truncated ({a1}) — nothing could be read from it.',
+    '{a0}: {a1} из {a2} запросов получили 401/403, и robots.txt сайта тоже закрывает ему весь сайт — для этого ИИ-поиска страницы закрыты дважды':
+        "{a0}: {a1} of {a2} requests got 401/403, and the site's robots.txt also closes the whole site to it — the pages are closed to this AI search twice",
+    '{a0}: robots.txt сайта закрывает ему весь сайт, а по логу он открыл {a1} стр. Настоящий бот robots.txt соблюдает — похоже, User-Agent подделан (проверит --verify-bots) или на сервере другой robots.txt':
+        "{a0}: the site's robots.txt closes the whole site to it, yet the log shows it opened {a1} page(s). A genuine bot obeys robots.txt — the User-Agent looks spoofed (--verify-bots checks this), or the server has a different robots.txt",
+    '{a0}: robots.txt ответил ему {a1} ({a2} из {a3} запросов). Ответ 5xx на robots.txt краулеры читают как «сайт обходить нельзя»':
+        '{a0}: robots.txt answered it with {a1} ({a2} of {a3} requests). Crawlers read a 5xx robots.txt as “do not crawl the site”',
+    'лог {a0} обрезан или повреждён — прочитано только то, что было до места поломки':
+        'log {a0} is truncated or corrupt — only the lines before the damage were read',
 }

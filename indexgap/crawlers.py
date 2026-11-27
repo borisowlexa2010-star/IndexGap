@@ -33,6 +33,7 @@ import json
 import os
 import re
 import urllib.request
+import zlib
 from collections import Counter
 from urllib.parse import unquote, urlsplit
 
@@ -69,7 +70,11 @@ BOTS = (
     ("meta-externalfetcher", "meta-externalfetcher", "Meta", AI_USER),
     ("meta-externalagent", "meta-externalagent", "Meta", TRAINING),
     ("youbot", "YouBot", "You.com", AI_SEARCH),
-    ("amazonbot", "Amazonbot", "Amazon", AI_SEARCH),
+    # Amazonbot — общий краулер Amazon (данные и для обучения моделей); поиск
+    # и запросы людей у Amazon ходят как Amzn-SearchBot и Amzn-User.
+    ("amzn-searchbot", "Amzn-SearchBot", "Amazon", AI_SEARCH),
+    ("amzn-user", "Amzn-User", "Amazon", AI_USER),
+    ("amazonbot", "Amazonbot", "Amazon", TRAINING),
     ("applebot", "Applebot", "Apple", SEARCH),
     ("bytespider", "Bytespider", "ByteDance", TRAINING),
     ("ccbot", "CCBot", "Common Crawl", TRAINING),
@@ -81,25 +86,37 @@ BOTS = (
 AI_PURPOSES = (AI_SEARCH, AI_USER)
 
 # Обычный «combined» формат nginx и Apache; хвост с referer и UA бывает не всегда.
+# Apache `vhost_combined` пишет перед адресом `хост:порт`.
 _COMBINED = re.compile(
-    r'^(?P<ip>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] '
+    r'^(?:(?P<vhost>[^\s:\[\]"]+):\d+ )?(?P<ip>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] '
     r'"(?P<method>[A-Z]+) (?P<target>\S+)(?: [^"]*)?" (?P<status>\d{3}) \S+'
     r'(?: "(?P<referer>[^"]*)" "(?P<ua>[^"]*)")?')
 
 # Поля, которыми JSON-логи разных CDN и хостингов называют одно и то же.
-_JSON_TARGET = ("url", "uri", "path", "request_uri", "requestUri", "requestPath",
+_JSON_TARGET = ("url", "uri", "path", "request_uri", "requestUri", "requestUrl", "requestPath",
                 "ClientRequestURI", "ClientRequestPath", "request_path", "cs-uri-stem")
 _JSON_HOST = ("host", "ClientRequestHost", "hostname", "requestHost")
 _JSON_UA = ("user_agent", "userAgent", "http_user_agent", "ua",
             "ClientRequestUserAgent", "cs(User-Agent)", "agent")
 _JSON_STATUS = ("status", "status_code", "statusCode", "EdgeResponseStatus",
                 "OriginResponseStatus", "sc-status", "response_status")
-_JSON_METHOD = ("method", "request_method", "ClientRequestMethod", "cs-method")
-_JSON_IP = ("clientIp", "ClientIP", "client_ip", "remote_addr", "remoteAddr", "ip",
+_JSON_METHOD = ("method", "request_method", "requestMethod", "ClientRequestMethod", "cs-method")
+_JSON_IP = ("clientIp", "ClientIP", "client_ip", "remote_addr", "remoteAddr", "remoteIp",
+            "remote_ip", "ip",
             "c-ip", "realIp", "x_forwarded_for")
 
 # Страница — то, у чего нет расширения или расширение страничное.
 _PAGE_EXT = {"", "html", "htm", "php", "asp", "aspx", "jsp", "shtml", "xhtml"}
+# Расширения файлов, которые точно не страницы. Всё прочее после точки
+# (`/rent/st.louis`, `/docs/v1.2`) — часть адреса страницы.
+_FILE_EXT = {"css", "js", "mjs", "map", "json", "xml", "txt", "csv", "rss", "atom",
+             "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp", "tif",
+             "tiff", "woff", "woff2", "ttf", "otf", "eot", "pdf", "zip", "gz", "tar",
+             "rar", "7z", "mp4", "webm", "mp3", "wav", "ogg", "mov", "avi", "wasm",
+             "webmanifest", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "env", "bak",
+             "sql", "log", "ini", "yml", "yaml", "md", "exe", "dmg", "apk"}
+# `"request": "GET /a/ HTTP/1.1"` — строка запроса целиком (nginx escape=json).
+_REQUEST_LINE = re.compile(r"^(?P<method>[A-Z]+) (?P<target>\S+)")
 
 
 def identify(user_agent: str) -> tuple:
@@ -118,6 +135,18 @@ def _first(record: dict, names: tuple):
     return None
 
 
+def _status_of(record: dict) -> int:
+    """Первый код ответа, похожий на HTTP: `"status": "info"` — уровень журнала."""
+    for name in _JSON_STATUS:
+        try:
+            code = int(record.get(name))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if 100 <= code <= 599:
+            return code
+    return 0
+
+
 def parse_line(line: str) -> dict:
     """
     Одна строка лога → {target, host, status, method, ua} или {}.
@@ -129,7 +158,7 @@ def parse_line(line: str) -> dict:
     if line.startswith("{"):
         try:
             record = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             return {}
         if not isinstance(record, dict):
             return {}
@@ -145,23 +174,32 @@ def parse_line(line: str) -> dict:
         if isinstance(inner, dict):
             record = {**inner, **record}
         target = _first(record, _JSON_TARGET)
+        method = _first(record, _JSON_METHOD)
+        request = record.get("request")
+        if not target and isinstance(request, str):
+            found = _REQUEST_LINE.match(request.strip())
+            if found:
+                target, method = found.group("target"), method or found.group("method")
         ua = _first(record, _JSON_UA)
+        headers = record.get("headers")
+        if not ua and isinstance(headers, dict):
+            # Caddy: `request.headers["User-Agent"]` — список строк.
+            ua = next((v for k, v in headers.items()
+                       if str(k).lower() == "user-agent" and v), None)
         if isinstance(ua, list):
             ua = " ".join(str(u) for u in ua)
         if not target or not ua:
             return {}
-        try:
-            status = int(_first(record, _JSON_STATUS) or 0)
-        except (TypeError, ValueError):
-            status = 0
+        status = _status_of(record)
         ip = str(_first(record, _JSON_IP) or "").split(",")[0].strip()
         return {"target": str(target), "host": str(_first(record, _JSON_HOST) or ""),
-                "status": status, "method": str(_first(record, _JSON_METHOD) or "GET").upper(),
+                "status": status, "method": str(method or "GET").upper(),
                 "ua": str(ua), "ip": ip}
     match = _COMBINED.match(line)
     if not match or not match.group("ua"):
         return {}
-    return {"target": match.group("target"), "host": "", "status": int(match.group("status")),
+    return {"target": match.group("target"), "host": match.group("vhost") or "",
+            "status": int(match.group("status")),
             "method": match.group("method"), "ua": match.group("ua"), "ip": match.group("ip")}
 
 
@@ -177,7 +215,7 @@ def _is_page(path: str) -> bool:
         return True
     last = path.rsplit("/", 1)[-1]
     ext = last.rsplit(".", 1)[-1].lower() if "." in last else ""
-    return ext in _PAGE_EXT
+    return ext in _PAGE_EXT or ext not in _FILE_EXT
 
 
 def origin(site: str) -> str:
@@ -216,7 +254,7 @@ def read_logs(paths: list, site: str = "") -> dict:
     # `https://demo.example/en/rent/`, а не `…/en/en/rent/`.
     base = origin(site)
     home = _bare_host(urlsplit(base).netloc) if base else ""
-    events = []
+    events, broken = [], []
     lines = matched = 0
     for path in paths:
         if not os.path.exists(path):
@@ -224,7 +262,7 @@ def read_logs(paths: list, site: str = "") -> dict:
         if os.path.isdir(path):
             raise SourceError(tr("{a0} — каталог; нужен файл лога (можно .gz).", a0=path))
         with _open(path) as fh:
-            for raw in fh:
+            for raw in _lines(fh, path, broken):
                 lines += 1
                 hit = parse_line(raw)
                 if not hit or hit["method"] not in ("GET", "HEAD"):
@@ -256,13 +294,25 @@ def read_logs(paths: list, site: str = "") -> dict:
                     url = (root or "") + (target.split("#")[0] if target.startswith("/") else "/" + target)
                 events.append((name, operator, purpose, hit["status"], hit.get("ip", ""),
                                path_only, url, hit["method"]))
+    if not matched and broken:
+        raise SourceError(tr("Лог {a0} повреждён или обрезан ({a1}) — прочитать из него "
+                             "ничего не удалось.", a0=broken[0][0], a1=broken[0][1]))
     if not matched:
         raise SourceError(tr(
             "В логах ({a0} строк) нет ни одного известного бота. Либо это не "
             "access-лог (нужен формат combined nginx/Apache или JSON-строки), "
             "либо User-Agent в нём не пишется.", a0=lines))
     return {"lines": lines, "bot_hits": matched, "bots": _aggregate(events),
-            "events": events}
+            "events": events, "broken": broken}
+
+
+def _lines(fh, path: str, broken: list):
+    """Строки лога; обрезанный или битый .gz отдаёт то, что успел, и помечается."""
+    try:
+        for raw in fh:
+            yield raw
+    except (EOFError, zlib.error, OSError) as exc:
+        broken.append((path, str(exc)))
 
 
 def _aggregate(events: list) -> dict:
@@ -273,13 +323,16 @@ def _aggregate(events: list) -> dict:
         method = event[7] if len(event) > 7 else "GET"
         bot = bots.setdefault(name, {
             "name": name, "operator": operator, "purpose": purpose,
-            "hits": 0, "statuses": Counter(), "pages": {}, "robots_txt": 0, "ips": Counter()})
+            "hits": 0, "statuses": Counter(), "pages": {}, "robots_txt": 0, "ips": Counter(),
+            "robots_errors": Counter()})
         bot["hits"] += 1
         bot["statuses"][status] += 1
         if ip:
             bot["ips"][ip] += 1
         if path_only.rstrip("/").endswith("robots.txt"):
             bot["robots_txt"] += 1
+            if status >= 500:
+                bot["robots_errors"][status] += 1
             continue
         if not _is_page(path_only):
             continue
@@ -303,12 +356,13 @@ def _aggregate(events: list) -> dict:
     return bots
 
 
-def coverage(pages: list, logs: dict, verified: dict = None) -> dict:
+def coverage(pages: list, logs: dict, verified: dict = None, robots: dict = None) -> dict:
     """
     Сводит логи со страницами сборки: какие страницы ИИ-поиск открыл, какие
     нет, и где бот получил ошибку на странице, которая существует.
     """
     from .publish import indexable
+    from . import aeo
 
     if not logs:
         return {}
@@ -320,9 +374,12 @@ def coverage(pages: list, logs: dict, verified: dict = None) -> dict:
         fetched = {k for k, v in bot["pages"].items() if v["ok"]} & publishable
         by_purpose[bot["purpose"]] |= fetched
         # Редирект на странице, которую бот потом всё же получил, — не ошибка.
+        # Однажды получил — ошибка была временной, если ошибок не больше, чем
+        # удачных ответов; одна удача и десяток 403 после — это новая защита.
         failed = {k: v for k, v in bot["pages"].items()
                   if k in display and v["errors"]
-                  and not (v["ok"] and all(300 <= s < 400 for s in v["errors"]))}
+                  and not (v["ok"] and all(300 <= s < 400 for s in v["errors"]))
+                  and not (v["ok"] and v["ok"] >= sum(v["errors"].values()))}
         statuses = bot["statuses"]
         rows.append({
             "name": name, "operator": bot["operator"], "purpose": bot["purpose"],
@@ -330,19 +387,40 @@ def coverage(pages: list, logs: dict, verified: dict = None) -> dict:
             "errors": sum(1 for _ in failed), "robots_txt": bot["robots_txt"],
             "forbidden": sum(n for s, n in statuses.items() if s in (401, 403)),
             "statuses": {str(s): n for s, n in sorted(statuses.items())},
+            "robots_errors": {str(s): n for s, n in
+                              sorted((bot.get("robots_errors") or {}).items())},
         })
         for key, page in sorted(failed.items()):
-            if page["ok"]:
-                continue          # однажды получил — значит, ошибка была временной
             errors.append({"bot": name, "purpose": bot["purpose"], "url": display[key],
                            "statuses": {str(s): n for s, n in sorted(page["errors"].items())}})
 
     ai_seen = by_purpose[AI_SEARCH] | by_purpose[AI_USER]
     notes = []
     for row in rows:
+        # robots.txt самого сайта, если он прочитан: закрыт ли бот целиком.
+        closed = bool(robots and robots.get("found") and aeo._search_bot_closed(
+            aeo._robots_group(robots, row["name"].lower())))
+        if row["purpose"] in AI_PURPOSES and closed and row["forbidden"] >= max(5, 0.5 * row["hits"]):
+            notes.append(tr(
+                "{a0}: {a1} из {a2} запросов получили 401/403, и robots.txt сайта "
+                "тоже закрывает ему весь сайт — для этого ИИ-поиска страницы закрыты "
+                "дважды", a0=row["name"], a1=row["forbidden"], a2=row["hits"]))
+        elif row["purpose"] in AI_PURPOSES and closed and row["pages"]:
+            notes.append(tr(
+                "{a0}: robots.txt сайта закрывает ему весь сайт, а по логу он открыл "
+                "{a1} стр. Настоящий бот robots.txt соблюдает — похоже, User-Agent "
+                "подделан (проверит --verify-bots) или на сервере другой robots.txt",
+                a0=row["name"], a1=row["pages"]))
+        robots_5xx = sum(row["robots_errors"].values())
+        if row["purpose"] in AI_PURPOSES and robots_5xx and robots_5xx * 2 >= row["robots_txt"]:
+            notes.append(tr(
+                "{a0}: robots.txt ответил ему {a1} ({a2} из {a3} запросов). Ответ 5xx "
+                "на robots.txt краулеры читают как «сайт обходить нельзя»",
+                a0=row["name"], a1=", ".join(row["robots_errors"]), a2=robots_5xx,
+                a3=row["robots_txt"]))
         # Массовый 403 ИИ-боту — почти всегда защита CDN, а не robots.txt:
         # Cloudflare с 2025 года блокирует ИИ-краулеров по умолчанию.
-        if row["purpose"] in AI_PURPOSES and row["forbidden"] >= max(5, 0.5 * row["hits"]):
+        if row["purpose"] in AI_PURPOSES and not closed and row["forbidden"] >= max(5, 0.5 * row["hits"]):
             notes.append(tr(
                 "{a0}: {a1} из {a2} запросов получили 401/403. Похоже, его отсекает "
                 "защита CDN или WAF, а не robots.txt (Cloudflare блокирует ИИ-ботов "
@@ -359,6 +437,9 @@ def coverage(pages: list, logs: dict, verified: dict = None) -> dict:
             "в логах нет ни одного бота ИИ-поиска (OAI-SearchBot, Claude-SearchBot, "
             "PerplexityBot) и ни одного визита по запросу человека. Для ИИ-ответов "
             "сайт пока невидим — проверь robots.txt и защиту CDN"))
+    for path, _reason in logs.get("broken") or ():
+        notes.append(tr("лог {a0} обрезан или повреждён — прочитано только то, что "
+                        "было до места поломки", a0=os.path.basename(path)))
     if verified is None:
         notes.append(tr(
             "Бот определён по User-Agent, а его может подделать кто угодно. Адреса "

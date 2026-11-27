@@ -1424,10 +1424,11 @@ def cmd_doctor(args):
     # Та же достижимость, что у check: ссылки закрытых в robots.txt страниц
     # поисковик не читает.
     robots_path = getattr(args, "robots", None) or _guess_robots(args)
-    blocked = set()
+    blocked, robots = set(), None
     if robots_path and not (urlsplit(args.site or "").path.strip("/")
                             and not getattr(args, "robots", None)):
-        blocked = aeo.blocked_urls(pages, aeo.read_robots(robots_path))
+        robots = aeo.read_robots(robots_path)
+        blocked = aeo.blocked_urls(pages, robots)
     analysis = checks.run_all(pages, home_url=_home_url(args, pages),
                               cfg=project.get("checks"),
                               language=project.get("language", ""), blocked=blocked)
@@ -1470,7 +1471,7 @@ def cmd_doctor(args):
     causes = doctor.explain(funnel_result, analysis)
     cross = doctor.cross_engine(funnel_result, pages)
     segments = doctor.segments(funnel_result, pages)
-    crawl = crawlers.coverage(pages, logs, verified=verdicts) if logs else {}
+    crawl = crawlers.coverage(pages, logs, verified=verdicts, robots=robots) if logs else {}
     if crawl:
         funnel_result["steps"].append({
             "id": "ai-fetched", "name": tr("Открыто ИИ-поиском (по логам)"),
