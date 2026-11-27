@@ -30,10 +30,11 @@ _CURRENCY = {
     "£": "GBP", "gbp": "GBP", "pound": "GBP", "pounds": "GBP",
     "₽": "RUB", "rub": "RUB", "руб": "RUB", "рубль": "RUB", "рублей": "RUB", "рубля": "RUB",
     "₹": "INR", "inr": "INR", "rupee": "INR", "rupees": "INR", "रुपये": "INR", "रुपया": "INR",
+    "रुपए": "INR",
     "¥": "JPY", "jpy": "JPY", "円": "JPY", "yen": "JPY",
     "元": "CNY", "cny": "CNY", "yuan": "CNY",
     "₩": "KRW", "krw": "KRW", "원": "KRW", "won": "KRW",
-    "₪": "ILS", "ils": "ILS", "שקל": "ILS", "שקלים": "ILS",
+    "₪": "ILS", "ils": "ILS", "שקל": "ILS", "שקלים": "ILS", 'ש"ח': "ILS",
     "฿": "THB", "thb": "THB", "baht": "THB", "บาท": "THB",
     "ريال": "SAR", "sar": "SAR", "درهم": "AED", "aed": "AED", "دراهم": "AED",
     "sgd": "SGD", "myr": "MYR", "idr": "IDR", "aud": "AUD", "cad": "CAD",
@@ -46,7 +47,7 @@ _CURRENCY = {
     "ดอลลาร์": "USD", "דולר": "USD", "דולרים": "USD", "долар": "USD", "доларів": "USD",
     "долара": "USD", "долари": "USD", "ドル": "USD", "美元": "USD", "달러": "USD",
     "us$": "USD",
-    "یورو": "EUR", "यूरो": "EUR", "ยูโร": "EUR", "יורו": "EUR", "ユーロ": "EUR",
+    "یورو": "EUR", "يورو": "EUR", "यूरो": "EUR", "ยูโร": "EUR", "יורו": "EUR", "ユーロ": "EUR",
     "欧元": "EUR", "유로": "EUR",
     "엔": "JPY", "人民币": "CNY", "港元": "HKD", "hk$": "HKD", "hkd": "HKD",
     "新元": "SGD", "s$": "SGD", "a$": "AUD", "au$": "AUD", "c$": "CAD", "ca$": "CAD",
@@ -86,7 +87,11 @@ def _kind(unit: str) -> str:
     for ch in text:
         if ch in _CURRENCY:
             return _CURRENCY[ch]
-    return ""
+    # Цена в валюте, которой нет в словаре («٥٠٠ جنيه», «٢٠ ﷼»), — своя
+    # единица без множителя: «ألف جنيه» и «جنيه» — одна валюта.
+    from .content import SCALES
+    words = [w for w in text.replace(".", " ").split() if w not in SCALES]
+    return words[-1] if words else ""
 
 
 def facts_of(page) -> dict:
@@ -155,7 +160,10 @@ def _value(number: str) -> float:
 _EXPLICIT_SIGNS = set("€£₽₹₩₪฿₺₴₸₱₫₦৳円元")
 _EXPLICIT_WORDS = {"euro", "euros", "евро", "یورو", "यूरो", "ยูโร", "יורו", "ユーロ",
                    "欧元", "유로", "us$", "s$", "a$", "au$", "c$", "ca$", "hk$", "nz$",
-                   "nt$", "r$", "mx$", "col$", "cl$"}
+                   "nt$", "r$", "mx$", "col$", "cl$",
+                   # Арабское «евро», шекель и рупия с ринггитом: у `Rp` и `RM`
+                   # одна валюта, пересчёта под тем же знаком не бывает.
+                   "يورو", 'ש"ח', "rp", "rm"}
 
 
 def _explicit(shown: str) -> bool:
