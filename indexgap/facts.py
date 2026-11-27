@@ -282,6 +282,110 @@ def _dearer_dollar(kind: str, added_shown: list, added: list, missing: list) -> 
             and sum(_value(n) for n in added) > sum(_value(n) for n in missing))
 
 
+# Метка цены — непереведённое слово с заглавной буквой (Basic, Pro, iPhone),
+# которое стоит перед ценой не дальше трёх слов в той же части фразы.
+# Запятая, точка и скобка обрывают поиск: «für $49 Pro, für $29 Basic» —
+# метка после цены, и прошлое слово чужое.
+_LABEL_WORD = re.compile(r"[^\W\d_][\w\-’']*")
+_LABEL_STOP = re.compile(r"[.,;!?()\[\]\n،、。，；！？|]")
+_LABEL_REACH = 60
+_LABEL_WORDS = 4
+
+
+def _price_spans(text: str) -> tuple:
+    """(подготовленный текст, [(начало, конец, вид, число)]) — цены в порядке появления."""
+    from . import content
+    prepared = content._cjk_compounds(content._same_signs(text))
+    spans = []
+    for m in content.PREFIX_PRICE.finditer(prepared):
+        factor, _ = content._price_scale_at(prepared, m.end())
+        spans.append((m.start(), m.end(), _kind(m.group(1)), content._scaled(m.group(2), factor)))
+    for m in content.SUFFIX_PRICE.finditer(prepared):
+        factor, _ = content._price_scale_at(prepared, m.end(1))
+        spans.append((m.start(), m.end(), _kind(m.group(0)[len(m.group(1)):]),
+                      content._scaled(m.group(1), factor)))
+    spans.sort()
+    # Цена, вложенная в другую («$29» внутри «$29 USD»), — та же цена.
+    out = []
+    for span in spans:
+        if out and span[0] < out[-1][1]:
+            continue
+        out.append(span)
+    return prepared, out
+
+
+def _labelled(text: str, shared: set, candidates: dict) -> dict:
+    """{(вид, метка): {числа}} — цены, перед которыми стоит общая обеим версиям метка (ближайшая)."""
+    prepared, spans = _price_spans(text)
+    out = {}
+    previous = 0
+    for start, end, kind, number in spans:
+        window = prepared[max(previous, start - _LABEL_REACH):start]
+        previous = end
+        stops = list(_LABEL_STOP.finditer(window))
+        if stops:
+            window = window[stops[-1].end():]
+        # Метка — ближайшее слово с заглавной буквой. Если оно не общее (имя
+        # повторяется или переведено), дальше не ищем: иначе меткой становился
+        # заголовок над абзацем.
+        words = [w for w in _LABEL_WORD.findall(window)[-_LABEL_WORDS:] if w in candidates]
+        if kind and kind != "%" and number and words and words[-1] in shared:
+            out.setdefault((kind, words[-1]), set()).add(number)
+    return out
+
+
+def _label_words(text: str) -> dict:
+    """{слово: сколько раз} для слов с заглавной буквой, которые не валюта."""
+    from .content import _ALL_CODES
+    counts = {}
+    for word in _LABEL_WORD.findall(text or ""):
+        if len(word) < 2 or word == word.lower() or word.lower() in _CURRENCY \
+                or word.upper() in _ALL_CODES:
+            continue
+        counts[word] = counts.get(word, 0) + 1
+    return counts
+
+
+def _swapped(ref, page) -> list:
+    """
+    Цены, перепутанные между позициями: «Basic $29, Pro $49» в оригинале и
+    «Basic $49, Pro $29» в переводе. Набор цен тот же, и сравнение множеств
+    этого не видит. Сравниваются только метки, которые одинаково написаны в
+    обеих версиях и встречаются в каждой ровно один раз: тогда пара
+    «метка → цена» однозначна, а перестановка фраз перевода ей не мешает.
+    Перевод должен приписать метке цену, которую оригинал даёт другой метке, —
+    иначе это не перестановка, а другое расхождение (или пересчёт).
+    """
+    ref_text, text = ref.text or "", page.text or ""
+    ref_words, words = _label_words(ref_text), _label_words(text)
+    shared = {w for w, n in ref_words.items() if n == 1 and words.get(w) == 1}
+    if len(shared) < 2:
+        return []
+    theirs, ours = _labelled(ref_text, shared, ref_words), _labelled(text, shared, words)
+    out = []
+    for kind in sorted({k for k, _ in theirs} & {k for k, _ in ours}):
+        mine = {label: ns for (k, label), ns in ours.items() if k == kind}
+        orig = {label: ns for (k, label), ns in theirs.items() if k == kind}
+        # Сравнима только чистая перестановка: те же метки, у каждой одна цена,
+        # и набор цен тот же. Если перевод поставил метку после цены («für $49
+        # Pro»), набор меток расходится, и пары не сравниваются.
+        if len(mine) < 2 or set(mine) != set(orig) \
+                or any(len(ns) != 1 for ns in list(mine.values()) + list(orig.values())):
+            continue
+        mine = {label: next(iter(ns)) for label, ns in mine.items()}
+        orig = {label: next(iter(ns)) for label, ns in orig.items()}
+        if sorted(mine.values()) != sorted(orig.values()):
+            continue
+        out += [(kind, label, mine[label], orig[label]) for label in sorted(mine)
+                if mine[label] != orig[label]]
+    return out
+
+
+def _pair(facts: dict, kind: str, label: str, number: str) -> str:
+    """«Basic $49» — метка и цена так, как цена написана на странице."""
+    return "{} {}".format(label, (facts.get(kind) or {}).get(number, number))
+
+
 def drift(pages: list) -> list:
     """
     `fact-drift`: перевод показывает цену или процент, которых нет в оригинале,
@@ -300,6 +404,7 @@ def drift(pages: list) -> list:
             if page is ref:
                 continue
             mine = facts_of(page)
+            reported = set()
             for kind, theirs in sorted(ref_facts.items()):
                 ours = mine.get(kind) or {}
                 if not ours or len(theirs) > MAX_FACTS or len(ours) > MAX_FACTS:
@@ -319,4 +424,12 @@ def drift(pages: list) -> list:
                         "переводе или осталась старой",
                         a0=", ".join(ours[n] for n in added[:4]), a1=ref.url,
                         a2=", ".join(theirs[n] for n in missing[:4]))))
+                    reported.add(kind)
+            swaps = [s for s in _swapped(ref, page) if s[0] not in reported]
+            if swaps:
+                issues.append(("warning", page.url, "fact-drift", tr(
+                    "в переводе цены перепутаны между позициями: {a0}, а в оригинале ({a1}) "
+                    "{a2}", a0=", ".join(_pair(mine, kind, label, ours) for kind, label, ours, _ in swaps[:4]),
+                    a1=ref.url,
+                    a2=", ".join(_pair(ref_facts, kind, label, theirs) for kind, label, _, theirs in swaps[:4]))))
     return issues

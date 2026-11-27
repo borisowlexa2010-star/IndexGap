@@ -88,6 +88,10 @@ MESSAGES = {
         "to indexing — the engine is showing people something that no longer "
         "exists. Close it with noindex, redirect to the current one, or rewrite "
         "it as a report on what happened",
+    "дата {a0} прошла более {a1} дней назад, но на странице есть и бессрочная серия ({a2}), поэтому сама страница актуальна. Убери прошедшее событие из разметки и текста или перенеси его в архив":
+        "the date {a0} passed more than {a1} days ago, but the page also carries "
+        "an open-ended series ({a2}), so the page itself is current. Remove the "
+        "past event from the markup and the text, or move it to an archive",
     "дата {a0} прошла, страница уже закрыта от индексации — это правильно":
         "the date {a0} has passed and the page is already closed to indexing — "
         "that is correct",

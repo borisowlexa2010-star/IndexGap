@@ -487,6 +487,12 @@ WHY = {
    "A dated event that has passed and is still open for indexing sends people "
    "to something that already happened. Search engines demote it; readers who "
    "arrive are worse off than if they had found nothing.",
+ "stale-event-part":
+   "A page that runs an open-ended series (an eventSchedule with no end date) "
+   "also marks up a one-off event that has passed. The page itself is current, "
+   "so it is not a stale event; the expired date still tells search engines and "
+   "readers about something that is over."
+   " The series keeps the page in the index; the past event is the part to remove or move to an archive.",
  "stale-closed":
    "The page describes something that has ended. Lower stakes than a stale "
    "event, and still a page whose usefulness expired."
@@ -549,7 +555,7 @@ FAMILIES = [
  ("freshness", "Freshness",
   "Pages whose usefulness has an expiry date, still open for indexing after it "
   "passed.",
-  ["stale-event", "stale-closed", "stale-year"]),
+  ["stale-event", "stale-event-part", "stale-closed", "stale-year"]),
  ("deploy", "What a deploy breaks (indexgap diff)",
   "Found by comparing two builds of the same site, before the new one goes "
   "live: pages that disappear, pages that close, templates whose titles changed "

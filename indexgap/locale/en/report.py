@@ -146,6 +146,8 @@ MESSAGES = {
         "engine is showing people something that no longer exists: close it with "
         "noindex, redirect to the current one, or rewrite it as a report on what "
         "happened.",
+    "На странице идёт бессрочная серия событий, а рядом размечено прошедшее разовое событие: страница актуальна, но устаревшая дата вводит в заблуждение.":
+        "The page runs an open-ended series of events, and next to it sits a past one-off event: the page is current, but the stale date misleads.",
     "Дата прошла, и страница уже закрыта от индексации — так и надо. Строка справочная.":
         "The date has passed and the page is already closed to indexing — as it "
         "should be. This line is informational.",

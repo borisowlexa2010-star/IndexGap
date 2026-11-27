@@ -352,6 +352,8 @@ MESSAGES = {
         'runs: {a0}',
     'в переводе {a0}, а в оригинале ({a1}) {a2} — цифра разошлась при переводе или осталась старой':
         'the translation says {a0}, the original ({a1}) says {a2} — the number drifted in translation or was left from an older version',
+    'в переводе цены перепутаны между позициями: {a0}, а в оригинале ({a1}) {a2}':
+        'the translation pairs prices with the wrong items: {a0}, while the original ({a1}) has {a2}',
     'Disallow: / для Googlebot — Google не обходит сайт целиком':
         'Disallow: / for Googlebot: Google does not crawl any page of the site',
     'Disallow: / для {a0} — сайт закрыт от этих поисковиков':

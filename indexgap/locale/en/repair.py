@@ -289,6 +289,8 @@ MESSAGES = {
         "Check whether these pages grew out of two keywords with one "
         "intent. If they did, merge them; if not, give each of them what "
         "the other one has not got.",
+    "Убери прошедшее разовое событие из JSON-LD и текста или перенеси его на страницу архива. Серию не трогай: она идёт, и страница нужна в индексе.":
+        "Remove the past one-off event from the JSON-LD and the text, or move it to an archive page. Leave the series alone: it is running, and the page belongs in the index.",
     "Реши, чем стала страница: архивом или невыполнимым обещанием. Архив пометь датой окончания прямо в тексте, обещание убери из индекса.":
         "Decide what the page has become: an archive or a promise it can no "
         "longer keep. Mark an archive with its end date in the text itself, "
